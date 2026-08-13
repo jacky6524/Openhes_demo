@@ -1,0 +1,97 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-bg text-ink antialiased;
+    font-feature-settings: 'tnum' 1; /* tabular numerals for KPI figures */
+  }
+}
+
+/* smooth map drill transitions */
+.map-transition * {
+  transition: fill 280ms ease, opacity 280ms ease;
+}
+
+/* fade + slight zoom-in on each drill level change (avoids hard jump) */
+@keyframes mapFade {
+  from {
+    opacity: 0;
+    transform: scale(1.04);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.map-fade {
+  animation: mapFade 320ms ease both;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* modal pop-in + backdrop fade */
+@keyframes modalPop {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+.modal-pop {
+  animation: modalPop 180ms ease-out both;
+}
+@keyframes backdropFade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.backdrop-fade {
+  animation: backdropFade 160ms ease-out both;
+}
+
+/* DCU 戰情室 — 異常電表模組選取時向下彈出 */
+@keyframes warPopDown {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+/* fill-mode 不可用 both/forwards：殘留的 transform 會讓內部 fixed 彈窗改以本容器定位而錯位 */
+.war-popdown { animation: warPopDown 200ms ease-out; }
+
+/* DCU 戰情室關係地圖 — marker 過渡 */
+.war-marker { transition: opacity 160ms ease; }
+.war-shape { transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease; }
+
+/* right-docked drawer slide-in */
+@keyframes drawerRight {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+.drawer-right {
+  animation: drawerRight 220ms ease-out both;
+}

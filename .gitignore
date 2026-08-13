@@ -1,0 +1,25 @@
+# 相依套件 — npm install 重建
+node_modules/
+
+# build 產物
+dist/
+dist-single/
+package-build/
+tsconfig.tsbuildinfo
+
+# 舊交付包
+OpenHES-Demo-v*/
+OpenHES-Demo-v*.zip
+
+# 原始圖資素材（src/ 未引用，實際用的是 src/data/geo/*.geo.json）
+TaiwanDisGeo/
+鄉(鎮、市、區)界線*/
+
+# 作業系統殘留
+__MACOSX/
+.DS_Store
+Thumbs.db
+
+# 編輯器
+.vscode/
+.idea/
