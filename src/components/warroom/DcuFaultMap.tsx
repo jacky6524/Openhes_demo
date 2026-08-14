@@ -6,12 +6,23 @@ import {
   districtStats, statByDistrict, cityStats, statByCity,
   dcuById, meterById, CITIES, dcusInScope, ONLINE_RATE_THRESHOLDS, type Dcu,
 } from '@/data/dcuFleet'
-import { SEVERITY_COLOR, SELECT_FILL, CLUSTER_BLUE, STATE_COLOR, STATE_LABEL, freqColor } from './warroomConfig'
+import { SEVERITY_COLOR, SEVERITY_STROKE, STATE_COLOR, STATE_LABEL, freqColor, MAP_BG } from './warroomConfig'
 import { addSelectedMeterLayer, setSelectedMeter } from './selectedMeterLayer'
 import { registerMap, unregisterMap, pushCamera, pullCamera } from './mapCamera'
+import { registerMarkerIcons, ICON_DCU_OFFLINE } from './markerIcons'
+import { buildLabelPoints } from './polyLabels'
 import { useWarroom, type WarLevel } from '@/store/useWarroom'
 
-const STYLE = 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json'
+/**
+ * 純 GeoJSON 底圖（無圖磚）—— 比照系統總覽的地圖呈現：只有行政區色塊，沒有街道底圖。
+ * glyphs 仍需外部字型來源才畫得出區名／群集數字（沿用 CARTO 的字型端點）。
+ */
+const BLANK_STYLE: any = {
+  version: 8,
+  glyphs: 'https://tiles.basemaps.cartocdn.com/fonts/{fontstack}/{range}.pbf',
+  sources: {},
+  layers: [{ id: 'bg', type: 'background', paint: { 'background-color': MAP_BG } }],
+}
 const TAIWAN_BOUNDS: [[number, number], [number, number]] = [[120.0, 21.88], [122.05, 25.32]]
 
 function bbox(geom: any): [number, number, number, number] {
@@ -22,10 +33,10 @@ function bbox(geom: any): [number, number, number, number] {
 function buildPoly(level: WarLevel, city: string) {
   if (level === 'taiwan') {
     const stats = new Map(cityStats().map((s) => [s.name, s]))
-    return { type: 'FeatureCollection', features: countiesGeoAll().features.map((f) => { const name = f.properties.name as string; const sev = stats.get(name)?.severity ?? 'normal'; return { ...f, properties: { ...f.properties, name, sevColor: SEVERITY_COLOR[sev] } } }) }
+    return ({ type: 'FeatureCollection', features: countiesGeoAll().features.map((f) => { const name = f.properties.name as string; const sev = stats.get(name)?.severity ?? 'normal'; return { ...f, properties: { ...f.properties, name, sevColor: SEVERITY_COLOR[sev], sevStroke: SEVERITY_STROKE[sev] } } }) })
   }
   const stats = new Map(districtStats(city).map((s) => [s.name, s]))
-  return { type: 'FeatureCollection', features: townsGeo(city).features.map((f) => { const name = f.properties.rname as string; const sev = stats.get(name)?.severity ?? 'normal'; return { ...f, properties: { ...f.properties, name, sevColor: SEVERITY_COLOR[sev] } } }) }
+  return ({ type: 'FeatureCollection', features: townsGeo(city).features.map((f) => { const name = f.properties.rname as string; const sev = stats.get(name)?.severity ?? 'normal'; return { ...f, properties: { ...f.properties, name, sevColor: SEVERITY_COLOR[sev], sevStroke: SEVERITY_STROKE[sev] } } }) })
 }
 /** DCU 點著色：斷線→紅、停用→灰、啟用正常→頻點色 */
 function dcuColor(d: Dcu) {
@@ -88,67 +99,61 @@ export function DcuFaultMap() {
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return
     polyFC.current = buildPoly(useWarroom.getState().level, city)
-    const map = new maplibregl.Map({ container: containerRef.current, style: STYLE, center: [121.0, 23.7], zoom: 6.4, attributionControl: { compact: true }, dragRotate: false })
+    const map = new maplibregl.Map({ container: containerRef.current, style: BLANK_STYLE, center: [121.0, 23.7], zoom: 6.4, attributionControl: { compact: true }, dragRotate: false })
     // 右上角讓給地圖頁籤，縮放控制移到右下
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right')
     mapRef.current = map
 
     map.on('load', () => {
+      registerMarkerIcons(map)
       map.addSource('poly', { type: 'geojson', data: polyFC.current })
-      map.addLayer({ id: 'poly-fill', type: 'fill', source: 'poly', paint: { 'fill-color': ['get', 'sevColor'], 'fill-opacity': 0.55 } })
-      map.addLayer({ id: 'poly-line', type: 'line', source: 'poly', paint: { 'line-color': '#B9A9AD', 'line-width': 1 } })
+      // 無圖磚底圖 → 色塊改用系統總覽的不透明度，邊框用同一層級的 stroke 色
+      map.addLayer({ id: 'poly-fill', type: 'fill', source: 'poly', paint: { 'fill-color': ['get', 'sevColor'], 'fill-opacity': 0.8 } })
+      map.addLayer({ id: 'poly-line', type: 'line', source: 'poly', paint: { 'line-color': ['get', 'sevStroke'], 'line-width': 0.9 } })
+      // 選取描邊（poly-sel / poly-sel-halo）依業主意見移除 —— 下鑽後鏡頭本身就框住該區
+      // 區名另用「一名一點」的 source：直接掛在多邊形上，MultiPolygon 的離島會各標一次
+      map.addSource('poly-labels', { type: 'geojson', data: buildLabelPoints(polyFC.current) as any })
+      map.addLayer({ id: 'poly-label', type: 'symbol', source: 'poly-labels', layout: { 'text-field': ['get', 'name'], 'text-size': 12, 'text-font': ['Open Sans Regular'] }, paint: { 'text-color': '#3A2F33', 'text-halo-color': '#fff', 'text-halo-width': 1.4 } })
       const st0 = useWarroom.getState()
-      const selF = ['==', ['get', 'name'], st0.level === 'city' && st0.district ? st0.district : ' '] as any
-      map.addLayer({ id: 'poly-sel-halo', type: 'line', source: 'poly', paint: { 'line-color': '#FFFFFF', 'line-width': 6, 'line-opacity': 0.9 }, filter: selF })
-      map.addLayer({ id: 'poly-sel', type: 'line', source: 'poly', paint: { 'line-color': SELECT_FILL, 'line-width': 3 }, filter: selF })
-      map.addLayer({ id: 'poly-label', type: 'symbol', source: 'poly', layout: { 'text-field': ['get', 'name'], 'text-size': 12, 'text-font': ['Open Sans Regular'] }, paint: { 'text-color': '#3A2F33', 'text-halo-color': '#fff', 'text-halo-width': 1.4 } })
 
-      // 所有 DCU（首頁球）— 群集統一藍色，單點依頻點/狀態色
-      // clusterMaxZoom 10：只有全台這種大範圍才聚成群集球；進到縣市/行政區改畫單點，
+      // 群集：只呈現「故障（斷線）DCU 數」的紅球 —— 依業主意見不再畫藍色的「全部 DCU」球。
+      // 群集內沒有任何斷線 → 整顆不畫（故障地圖上沒問題的區域本來就不需要標記）。
+      // clusterMaxZoom 10：只有全台這種大範圍才聚成群集；進到縣市/行政區改畫單點，
       // 位置才會與關係地圖上的 DCU 完全一致（群集球畫在群心，不是任何一台 DCU 的座標）
-      // clusterProperties.off：群集內有幾台斷線 —— 讓群集球也看得出哪一群有問題
       map.addSource('dcus', {
         type: 'geojson', data: buildDcuPoints(st0.level, city, st0.district) as any,
         cluster: true, clusterRadius: 46, clusterMaxZoom: 10,
         clusterProperties: { off: ['+', ['case', ['==', ['get', 'state'], 'offline'], 1, 0]] },
       })
+      const clusterHasFault: any = ['all', ['has', 'point_count'], ['>', ['get', 'off'], 0]]
       map.addLayer({
-        id: 'clusters', type: 'circle', source: 'dcus', filter: ['has', 'point_count'],
+        id: 'clusters', type: 'circle', source: 'dcus', filter: clusterHasFault,
         paint: {
-          'circle-color': CLUSTER_BLUE, 'circle-radius': ['step', ['get', 'point_count'], 15, 5, 19, 12, 25],
-          // 群集內含斷線 → 改成紅色粗外框
-          'circle-stroke-width': ['case', ['>', ['get', 'off'], 0], 3.5, 2],
-          'circle-stroke-color': ['case', ['>', ['get', 'off'], 0], STATE_COLOR.offline, '#fff'],
-          'circle-opacity': 0.92,
+          'circle-color': STATE_COLOR.offline,
+          'circle-radius': ['step', ['get', 'off'], 15, 5, 19, 20, 24, 50, 29],
+          'circle-stroke-width': 2.5, 'circle-stroke-color': '#fff', 'circle-opacity': 0.94,
         },
       })
-      map.addLayer({ id: 'cluster-count', type: 'symbol', source: 'dcus', filter: ['has', 'point_count'], layout: { 'text-field': ['get', 'point_count_abbreviated'], 'text-size': 12, 'text-font': ['Open Sans Bold'] }, paint: { 'text-color': '#fff' } })
-      // 群集右上角的紅色斷線數角標
       map.addLayer({
-        id: 'cluster-off-badge', type: 'circle', source: 'dcus', filter: ['>', ['get', 'off'], 0],
-        paint: { 'circle-color': STATE_COLOR.offline, 'circle-radius': 9, 'circle-stroke-color': '#fff', 'circle-stroke-width': 1.5, 'circle-translate': [16, -14] },
-      })
-      map.addLayer({
-        id: 'cluster-off-count', type: 'symbol', source: 'dcus', filter: ['>', ['get', 'off'], 0],
-        layout: { 'text-field': ['to-string', ['get', 'off']], 'text-size': 10, 'text-font': ['Open Sans Bold'] },
-        paint: { 'text-color': '#fff', 'text-translate': [16, -14] },
+        id: 'cluster-count', type: 'symbol', source: 'dcus', filter: clusterHasFault,
+        layout: { 'text-field': ['to-string', ['get', 'off']], 'text-size': 13, 'text-font': ['Open Sans Bold'] },
+        paint: { 'text-color': '#fff' },
       })
 
-      // 斷線 DCU：紅色光暈 + 放大 + 單獨畫在最上層，不會被正常點蓋住
-      map.addLayer({
-        id: 'dcu-offline-halo', type: 'circle', source: 'dcus',
-        filter: ['all', ['!', ['has', 'point_count']], ['==', ['get', 'state'], 'offline']],
-        paint: { 'circle-color': STATE_COLOR.offline, 'circle-radius': 16, 'circle-opacity': 0.2 },
-      })
+      // 未群集的 DCU：正常/停用畫圓點，斷線改用「方形 ✕」圖示（大而顯眼，最上層）
       map.addLayer({
         id: 'dcu-point', type: 'circle', source: 'dcus',
         filter: ['all', ['!', ['has', 'point_count']], ['!=', ['get', 'state'], 'offline']],
         paint: { 'circle-color': ['get', 'color'], 'circle-radius': 6.5, 'circle-stroke-width': 2, 'circle-stroke-color': '#fff' },
       })
       map.addLayer({
-        id: 'dcu-point-off', type: 'circle', source: 'dcus',
+        id: 'dcu-point-off', type: 'symbol', source: 'dcus',
         filter: ['all', ['!', ['has', 'point_count']], ['==', ['get', 'state'], 'offline']],
-        paint: { 'circle-color': STATE_COLOR.offline, 'circle-radius': 10, 'circle-stroke-width': 2.5, 'circle-stroke-color': '#fff' },
+        layout: {
+          'icon-image': ICON_DCU_OFFLINE,
+          'icon-size': ['interpolate', ['linear'], ['zoom'], 8, 0.7, 12, 0.95, 16, 1.25],
+          'icon-allow-overlap': true, 'icon-ignore-placement': true,
+        },
       })
 
       // 選取電表的強化標記（此圖不畫電表，點列表時至少要看得到目標在哪）
@@ -198,18 +203,17 @@ export function DcuFaultMap() {
     const map = mapRef.current; if (!map || !readyRef.current) return
     polyFC.current = buildPoly(level, city)
     ;(map.getSource('poly') as maplibregl.GeoJSONSource)?.setData(polyFC.current)
+    ;(map.getSource('poly-labels') as maplibregl.GeoJSONSource)?.setData(buildLabelPoints(polyFC.current) as any)
     ;(map.getSource('dcus') as maplibregl.GeoJSONSource)?.setData(buildDcuPoints(level, city, useWarroom.getState().district) as any)
     setDcuInfo(null); fitScope()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [level, city])
 
-  // district 變更 → 選取外框 + fit（縣市層級；''＝整個縣市放滿）
+  // district 變更 → 重建 DCU 點 + fit（縣市層級；''＝整個縣市放滿）。
+  // 選取描邊已移除，改由鏡頭框住該區來表示目前選取。
   useEffect(() => {
     const map = mapRef.current; if (!map || !readyRef.current) return
     ;(map.getSource('dcus') as maplibregl.GeoJSONSource)?.setData(buildDcuPoints(level, city, district) as any)
-    const f = ['==', ['get', 'name'], level === 'city' && district ? district : ' '] as any
-    if (map.getLayer('poly-sel')) map.setFilter('poly-sel', f)
-    if (map.getLayer('poly-sel-halo')) map.setFilter('poly-sel-halo', f)
     if (level === 'city') { if (district) fitByName(district); else fitAllCity(); setDcuInfo(null) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [district, level])

@@ -18,6 +18,11 @@ interface WarroomState {
   hoverDcuId: string | null
   /** DCU 列表的狀態篩選（KPI 卡點擊可直接帶入） */
   listFilter: DcuListFilter
+  /**
+   * 這次選取是否來自地圖 —— 來自地圖時，右側列表把該列排到最上方，方便對照；
+   * 直接點列表列時不重排（否則列會在游標底下跳走）。
+   */
+  pinSelected: boolean
   /** 全台層級右側是否改顯示 DCU 列表（預設為縣市故障分布） */
   dcuListOpen: boolean
   pinnedDcuIds: string[]
@@ -29,10 +34,12 @@ interface WarroomState {
   setCity: (c: string) => void
   setDistrict: (d: string) => void
   setTab: (t: WarTab) => void
+  /** 由地圖選取 DCU（會把列表該列置頂） */
   selectDcu: (id: string | null) => void
-  /** 點同一台＝收合（比照裝置列表：再次點擊縮回電表列表） */
+  /** 點同一台＝收合（比照裝置列表：再次點擊縮回電表列表）；來自列表，不置頂 */
   toggleDcu: (id: string) => void
-  selectMeter: (id: string | null) => void
+  /** opts.pin 預設 true（來自地圖）；列表列點擊要傳 { pin: false } */
+  selectMeter: (id: string | null, opts?: { pin?: boolean }) => void
   setHoverDcuId: (id: string | null) => void
   /** 設定列表篩選；一併清除選取並開啟 DCU 列表，讓篩選結果直接可見 */
   setListFilter: (f: DcuListFilter) => void
@@ -55,6 +62,7 @@ export const useWarroom = create<WarroomState>((set) => ({
   selectedMeterId: null,
   hoverDcuId: null,
   listFilter: 'all',
+  pinSelected: false,
   dcuListOpen: false,
   pinnedDcuIds: [],
   resetNonce: 0,
@@ -70,15 +78,16 @@ export const useWarroom = create<WarroomState>((set) => ({
   setDistrict: (district) => set({ district, selectedDcuId: null, selectedMeterId: null, pinnedDcuIds: [] }),
   // 兩張地圖的範圍邏輯一致：切換頁籤不改變層級／行政區，各自照當前範圍撐滿畫面
   setTab: (tab) => set({ tab }),
-  selectDcu: (selectedDcuId) => set({ selectedDcuId, selectedMeterId: null }),
-  toggleDcu: (id) => set((s) => (s.selectedDcuId === id ? { selectedDcuId: null, selectedMeterId: null } : { selectedDcuId: id, selectedMeterId: null })),
+  selectDcu: (selectedDcuId) => set({ selectedDcuId, selectedMeterId: null, pinSelected: true }),
+  toggleDcu: (id) => set((s) => (s.selectedDcuId === id ? { selectedDcuId: null, selectedMeterId: null, pinSelected: false } : { selectedDcuId: id, selectedMeterId: null, pinSelected: false })),
   // 直接點電表時，一併帶出其收容 DCU，讓右側電表列表展開並定位到該列。
   // 故障地圖不畫電表，因此選電表一律切到關係地圖，才看得到目標與其歸屬。
-  selectMeter: (selectedMeterId) =>
+  selectMeter: (selectedMeterId, opts) =>
     set((s) => {
-      if (!selectedMeterId) return { selectedMeterId: null }
+      const pinSelected = opts?.pin ?? true
+      if (!selectedMeterId) return { selectedMeterId: null, pinSelected }
       const dcuId = meterById.get(selectedMeterId)?.dcuId ?? s.selectedDcuId
-      return { selectedMeterId, selectedDcuId: dcuId, tab: 'relation' as WarTab }
+      return { selectedMeterId, selectedDcuId: dcuId, tab: 'relation' as WarTab, pinSelected }
     }),
   setHoverDcuId: (hoverDcuId) => set({ hoverDcuId }),
   setListFilter: (listFilter) => set({ listFilter, dcuListOpen: true, selectedDcuId: null, selectedMeterId: null }),

@@ -82,15 +82,15 @@ export interface Meter {
 
 /**
  * 告警層級 —— 以「DCU 連線率」為判定基準（連線數 / 總數），也就是地圖區塊塗色的依據。
- * 正常 ≥95%｜注意 85–95%｜異常 70–85%｜嚴重 <70%。門檻可配置。
+ * 比照系統總覽，只分三級：良好 ≥95%｜注意 85–95%｜警告 <85%。門檻可配置。
+ * （原本的四級 normal/warn/abnormal/critical 已於 2026-08 依業主意見收斂為三級。）
  */
-export type Severity = 'normal' | 'warn' | 'abnormal' | 'critical'
-export const ONLINE_RATE_THRESHOLDS = { normal: 0.95, warn: 0.85, abnormal: 0.7 }
+export type Severity = 'normal' | 'warn' | 'alert'
+export const ONLINE_RATE_THRESHOLDS = { normal: 0.95, warn: 0.85 }
 export function classifySeverity(onlineRate: number): Severity {
   if (onlineRate >= ONLINE_RATE_THRESHOLDS.normal) return 'normal'
   if (onlineRate >= ONLINE_RATE_THRESHOLDS.warn) return 'warn'
-  if (onlineRate >= ONLINE_RATE_THRESHOLDS.abnormal) return 'abnormal'
-  return 'critical'
+  return 'alert'
 }
 
 /* ---------- PRNG ---------- */
@@ -225,6 +225,26 @@ for (const m of METERS) { if (!metersByDcu.has(m.dcuId)) metersByDcu.set(m.dcuId
 export const metersOfDcu = (id: string) => metersByDcu.get(id) ?? []
 export const offlineMetersOfDcu = (id: string) => metersOfDcu(id).filter((m) => !m.online)
 
+/* ---------- 歸屬錯誤（實際收容 ≠ 白名單應屬），分兩個方向 ----------
+   他台連入 (in) ：實際收容於本台、白名單卻應屬別台 —— 從 metersByDcu 查
+   連入他台 (out)：白名單應屬本台、實際卻跑去別台 —— 從 metersByExpected 查
+   兩者是同一顆電表的一體兩面：對 A 是 out，對 B 就是 in。 */
+const metersByExpected = new Map<string, Meter[]>()
+for (const m of METERS) {
+  if (m.expectedDcuId === m.dcuId) continue
+  if (!metersByExpected.has(m.expectedDcuId)) metersByExpected.set(m.expectedDcuId, [])
+  metersByExpected.get(m.expectedDcuId)!.push(m)
+}
+/** 白名單應屬本台、實際卻收容於別台的電表（連入他台） */
+export const metersExpectedOf = (id: string) => metersByExpected.get(id) ?? []
+
+/** 全部歸屬錯誤電表（實際收容 ≠ 白名單應屬） */
+export const MISASSIGNED_METERS = METERS.filter((m) => m.dcuId !== m.expectedDcuId)
+/** 某縣市（可再限行政區）的歸屬錯誤電表，依電表所在地判定 */
+export function misassignedInCity(city: string, district = ''): Meter[] {
+  return MISASSIGNED_METERS.filter((m) => m.city === city && (!district || m.district === district))
+}
+
 /* ---------- 讀表率（一組 DCU 的收容電表上線比） ---------- */
 function readRateOf(dcus: Dcu[]): number {
   let total = 0, online = 0
@@ -232,12 +252,14 @@ function readRateOf(dcus: Dcu[]): number {
   return total ? (online / total) * 100 : 0
 }
 
-/** 一組 DCU 的彙總：總數/連線數/斷線數/讀表率 */
-export interface AggStat { dcuTotal: number; dcuOnline: number; dcuOffline: number; readRate: number }
+/** 一組 DCU 的彙總：總數/連線數/斷線數/停用數/讀表率
+    註：停用 DCU 仍屬「連線」（state='disabled' 時 online=true），故 dcuOnline ⊇ dcuDisabled */
+export interface AggStat { dcuTotal: number; dcuOnline: number; dcuOffline: number; dcuDisabled: number; readRate: number }
 export function aggStat(dcus: Dcu[]): AggStat {
   const dcuTotal = dcus.length
   const dcuOnline = dcus.filter((d) => d.online).length
-  return { dcuTotal, dcuOnline, dcuOffline: dcuTotal - dcuOnline, readRate: readRateOf(dcus) }
+  const dcuDisabled = dcus.filter((d) => d.state === 'disabled').length
+  return { dcuTotal, dcuOnline, dcuOffline: dcuTotal - dcuOnline, dcuDisabled, readRate: readRateOf(dcus) }
 }
 
 /** 依地圖層級取範圍內 DCU（縣市層 district='' 代表整個縣市所有行政區） */

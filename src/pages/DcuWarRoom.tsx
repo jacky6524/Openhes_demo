@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef, Fragment } from 'react'
 import { ChevronDown, CornerUpLeft, Crosshair, ArrowLeft, MousePointerClick, Copy, Check, ClipboardList, Info, Settings, X } from 'lucide-react'
 import {
   Th as BitTh, StatusPill, StatePill, SortHead, FilterHead, SearchHead, MenuItem,
@@ -15,13 +15,13 @@ import type { DcuRow } from '@/data/dcuList'
 import { status as statusTok } from '@/tokens'
 import { DcuFaultMap } from '@/components/warroom/DcuFaultMap'
 import { DcuRelationMap } from '@/components/warroom/DcuRelationMap'
-import { SEVERITY_COLOR, SEVERITY_LABEL, GROUP_COLORS, CLUSTER_BLUE, STATE_COLOR, FREQ_COLORS } from '@/components/warroom/warroomConfig'
+import { SEVERITY_COLOR, SEVERITY_STROKE, SEVERITY_ACCENT, SEVERITY_LABEL, GROUP_COLORS, STATE_COLOR, FREQ_COLORS, MIS_COLOR } from '@/components/warroom/warroomConfig'
 import { useWarroom, type DcuListFilter } from '@/store/useWarroom'
 import {
-  CITIES, districtsOf,
-  metersOfDcu, dcuById, cityStats, aggStat, dcusInScope, type Dcu,
+  CITIES, districtsOf, misassignedInCity,
+  metersOfDcu, cityStats, aggStat, dcusInScope, type Dcu, type Meter,
 } from '@/data/dcuFleet'
-import { dcuStat, misassignedOfDcu, type DcuStat } from '@/data/dcuMetrics'
+import { dcuStat, misassignedIn, misassignedOut, MIS_DIR_LABEL, type DcuStat, type MisDir } from '@/data/dcuMetrics'
 import { fmtInt } from '@/lib/format'
 
 /**
@@ -146,18 +146,22 @@ function MapLegend() {
         <div className="flex flex-col gap-1.5">
           <div className="font-semibold text-ink-sub">DCU 連線率告警（區塊塗色）</div>
           <div className="flex items-center gap-3">
-            {([
-              ['normal', '≥95%'], ['warn', '85-95%'], ['abnormal', '70-85%'], ['critical', '<70%'],
-            ] as const).map(([k, range]) => (
+            {([['normal', '≥95%'], ['warn', '85-95%'], ['alert', '<85%']] as const).map(([k, range]) => (
               <span key={k} className="inline-flex items-center gap-1.5 text-ink-sub">
-                <span className="h-3 w-3 rounded-[3px]" style={{ background: SEVERITY_COLOR[k] }} />
+                <span className="h-3 w-3 rounded-[3px] border" style={{ background: SEVERITY_COLOR[k], borderColor: SEVERITY_STROKE[k] }} />
                 {SEVERITY_LABEL[k]}<span className="text-ink-mut tabular-nums">{range}</span>
               </span>
             ))}
           </div>
           <div className="flex items-center gap-3 text-ink-sub">
-            <span className="inline-flex items-center gap-1.5"><span className="grid place-items-center h-3.5 w-3.5 rounded-full border-2 border-white text-[8px] font-bold text-white" style={{ background: CLUSTER_BLUE }}>n</span>DCU 群集</span>
-            <span className="inline-flex items-center gap-1.5"><span className="h-3 w-3 rounded-full border-2 border-white" style={{ background: STATE_COLOR.offline }} />斷線</span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="grid place-items-center h-4 w-4 rounded-full border-2 border-white text-[8px] font-bold text-white" style={{ background: STATE_COLOR.offline }}>n</span>
+              群集內斷線 DCU 數
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="grid place-items-center h-4 w-4 rounded-[4px] border-2 border-white text-white text-[9px] font-bold leading-none" style={{ background: STATE_COLOR.offline }}>✕</span>
+              斷線 DCU
+            </span>
             <span className="inline-flex items-center gap-1.5"><span className="h-3 w-3 rounded-full border-2 border-white" style={{ background: STATE_COLOR.disabled }} />停用</span>
           </div>
           <div className="flex items-center gap-1.5 text-ink-sub">
@@ -170,7 +174,7 @@ function MapLegend() {
           {/* B1/A4：DCU 一律圓形、底色＝頻點色；狀態只有 正常／斷線／停用，與 GPU 圓點同一套編碼 */}
           <div className="flex items-center gap-3 text-ink-sub">
             <span className="inline-flex items-center gap-1.5"><span className="h-4 w-4 rounded-full border-2 border-white shadow-sm" style={{ background: FREQ_COLORS[0] }} />DCU 正常（底色＝頻點色）</span>
-            <span className="inline-flex items-center gap-1.5"><span className="grid place-items-center h-4 w-4 rounded-full border-2 text-white text-[8px] font-bold leading-none" style={{ background: FREQ_COLORS[0], borderColor: STATE_COLOR.offline }}>✕</span>斷線</span>
+            <span className="inline-flex items-center gap-1.5"><span className="grid place-items-center h-4 w-4 rounded-[4px] border-2 border-white text-white text-[9px] font-bold leading-none" style={{ background: STATE_COLOR.offline }}>✕</span>斷線</span>
             <span className="inline-flex items-center gap-1.5"><span className="h-4 w-4 rounded-full border-2 border-white" style={{ background: STATE_COLOR.disabled }} />停用</span>
           </div>
           <div className="flex items-center gap-3 text-ink-sub">
@@ -178,18 +182,14 @@ function MapLegend() {
           </div>
           <div className="flex items-center gap-3 text-ink-sub">
             <span className="inline-flex items-center gap-1.5">
-              <span className="h-3.5 w-3.5 rounded-full border-2" style={{ background: `${FREQ_COLORS[0]}3D`, borderColor: FREQ_COLORS[0] }} />
-              歸屬圈（左上切換顯示時機）
+              <span className="grid place-items-center h-4 w-4 rounded-full border-2 border-white text-white text-[9px] font-bold leading-none" style={{ background: MIS_COLOR }}>✕</span>
+              歸屬錯誤電表
             </span>
-            <span className="inline-flex items-center gap-1.5">
-              <span className="h-3.5 w-3.5 rounded-full border-[1.5px]" style={{ borderColor: '#2A2125', boxShadow: '0 0 0 1.5px #fff inset' }} />
-              圈外電表（輔助判讀）
-            </span>
+            <span className="inline-flex items-center gap-1.5"><span className="w-5 border-t-2" style={{ borderColor: MIS_COLOR }} />實際收容</span>
+            <span className="inline-flex items-center gap-1.5"><span className="w-5 border-t-2 border-dashed" style={{ borderColor: '#9AA0A6' }} />白名單應屬</span>
           </div>
           <div className="flex items-center gap-3 text-ink-sub">
-            <span className="inline-flex items-center gap-1.5"><span className="h-3.5 w-3.5 rounded-full border-2 border-white" style={{ background: '#E8862B' }} />歸屬錯誤電表</span>
-            <span className="inline-flex items-center gap-1.5"><span className="w-5 border-t-2" style={{ borderColor: '#E8862B' }} />實際收容</span>
-            <span className="inline-flex items-center gap-1.5"><span className="w-5 border-t-2 border-dashed" style={{ borderColor: '#5B4E52' }} />白名單應屬</span>
+            <span>方向：<b className="text-ink">他台連入</b>＝別台的表跑進來 ／ <b className="text-ink">連入他台</b>＝自己的表跑出去</span>
           </div>
           <div className="flex items-center gap-3 text-ink-sub">
             <span className="inline-flex items-center gap-1.5"><span className="flex gap-0.5">{GROUP_COLORS.map((c) => <span key={c} className="h-3 w-3 rounded-[3px] border-2" style={{ borderColor: c }} />)}</span>釘選群組</span>
@@ -219,6 +219,8 @@ function KpiCard() {
     { label: 'DCU 總數', value: fmtInt(agg.dcuTotal), filter: 'all' as const },
     { label: '連線數', value: fmtInt(agg.dcuOnline), filter: 'online' as const },
     { label: '斷線數', value: fmtInt(agg.dcuOffline), danger: true, filter: 'offline' as const },
+    // 停用 DCU 仍計入「連線數」（state='disabled' 時 online=true），故單獨列一格
+    { label: '停用數', value: fmtInt(agg.dcuDisabled), filter: 'disabled' as const },
     { label: '讀表率', value: `${agg.readRate.toFixed(1)}%`, danger: low },
   ]
   return (
@@ -229,18 +231,18 @@ function KpiCard() {
         <span className="flex-1" />
         <span className="text-[12px] text-ink-mut">{level === 'taiwan' ? '點數字看 DCU 列表 · 點地圖縣市下鑽' : '點數字篩選下方列表'}</span>
       </div>
-      <KpiRow kpis={kpis} cols={4} active={active} onPick={setListFilter} />
+      <KpiRow kpis={kpis} cols={5} active={active} onPick={setListFilter} />
     </div>
   )
 }
 function KpiRow({ kpis, cols = 3, active, onPick }: {
   kpis: { label: string; value: string; danger?: boolean; filter?: DcuListFilter }[]
-  cols?: 3 | 4
+  cols?: 3 | 4 | 5
   active?: DcuListFilter
   onPick?: (f: DcuListFilter) => void
 }) {
   return (
-    <div className={`grid ${cols === 4 ? 'grid-cols-4' : 'grid-cols-3'} gap-2.5`}>
+    <div className={`grid ${cols === 5 ? 'grid-cols-5' : cols === 4 ? 'grid-cols-4' : 'grid-cols-3'} gap-2`}>
       {kpis.map((k) => {
         const pick = k.filter && onPick ? () => onPick(k.filter!) : undefined
         const on = !!k.filter && active === k.filter && active !== 'all'
@@ -265,10 +267,19 @@ function KpiRow({ kpis, cols = 3, active, onPick }: {
   )
 }
 
-/* ------------------------------ 全台：縣市故障分布清單（一次看完 總數/連線/斷線/讀表率/狀態） ------------------------------ */
+/* ------------------------------ 全台：縣市故障分布清單（可展開該縣市的歸屬錯誤電表） ------------------------------ */
 function CityList() {
   const setCity = useWarroom((s) => s.setCity)
+  const selectMeter = useWarroom((s) => s.selectMeter)
   const rows = useMemo(() => cityStats().slice().sort((a, b) => b.offlineRate - a.offlineRate), [])
+  // 展開中的縣市 → 直接列出該縣市的歸屬錯誤電表（子選單）
+  const [openCity, setOpenCity] = useState<string | null>(null)
+  const misByCity = useMemo(() => {
+    const m = new Map<string, ReturnType<typeof misassignedInCity>>()
+    rows.forEach((s) => m.set(s.name, misassignedInCity(s.name)))
+    return m
+  }, [rows])
+
   return (
     <div className="flex-1 min-h-0 rounded-card bg-surface border border-border shadow-card flex flex-col">
       <div className="shrink-0 px-4 py-2.5 border-b border-border"><h3 className="text-[14px] font-semibold text-ink">縣市故障分布</h3></div>
@@ -276,40 +287,89 @@ function CityList() {
         <table className="w-full text-[12.5px]">
           <thead className="sticky top-0 bg-surface z-10 text-ink-sub">
             <tr className="border-b border-border">
-              <th className="font-medium px-3 py-2 text-left whitespace-nowrap">縣市</th>
+              <th className="font-medium px-2 py-2 text-left whitespace-nowrap">縣市</th>
               <th className="font-medium px-2 py-2 text-right whitespace-nowrap">DCU總數</th>
               <th className="font-medium px-2 py-2 text-right whitespace-nowrap">連線數</th>
               <th className="font-medium px-2 py-2 text-right whitespace-nowrap">斷線數</th>
               <th className="font-medium px-2 py-2 text-right whitespace-nowrap">讀表率</th>
-              <th className="font-medium px-3 py-2 text-left whitespace-nowrap">狀態</th>
+              <th className="font-medium px-2 py-2 text-left whitespace-nowrap">狀態</th>
+              <th className="font-medium px-2 py-2 text-right whitespace-nowrap">歸屬錯誤</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((s) => (
-              <tr key={s.name} onClick={() => setCity(s.name)} className="border-b border-divider cursor-pointer hover:bg-inset/40">
-                <td className="px-3 py-2 font-semibold text-ink whitespace-nowrap">{s.name}</td>
-                <td className="px-2 py-2 text-right tabular-nums text-ink-sub">{fmtInt(s.dcuTotal)}</td>
-                <td className="px-2 py-2 text-right tabular-nums text-ink">{fmtInt(s.dcuOnline)}</td>
-                <td className="px-2 py-2 text-right tabular-nums font-medium" style={{ color: s.dcuOffline > 0 ? '#DB3B36' : '#2A2125' }}>{fmtInt(s.dcuOffline)}</td>
-                <td className="px-2 py-2 text-right tabular-nums font-medium" style={{ color: s.readRate < 95 ? '#DB3B36' : '#2A2125' }}>{s.readRate.toFixed(1)}%</td>
-                <td className="px-3 py-2">
-                  <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold whitespace-nowrap" style={{ color: SEVERITY_COLOR[s.severity] === '#DCE3DD' ? '#6B5E62' : SEVERITY_COLOR[s.severity] }}>
-                    <span className="h-2.5 w-2.5 rounded-[3px]" style={{ background: SEVERITY_COLOR[s.severity] }} />{SEVERITY_LABEL[s.severity]}
-                  </span>
-                </td>
-              </tr>
-            ))}
+            {rows.map((s) => {
+              const mis = misByCity.get(s.name) ?? []
+              const open = openCity === s.name
+              return (
+                <Fragment key={s.name}>
+                  <tr onClick={() => setCity(s.name)} className="border-b border-divider cursor-pointer hover:bg-inset/40">
+                    <td className="px-2 py-2 font-semibold text-ink whitespace-nowrap">{s.name}</td>
+                    <td className="px-2 py-2 text-right tabular-nums text-ink-sub">{fmtInt(s.dcuTotal)}</td>
+                    <td className="px-2 py-2 text-right tabular-nums text-ink">{fmtInt(s.dcuOnline)}</td>
+                    <td className="px-2 py-2 text-right tabular-nums font-medium" style={{ color: s.dcuOffline > 0 ? RED : '#2A2125' }}>{fmtInt(s.dcuOffline)}</td>
+                    <td className="px-2 py-2 text-right tabular-nums font-medium" style={{ color: s.readRate < 95 ? RED : '#2A2125' }}>{s.readRate.toFixed(1)}%</td>
+                    <td className="px-2 py-2">
+                      <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold whitespace-nowrap" style={{ color: SEVERITY_ACCENT[s.severity] }}>
+                        <span className="h-2.5 w-2.5 rounded-[3px] border" style={{ background: SEVERITY_COLOR[s.severity], borderColor: SEVERITY_STROKE[s.severity] }} />{SEVERITY_LABEL[s.severity]}
+                      </span>
+                    </td>
+                    <td className="px-2 py-2 text-right">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setOpenCity(open ? null : s.name) }}
+                        disabled={!mis.length}
+                        title={mis.length ? '展開歸屬錯誤電表清單' : '此縣市無歸屬錯誤電表'}
+                        className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-semibold tabular-nums ${
+                          mis.length ? 'hover:bg-inset' : 'opacity-40 cursor-default'
+                        }`}
+                        style={{ color: mis.length ? MIS_COLOR : undefined }}
+                      >
+                        {mis.length ? <ChevronDown size={12} className={open ? '' : '-rotate-90'} /> : null}
+                        {fmtInt(mis.length)}
+                      </button>
+                    </td>
+                  </tr>
+                  {open && mis.length > 0 && (
+                    <tr className="border-b border-divider">
+                      <td colSpan={7} className="p-0 bg-inset/30">
+                        <div className="max-h-[220px] overflow-auto">
+                          <table className="w-full text-[11.5px]">
+                            <thead className="sticky top-0 bg-inset/80 backdrop-blur text-ink-mut">
+                              <tr>
+                                <th className="font-medium px-3 py-1.5 text-left whitespace-nowrap">表號</th>
+                                <th className="font-medium px-2 py-1.5 text-left whitespace-nowrap">行政區</th>
+                                <th className="font-medium px-2 py-1.5 text-left whitespace-nowrap">實際收容</th>
+                                <th className="font-medium px-2 py-1.5 text-left whitespace-nowrap">白名單應屬</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {mis.map((m) => (
+                                <tr key={m.id} onClick={() => selectMeter(m.id)} className="border-t border-divider/60 cursor-pointer hover:bg-surface" title="檢視此電表">
+                                  <td className="px-3 py-1.5 font-mono text-ink whitespace-nowrap">
+                                    <span className="mr-1 font-bold" style={{ color: MIS_COLOR }}>✕</span>{m.id}
+                                  </td>
+                                  <td className="px-2 py-1.5 text-ink-sub whitespace-nowrap">{m.district}</td>
+                                  <td className="px-2 py-1.5 font-mono text-ink-sub whitespace-nowrap">{m.dcuId}</td>
+                                  <td className="px-2 py-1.5 font-mono whitespace-nowrap" style={{ color: MIS_COLOR }}>{m.expectedDcuId}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              )
+            })}
           </tbody>
         </table>
       </div>
-      <div className="shrink-0 px-3 py-2 border-t border-border text-[11px] text-ink-mut">點縣市（或地圖上的縣市）進入該縣市的行政區故障地圖。</div>
+      <div className="shrink-0 px-3 py-2 border-t border-border text-[11px] text-ink-mut">點縣市（或地圖上的縣市）進入該縣市的行政區故障地圖；點右側數字展開該縣市的歸屬錯誤電表。</div>
     </div>
   )
 }
 
 /* ------------------------------ 右② DCU 列表（DCU 裝置列表的列表功能就地復現） ------------------------------ */
-const PROTOCOLS = ['DCU', 'LTE', 'NB-IoT'] as const
-
 /** fleet DCU → 裝置列表的 DcuRow（供 DCU資料 抽屜共用同一組欄位） */
 function toDcuRow(d: Dcu, stat: DcuStat): DcuRow {
   return {
@@ -326,6 +386,7 @@ function DcuListTable() {
   const city = useWarroom((s) => s.city)
   const district = useWarroom((s) => s.district)
   const selectedDcuId = useWarroom((s) => s.selectedDcuId)
+  const pinSelected = useWarroom((s) => s.pinSelected)
   // 點同一台＝收合電表列表（比照裝置列表）
   const toggleDcu = useWarroom((s) => s.toggleDcu)
   const setHoverDcuId = useWarroom((s) => s.setHoverDcuId) // A3：列表 hover → 地圖高亮
@@ -335,7 +396,6 @@ function DcuListTable() {
   const setStateFilter = useWarroom((s) => s.setListFilter)
   const closeDcuList = useWarroom((s) => s.closeDcuList)
 
-  const [protocol, setProtocol] = useState<(typeof PROTOCOLS)[number]>('DCU')
   const [idQ, setIdQ] = useState('')
   const [codeQ, setCodeQ] = useState('')
   const [menu, setMenu] = useState<null | 'state' | 'id' | 'code'>(null)
@@ -347,20 +407,29 @@ function DcuListTable() {
   // 詳細資料改彈窗（與電表詳細資料同模式），不再整頁跳轉離開總覽
   const [detailDcu, setDetailDcu] = useState<string | null>(null)
 
-  const scoped = useMemo(() => dcusInScope(level, city, district).map((d) => ({ d, stat: dcuStat(d.id), mis: misassignedOfDcu(d.id).length })), [level, city, district])
+  const scoped = useMemo(() => dcusInScope(level, city, district).map((d) => ({
+    d, stat: dcuStat(d.id), misIn: misassignedIn(d.id).length, misOut: misassignedOut(d.id).length,
+  })), [level, city, district])
   const rows = useMemo(() => {
     const list = scoped.filter(({ d }) =>
       (stateFilter === 'all' ||
         (stateFilter === 'online' ? d.state !== 'offline' : d.state === stateFilter)) &&
       d.id.toLowerCase().includes(idQ.trim().toLowerCase()) &&
       d.code.toLowerCase().includes(codeQ.trim().toLowerCase()))
-    return [...list].sort((a, b) => (sortDir === 'asc' ? a.stat.readRate - b.stat.readRate : b.stat.readRate - a.stat.readRate))
-  }, [scoped, stateFilter, idQ, codeQ, sortDir])
+    return [...list].sort((a, b) => {
+      // 從地圖點選的 DCU 置頂，方便與地圖對照；點列表列本身不重排（否則列會在游標下跳走）
+      if (pinSelected) {
+        if (a.d.id === selectedDcuId) return -1
+        if (b.d.id === selectedDcuId) return 1
+      }
+      return sortDir === 'asc' ? a.stat.readRate - b.stat.readRate : b.stat.readRate - a.stat.readRate
+    })
+  }, [scoped, stateFilter, idQ, codeQ, sortDir, pinSelected, selectedDcuId])
 
   const sum = useMemo(() => scoped.reduce((s, { stat }) => ({ online: s.online + stat.online, total: s.total + stat.total }), { online: 0, total: 0 }), [scoped])
   // 無限捲動取代分頁器
   const scrollRef = useRef<HTMLDivElement | null>(null)
-  const { visible, sentinelRef, hasMore } = useInfiniteRows(rows.length, [stateFilter, idQ, codeQ, sortDir, level, city, district])
+  const { visible, sentinelRef, hasMore } = useInfiniteRows(rows.length, [stateFilter, idQ, codeQ, sortDir, level, city, district, selectedDcuId])
   const pageRows = rows.slice(0, visible)
   const copy = (t: string) => {
     navigator.clipboard?.writeText(t).then(() => {
@@ -392,11 +461,6 @@ function DcuListTable() {
             <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm" style={{ background: statusTok.warning.fg }} />50-80%</span>
           </div>
           <div className="text-[11.5px] text-ink-sub tabular-nums">上線數 <b className="text-ink">{fmtInt(sum.online)}</b> / 總數 <b className="text-ink">{fmtInt(sum.total)}</b></div>
-          <div className="flex items-center gap-0.5 rounded-lg bg-inset p-0.5">
-            {PROTOCOLS.map((p) => (
-              <button key={p} onClick={() => setProtocol(p)} className={['px-2 py-0.5 rounded-md text-[11.5px] font-medium transition-colors', protocol === p ? 'bg-surface text-ink shadow-card' : 'text-ink-sub hover:text-ink'].join(' ')}>{p}</button>
-            ))}
-          </div>
         </div>
       </div>
       <div ref={scrollRef} className="flex-1 min-h-0 overflow-auto">
@@ -427,7 +491,7 @@ function DcuListTable() {
             </tr>
           </thead>
           <tbody>
-            {pageRows.map(({ d, stat, mis }) => {
+            {pageRows.map(({ d, stat, misIn, misOut }) => {
               const on = selectedDcuId === d.id
               const row = toDcuRow(d, stat)
               return (
@@ -440,7 +504,9 @@ function DcuListTable() {
                   <td className="px-3 py-2"><PercentBadge percent={stat.readRate} /></td>
                   <td className="px-3 py-2">
                     <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
-                      {mis > 0 && <span className="grid place-items-center h-4 min-w-4 px-1 rounded-full text-white text-[10px] font-bold" style={{ background: '#E8862B' }} title={`歸屬錯誤電表 ${mis} 顆`}>{mis}</span>}
+                      {/* 歸屬錯誤分兩個方向：↓＝他台連入（別人的表跑進來）、↑＝連入他台（自己的表跑出去） */}
+                      {misIn > 0 && <span className="grid place-items-center h-4 min-w-4 px-1 rounded-full text-white text-[10px] font-bold" style={{ background: MIS_COLOR }} title={`他台連入 ${misIn} 顆`}>↓{misIn}</span>}
+                      {misOut > 0 && <span className="grid place-items-center h-4 min-w-4 px-1 rounded-full text-[10px] font-bold border" style={{ borderColor: MIS_COLOR, color: MIS_COLOR }} title={`連入他台 ${misOut} 顆`}>↑{misOut}</span>}
                       {row.alarms > 0 && <span className="grid place-items-center h-4 min-w-4 px-1 rounded-full bg-danger text-white text-[10px] font-bold">{row.alarms}</span>}
                       <button onClick={() => copy(d.code)} title="複製 DCU 編號" className="text-ink-mut hover:text-brand">
                         {copied === d.code ? <Check size={14} className="text-normal" /> : <Copy size={14} />}
@@ -477,6 +543,8 @@ function minsAgo(last: string) {
 }
 type MeterStatusFilter = 'all' | 'online' | 'offline'
 type MeterSortKey = 'lqi' | 'time'
+/** 歸屬檢視：全部 ／ 兩個方向都看 ／ 只看他台連入 ／ 只看連入他台 */
+type MeterMisFilter = 'all' | 'mis' | MisDir
 
 function MeterListTable() {
   const district = useWarroom((s) => s.district)
@@ -485,8 +553,9 @@ function MeterListTable() {
   const selectMeter = useWarroom((s) => s.selectMeter)
   const selectedMeterId = useWarroom((s) => s.selectedMeterId)
 
-  // 全部電表 ／ 歸屬錯誤（實際收容 ≠ 白名單應屬）
-  const [misOnly, setMisOnly] = useState(false)
+  const pinSelected = useWarroom((s) => s.pinSelected)
+  // 全部 ／ 歸屬錯誤（兩個方向）／ 他台連入 ／ 連入他台
+  const [misFilter, setMisFilter] = useState<MeterMisFilter>('all')
   const [statusFilter, setStatusFilter] = useState<MeterStatusFilter>('all')
   const [q, setQ] = useState({ meterNo: '', elecNo: '' })
   const [menu, setMenu] = useState<null | 'status' | 'meterNo' | 'elecNo'>(null)
@@ -496,32 +565,53 @@ function MeterListTable() {
   const [infoMeter, setInfoMeter] = useState<DcuMeterRow | null>(null)
   const [settingsMeter, setSettingsMeter] = useState<DcuMeterRow | null>(null)
 
-  // 補齊裝置列表面板的欄位（電號 / FAN ID / LQI —— demo 由表號推導，上線改 API 欄位）
-  const all = useMemo(() => (selectedDcuId
-    ? metersOfDcu(selectedDcuId).map((m) => ({ m, ext: meterRowOf(m.id, m.dcuId, m.online) }))
-    : []), [selectedDcuId])
-  const online = all.filter(({ m }) => m.online).length
-  const misCount = selectedDcuId ? all.filter(({ m }) => m.expectedDcuId !== m.dcuId).length : 0
+  /**
+   * 本台收容的電表（含「他台連入」）＋ 白名單應屬本台但跑到別台的電表（「連入他台」）。
+   * 後者不在 metersOfDcu 裡，必須另外併進來，否則使用者看不到自己的表跑去哪。
+   * dir: null＝正常歸屬；'in'＝他台連入；'out'＝連入他台
+   */
+  const all = useMemo(() => {
+    if (!selectedDcuId) return [] as { m: Meter; ext: DcuMeterRow; dir: MisDir | null }[]
+    const own = metersOfDcu(selectedDcuId).map((m) => ({
+      m, ext: meterRowOf(m.id, m.dcuId, m.online), dir: (m.expectedDcuId !== selectedDcuId ? 'in' : null) as MisDir | null,
+    }))
+    const gone = misassignedOut(selectedDcuId).map((m) => ({
+      m, ext: meterRowOf(m.id, m.dcuId, m.online), dir: 'out' as MisDir,
+    }))
+    return [...own, ...gone]
+  }, [selectedDcuId])
+  // 上線數 / 總數 只算本台實際收容的（連入他台的已不屬於本台，不計入分母）
+  const owned = all.filter((r) => r.dir !== 'out')
+  const online = owned.filter(({ m }) => m.online).length
+  const misIn = all.filter((r) => r.dir === 'in').length
+  const misOut = all.filter((r) => r.dir === 'out').length
+  const misCount = misIn + misOut
   const setSearch = (k: keyof typeof q, v: string) => setQ((s) => ({ ...s, [k]: v }))
   const toggleSort = (key: MeterSortKey) => {
     if (key === sortKey) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
     else { setSortKey(key); setSortDir('desc') }
   }
   const rows = useMemo(() => {
-    const list = all.filter(({ m, ext }) =>
-      (!misOnly || m.expectedDcuId !== m.dcuId) &&
+    const list = all.filter(({ m, ext, dir }) =>
+      // 「歸屬錯誤」檢視：兩個方向都列出；'in' 之外還包含跑到別台的 'out'
+      (misFilter === 'all' || (misFilter === 'mis' ? !!dir : dir === misFilter)) &&
       (statusFilter === 'all' || (statusFilter === 'online') === m.online) &&
       m.id.toLowerCase().includes(q.meterNo.trim().toLowerCase()) &&
       ext.elecNo.toLowerCase().includes(q.elecNo.trim().toLowerCase()))
     return [...list].sort((a, b) => {
+      // 從地圖點選的電表置頂，方便與地圖對照
+      if (pinSelected) {
+        if (a.m.id === selectedMeterId) return -1
+        if (b.m.id === selectedMeterId) return 1
+      }
       const d = sortKey === 'lqi' ? a.ext.signal - b.ext.signal : minsAgo(a.m.last) - minsAgo(b.m.last)
       return sortDir === 'asc' ? d : -d
     })
-  }, [all, misOnly, statusFilter, q, sortKey, sortDir])
+  }, [all, misFilter, statusFilter, q, sortKey, sortDir, pinSelected, selectedMeterId])
 
   // 無限捲動取代分頁器
   const scrollRef = useRef<HTMLDivElement | null>(null)
-  const { visible, sentinelRef, revealIndex, hasMore } = useInfiniteRows(rows.length, [selectedDcuId, misOnly, statusFilter, q, sortKey, sortDir])
+  const { visible, sentinelRef, revealIndex, hasMore } = useInfiniteRows(rows.length, [selectedDcuId, misFilter, statusFilter, q, sortKey, sortDir, selectedMeterId])
   const pageRows = rows.slice(0, visible)
 
   // 從地圖點電表時，把該列載入（若在未載入的區段）並捲入可視範圍
@@ -544,15 +634,29 @@ function MeterListTable() {
         </div>
         {selectedDcuId && (
           <div className="flex items-center gap-3">
-            {/* 全部 ／ 歸屬錯誤 切換：歸屬錯誤＝實際收容但白名單不屬於本 DCU，配合地圖警示點除錯 */}
+            {/* 歸屬檢視：歸屬錯誤再分「他台連入」（別人的表跑進來）與「連入他台」（自己的表跑出去） */}
             <div className="flex items-center gap-0.5 rounded-lg bg-inset p-0.5">
-              <button onClick={() => setMisOnly(false)} className={['px-2 py-0.5 rounded-md text-[11.5px] font-medium transition-colors', !misOnly ? 'bg-surface text-ink shadow-card' : 'text-ink-sub hover:text-ink'].join(' ')}>全部</button>
-              <button onClick={() => setMisOnly(true)} className={['px-2 py-0.5 rounded-md text-[11.5px] font-medium transition-colors inline-flex items-center gap-1', misOnly ? 'bg-surface shadow-card' : 'text-ink-sub hover:text-ink'].join(' ')} style={misOnly ? { color: '#E8862B' } : undefined}>
-                歸屬錯誤
-                {misCount > 0 && <span className="grid place-items-center h-4 min-w-4 px-1 rounded-full text-white text-[10px] font-bold" style={{ background: '#E8862B' }}>{misCount}</span>}
-              </button>
+              {([
+                { k: 'all' as const, label: '全部', n: 0 },
+                { k: 'mis' as const, label: '歸屬錯誤', n: misCount },
+                { k: 'in' as const, label: '他台連入', n: misIn },
+                { k: 'out' as const, label: '連入他台', n: misOut },
+              ]).map((t) => {
+                const on = misFilter === t.k
+                return (
+                  <button
+                    key={t.k}
+                    onClick={() => setMisFilter(t.k)}
+                    className={['px-2 py-0.5 rounded-md text-[11.5px] font-medium transition-colors inline-flex items-center gap-1', on ? 'bg-surface shadow-card' : 'text-ink-sub hover:text-ink'].join(' ')}
+                    style={on ? { color: t.k === 'all' ? undefined : MIS_COLOR } : undefined}
+                  >
+                    {t.label}
+                    {t.n > 0 && <span className="grid place-items-center h-4 min-w-4 px-1 rounded-full text-white text-[10px] font-bold" style={{ background: MIS_COLOR }}>{t.n}</span>}
+                  </button>
+                )
+              })}
             </div>
-            <span className="text-[12px] text-ink-sub tabular-nums">上線數 <b className="text-ink">{fmtInt(online)}</b> / 總數 <b className="text-ink">{fmtInt(all.length)}</b></span>
+            <span className="text-[12px] text-ink-sub tabular-nums">上線數 <b className="text-ink">{fmtInt(online)}</b> / 總數 <b className="text-ink">{fmtInt(owned.length)}</b></span>
           </div>
         )}
       </div>
@@ -588,15 +692,18 @@ function MeterListTable() {
                 </tr>
               </thead>
               <tbody>
-                {pageRows.map(({ m, ext }) => {
-                  const mis = m.expectedDcuId !== m.dcuId
+                {pageRows.map(({ m, ext, dir }) => {
                   return (
-                    <tr key={m.id} ref={selectedMeterId === m.id ? selRowRef : undefined} onClick={() => selectMeter(m.id)} className={`border-b border-divider cursor-pointer ${selectedMeterId === m.id ? 'bg-brand-soft/60' : 'hover:bg-inset/40'}`}>
+                    <tr key={m.id} ref={selectedMeterId === m.id ? selRowRef : undefined} onClick={() => selectMeter(m.id, { pin: false })} className={`border-b border-divider cursor-pointer ${selectedMeterId === m.id ? 'bg-brand-soft/60' : 'hover:bg-inset/40'}`}>
                       <td className="px-3 py-2"><StatusPill status={m.online ? 'online' : 'offline'} /></td>
                       <td className="px-3 py-2 font-mono text-ink">
-                        {mis && <span className="mr-1 text-[11px] font-bold" style={{ color: '#E8862B' }} title={`歸屬錯誤：白名單應屬 ${m.expectedDcuId}`}>⚠</span>}
+                        {dir && <span className="mr-1 text-[11px] font-bold" style={{ color: MIS_COLOR }} title={MIS_DIR_LABEL[dir]}>✕</span>}
                         {m.id}{!!district && m.district !== district && <span className="ml-1 text-[10px] text-ink-mut">跨區</span>}
-                        {mis && <div className="text-[10px] font-sans font-medium" style={{ color: '#E8862B' }}>應屬 {m.expectedDcuId}</div>}
+                        {dir && (
+                          <div className="text-[10px] font-sans font-medium" style={{ color: MIS_COLOR }}>
+                            {MIS_DIR_LABEL[dir]}：{dir === 'in' ? `應屬 ${m.expectedDcuId}` : `現由 ${m.dcuId} 收容`}
+                          </div>
+                        )}
                       </td>
                       <td className="px-3 py-2 font-mono text-ink-sub">{ext.elecNo}</td>
                       <td className="px-3 py-2 font-mono text-ink-sub">{ext.fanMac.slice(0, 14)}</td>
@@ -612,7 +719,7 @@ function MeterListTable() {
                     </tr>
                   )
                 })}
-                {pageRows.length === 0 && <tr><td colSpan={7} className="px-3 py-8 text-center text-ink-mut">{misOnly ? '此 DCU 無歸屬錯誤電表' : '查無符合條件的電表'}</td></tr>}
+                {pageRows.length === 0 && <tr><td colSpan={7} className="px-3 py-8 text-center text-ink-mut">{misFilter === 'all' ? '查無符合條件的電表' : misFilter === 'in' ? '此 DCU 無他台連入的電表' : misFilter === 'out' ? '此 DCU 無連入他台的電表' : '此 DCU 無歸屬錯誤電表'}</td></tr>}
               </tbody>
             </table>
             <div ref={sentinelRef} />

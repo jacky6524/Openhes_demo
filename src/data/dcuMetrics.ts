@@ -7,7 +7,7 @@
  *
  * 百萬級電表時前端不可能再逐表彙總：一次掃描 100 萬筆約 270ms，會直接卡在互動路徑上。
  */
-import { dcuById, dcuMeterStat, metersOfDcu, type Meter } from './dcuFleet'
+import { dcuById, dcuMeterStat, metersOfDcu, metersExpectedOf, type Meter } from './dcuFleet'
 import { meterRange } from '@/lib/geoRange'
 
 /** 一台 DCU 的讀表彙總（API 欄位候選：total / online / read / read_rate） */
@@ -48,11 +48,34 @@ export function dcuRange(dcuId: string): DcuRange | null {
 }
 
 /**
- * 歸屬錯誤：該 DCU 實際收容、但白名單不屬於它的電表。
+ * 歸屬錯誤分兩個方向（依業主 2026-08 意見）：
+ *   in  他台連入 —— 實際收容於本台、白名單卻應屬別台（別人的表跑進來）
+ *   out 連入他台 —— 白名單應屬本台、實際卻收容於別台（自己的表跑出去）
+ * 同一顆電表對甲是 out、對乙就是 in。
  * TODO: 上線後改由後端白名單比對（一句 join），前端只拿計數與分頁列表。
  */
-export function misassignedOfDcu(dcuId: string): Meter[] {
+export type MisDir = 'in' | 'out'
+export const MIS_DIR_LABEL: Record<MisDir, string> = { in: '他台連入', out: '連入他台' }
+export interface MisMeter { meter: Meter; dir: MisDir }
+
+/** 他台連入：實際收容於本台、但白名單應屬別台 */
+export function misassignedIn(dcuId: string): Meter[] {
   return metersOfDcu(dcuId).filter((m) => m.expectedDcuId !== dcuId)
+}
+/** 連入他台：白名單應屬本台、但實際收容於別台 */
+export function misassignedOut(dcuId: string): Meter[] {
+  return metersExpectedOf(dcuId)
+}
+/** 兩個方向合併，帶方向標記（供列表與地圖圖層共用） */
+export function misassignedDetail(dcuId: string): MisMeter[] {
+  return [
+    ...misassignedIn(dcuId).map((meter) => ({ meter, dir: 'in' as MisDir })),
+    ...misassignedOut(dcuId).map((meter) => ({ meter, dir: 'out' as MisDir })),
+  ]
+}
+/** 與本台有關的所有歸屬錯誤電表（兩個方向）—— 供徽章計數 */
+export function misassignedOfDcu(dcuId: string): Meter[] {
+  return [...misassignedIn(dcuId), ...misassignedOut(dcuId)]
 }
 
 /** 資料來源更新（改接 API 後的輪詢／重新整理）時呼叫 */

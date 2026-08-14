@@ -3,19 +3,33 @@
  * 色弱友善原則：資訊拆成多通道（形狀＝裝置類型、紅色中心＝斷線、外框色＝群組、
  * 虛線＝跨區/最後已知），不只靠單一顏色。
  */
+import { health } from '@/tokens'
 
-/** 行政區嚴重度色（故障地圖色塊）— 四級，色相拉開 */
+/**
+ * 行政區嚴重度色（故障地圖色塊）—— 直接沿用系統總覽的 health token，
+ * 兩頁的「良好／注意／警告」是同一組顏色與同一組字，不再各自定義。
+ */
 export const SEVERITY_COLOR = {
-  normal: '#DCE3DD', // 正常/低彩度灰綠
-  warn: '#F5C518', // 注意 黃
-  abnormal: '#E8862B', // 異常 橘
-  critical: '#DB3B36', // 嚴重 紅
+  normal: health.good.fill,
+  warn: health.warning.fill,
+  alert: health.alert.fill,
+} as const
+/** 對應的邊框色（系統總覽地圖用同一組 stroke） */
+export const SEVERITY_STROKE = {
+  normal: health.good.stroke,
+  warn: health.warning.stroke,
+  alert: health.alert.stroke,
+} as const
+/** 文字用的高彩度變體（色塊太淡時用，例如列表的狀態文字） */
+export const SEVERITY_ACCENT = {
+  normal: health.good.accent,
+  warn: health.warning.accent,
+  alert: health.alert.accent,
 } as const
 export const SEVERITY_LABEL = {
-  normal: '正常',
-  warn: '注意',
-  abnormal: '異常',
-  critical: '嚴重',
+  normal: health.good.label, // 良好
+  warn: health.warning.label, // 注意
+  alert: health.alert.label, // 警告
 } as const
 
 /** 裝置狀態編碼（關係地圖） */
@@ -68,11 +82,24 @@ export const DIM_OPACITY = 0.22 // 非聚焦裝置降透明度
 export const SELECT_FILL = '#2F6BED'
 export const SELECT_FILL_OPACITY = 0.28
 
-/** 故障地圖圖例 */
+/** 故障地圖圖例（三級，與系統總覽一致） */
 export const FAULT_LEGEND = {
-  severity: (['normal', 'warn', 'abnormal', 'critical'] as const).map((k) => ({
+  severity: (['normal', 'warn', 'alert'] as const).map((k) => ({
     key: k,
     label: SEVERITY_LABEL[k],
     color: SEVERITY_COLOR[k],
   })),
 }
+
+/**
+ * 歸屬錯誤電表的標記色 —— 依業主意見改為灰色（原為橘色）。
+ * 形狀是「畫叉的圓圈」，與斷線 DCU 的「畫叉的方塊」以形狀區隔，不只靠顏色。
+ */
+export const MIS_COLOR = '#6B5E62'
+/** 兩個方向共用同一個灰色標記，方向以 popup／列表文字區分 */
+export const MIS_DIR_STROKE = { in: '#6B5E62', out: '#9AA0A6' } as const
+
+/** 系統總覽的地圖底色（故障地圖改為純 GeoJSON 模式後沿用，兩頁視覺一致） */
+export const MAP_BG = '#F7F1F2'
+/** 無資料 / 未部署區域（比照系統總覽的斜線紋底色） */
+export const MAP_NO_DATA = '#ECE7E9'
