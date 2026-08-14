@@ -8,7 +8,7 @@ import {
 } from '@/data/dcuFleet'
 import { SEVERITY_COLOR, SEVERITY_STROKE, STATE_COLOR, STATE_LABEL, freqColor, MAP_BG } from './warroomConfig'
 import { addSelectedMeterLayer, setSelectedMeter } from './selectedMeterLayer'
-import { registerMap, unregisterMap, pushCamera, pullCamera } from './mapCamera'
+import { registerMap, unregisterMap, pushCamera, pullCamera, pushHistory, popHistory, clearHistory } from './mapCamera'
 import { registerMarkerIcons, ICON_DCU_OFFLINE } from './markerIcons'
 import { buildLabelPoints } from './polyLabels'
 import { useWarroom, type WarLevel } from '@/store/useWarroom'
@@ -99,7 +99,9 @@ export function DcuFaultMap() {
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return
     polyFC.current = buildPoly(useWarroom.getState().level, city)
-    const map = new maplibregl.Map({ container: containerRef.current, style: BLANK_STYLE, center: [121.0, 23.7], zoom: 6.4, attributionControl: { compact: true }, dragRotate: false })
+    // doubleClickZoom 關閉：雙擊改成「退回上一個視角」，內建 handler 早於使用者監聽器
+    // 執行，光靠 preventDefault() 攔不住，只能整個關掉
+    const map = new maplibregl.Map({ container: containerRef.current, style: BLANK_STYLE, center: [121.0, 23.7], zoom: 6.4, attributionControl: { compact: true }, dragRotate: false, doubleClickZoom: false })
     // 右上角讓給地圖頁籤，縮放控制移到右下
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right')
     mapRef.current = map
@@ -155,6 +157,12 @@ export function DcuFaultMap() {
           'icon-allow-overlap': true, 'icon-ignore-placement': true,
         },
       })
+      // 透明的加大命中範圍 —— 6.5px 的圓點實際上不好點
+      map.addLayer({
+        id: 'dcu-hit', type: 'circle', source: 'dcus',
+        filter: ['!', ['has', 'point_count']],
+        paint: { 'circle-color': '#000', 'circle-opacity': 0, 'circle-radius': ['interpolate', ['linear'], ['zoom'], 8, 9, 12, 12, 16, 16] },
+      })
 
       // 選取電表的強化標記（此圖不畫電表，點列表時至少要看得到目標在哪）
       addSelectedMeterLayer(map)
@@ -182,25 +190,30 @@ export function DcuFaultMap() {
       // DCU 單點：hover 顯示詳細資訊；click 高亮（不切換至關係地圖）
       const enter = () => (map.getCanvas().style.cursor = 'pointer'); const leave = () => (map.getCanvas().style.cursor = '')
       map.on('mouseenter', 'clusters', enter); map.on('mouseleave', 'clusters', leave)
-      // 正常點與斷線點是兩個圖層，事件要各掛一次
-      ;(['dcu-point', 'dcu-point-off'] as const).forEach((layer) => {
-        map.on('mousemove', layer, (e) => {
-          const f = e.features?.[0]; if (!f) return; map.getCanvas().style.cursor = 'pointer'
-          const p = f.properties!
-          setHover(null)
-          setDcuInfo({ id: p.id, dist: p.dist, serial: p.serial, address: p.address, code: p.code, freq: p.freq, state: p.state, color: p.color, x: e.point.x, y: e.point.y })
-        })
-        map.on('mouseleave', layer, () => { map.getCanvas().style.cursor = ''; setDcuInfo(null) })
-        map.on('click', layer, (e) => { const f = e.features?.[0]; if (!f) return; selectDcu(f.properties!.id) })
+      // 事件掛在透明命中圈上（同時涵蓋正常圓點與斷線方形圖示，範圍也比實際圖形大）
+      map.on('mousemove', 'dcu-hit', (e) => {
+        const f = e.features?.[0]; if (!f) return; map.getCanvas().style.cursor = 'pointer'
+        const p = f.properties!
+        setHover(null)
+        setDcuInfo({ id: p.id, dist: p.dist, serial: p.serial, address: p.address, code: p.code, freq: p.freq, state: p.state, color: p.color, x: e.point.x, y: e.point.y })
       })
+      map.on('mouseleave', 'dcu-hit', () => { map.getCanvas().style.cursor = ''; setDcuInfo(null) })
+      map.on('click', 'dcu-hit', (e) => { const f = e.features?.[0]; if (!f) return; selectDcu(f.properties!.id) })
+      /**
+       * 雙擊 → 退回上一個視角。掛在整張地圖而不是裝置圖層：第一下點擊會把鏡頭移到
+       * 該裝置並拉近，裝置因此從游標底下滑走，第二下往往落空。
+       * 沒有可退的視角時就什麼都不做（內建雙擊放大已於 constructor 關閉）。
+       */
+      map.on('dblclick', () => { popHistory('fault') })
     })
     return () => { unregisterMap('fault'); map.remove(); mapRef.current = null; readyRef.current = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // level / city 變更 → 重建 polygons + DCU 點 + fit
+  // level / city 變更 → 重建 polygons + DCU 點 + fit（換了範圍，舊視角就沒有意義了）
   useEffect(() => {
     const map = mapRef.current; if (!map || !readyRef.current) return
+    clearHistory('fault')
     polyFC.current = buildPoly(level, city)
     ;(map.getSource('poly') as maplibregl.GeoJSONSource)?.setData(polyFC.current)
     ;(map.getSource('poly-labels') as maplibregl.GeoJSONSource)?.setData(buildLabelPoints(polyFC.current) as any)
@@ -213,12 +226,19 @@ export function DcuFaultMap() {
   // 選取描邊已移除，改由鏡頭框住該區來表示目前選取。
   useEffect(() => {
     const map = mapRef.current; if (!map || !readyRef.current) return
+    clearHistory('fault') // 換了行政區，之前的視角沒有意義
     ;(map.getSource('dcus') as maplibregl.GeoJSONSource)?.setData(buildDcuPoints(level, city, district) as any)
     if (level === 'city') { if (district) fitByName(district); else fitAllCity(); setDcuInfo(null) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [district, level])
 
-  useEffect(() => { const map = mapRef.current; if (!map || !readyRef.current || !activeRef.current || !selectedDcuId) return; const d = dcuById.get(selectedDcuId); if (d) map.easeTo({ center: [d.lng, d.lat], zoom: Math.max(map.getZoom(), 15), duration: 600 }) /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [selectedDcuId])
+  // 選取 DCU → 拉近；先記下目前視角，雙擊裝置可退回
+  useEffect(() => {
+    const map = mapRef.current; if (!map || !readyRef.current || !activeRef.current || !selectedDcuId) return
+    const d = dcuById.get(selectedDcuId)
+    if (d) { pushHistory('fault'); map.easeTo({ center: [d.lng, d.lat], zoom: Math.max(map.getZoom(), 15), duration: 600 }) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDcuId])
   // 切換成顯示中的那張 → 對齊另一張的鏡頭（並重算尺寸）；還沒有共用鏡頭才自行取景
   useEffect(() => {
     const map = mapRef.current; if (!map || !readyRef.current || !active) return
@@ -231,7 +251,7 @@ export function DcuFaultMap() {
     const map = mapRef.current; if (!map || !readyRef.current) return
     const m = selectedMeterId ? meterById.get(selectedMeterId) ?? null : null
     setSelectedMeter(map, m)
-    if (m && activeRef.current) map.easeTo({ center: [m.lng, m.lat], zoom: Math.max(map.getZoom(), 16), duration: 600 })
+    if (m && activeRef.current) { pushHistory('fault'); map.easeTo({ center: [m.lng, m.lat], zoom: Math.max(map.getZoom(), 16), duration: 600 }) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedMeterId])
   useEffect(() => { if (readyRef.current && resetNonce) fitScope() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [resetNonce])

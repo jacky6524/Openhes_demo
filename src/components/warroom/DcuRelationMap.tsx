@@ -9,7 +9,7 @@ import {
 import { dcuStat, misassignedIn, misassignedOut, MIS_DIR_LABEL, type MisDir } from '@/data/dcuMetrics'
 import { townsGeo, countiesGeoAll } from '@/data/geo/geo'
 import { addSelectedMeterLayer, setSelectedMeter } from './selectedMeterLayer'
-import { registerMap, unregisterMap, pushCamera, pullCamera } from './mapCamera'
+import { registerMap, unregisterMap, pushCamera, pullCamera, pushHistory, popHistory, clearHistory } from './mapCamera'
 import { GROUP_COLORS, DIM_OPACITY, STATE_COLOR, STATE_LABEL, freqColor, pinColor, MIS_COLOR } from './warroomConfig'
 import { registerMarkerIcons, ICON_MIS_METER, ICON_DCU_OFFLINE } from './markerIcons'
 import { buildLabelPoints } from './polyLabels'
@@ -70,6 +70,9 @@ interface DcuPop { dcu: Dcu; online: number; total: number; readRate: number; mi
 const METER_RADIUS_SOFT: any = ['interpolate', ['linear'], ['zoom'], 12, 1.7, 14, 2.8, 16, 4.2]
 const METER_RADIUS_FOCUS: any = ['interpolate', ['linear'], ['zoom'], 12, 2, 14, 3.4, 16, 5.2]
 const METER_OPACITY_SOFT: any = ['case', ['==', ['get', 'on'], 0], 0.45, 0.68]
+/** 透明命中圈：視覺仍是小點，但滑鼠有合理的可點範圍 */
+const METER_HIT_RADIUS: any = ['interpolate', ['linear'], ['zoom'], 12, 6, 14, 8, 16, 11]
+const DCU_HIT_RADIUS: any = ['interpolate', ['linear'], ['zoom'], 7, 8, 10, 10, 13, 13, 16, 16]
 
 /**
  * DCU 超過這個數量就改用 GPU 圓點（整個縣市約 90–150 台、全台 420 台，
@@ -83,6 +86,9 @@ const EMPTY_FC_DATA = { type: 'FeatureCollection' as const, features: [] as any[
  * 百萬級電表時電表只該存在於街道級視野內；這裡先把「縮放層級決定圖層存在與否」這條路鋪好。
  */
 const METER_MIN_ZOOM = 13
+
+/** 可點擊的裝置圖層（命中圈＋歸屬錯誤圖示）—— 空白處判定與雙擊退回都用這組 */
+const DEVICE_LAYERS = ['rel-meter-hit', 'rel-dcu-hit', 'rel-mis-dot'] as const
 
 /** 電表 → GeoJSON（純函式，供地圖事件在元件外重建） */
 function meterFeatures(meters: Meter[]) {
@@ -226,6 +232,9 @@ export function DcuRelationMap() {
     const map = new maplibregl.Map({
       container: containerRef.current, style: STYLE, center: [121.5715, 25.0325], zoom: 13.2,
       attributionControl: { compact: true }, dragRotate: false,
+      // 雙擊改成「退回上一個視角」，關掉內建的雙擊放大以免兩者互搶
+      // （內建 handler 早於使用者監聽器執行，光靠 preventDefault() 攔不住）
+      doubleClickZoom: false,
     })
     // 右上角讓給地圖頁籤，縮放控制移到右下
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right')
@@ -257,6 +266,12 @@ export function DcuRelationMap() {
           'circle-stroke-color': '#fff',
           'circle-stroke-width': 0,
         },
+      })
+      // 透明的加大命中範圍 —— 電表點在 z14 只有 2.8px 半徑，實際上很難點到。
+      // 視覺維持小點（密度圖需要），只把可點擊的範圍放大。
+      map.addLayer({
+        id: 'rel-meter-hit', type: 'circle', source: 'rel-meters',
+        paint: { 'circle-color': '#000', 'circle-opacity': 0, 'circle-radius': METER_HIT_RADIUS },
       })
 
       // 歸屬錯誤：指向線 + 灰色圓圈✕圖示。不受電表縮放門檻限制，
@@ -298,6 +313,12 @@ export function DcuRelationMap() {
         },
       })
 
+      // DCU 的透明命中圈（疊在電表命中圈之上，DCU 優先被點到）
+      map.addLayer({
+        id: 'rel-dcu-hit', type: 'circle', source: 'rel-dcus',
+        paint: { 'circle-color': '#000', 'circle-opacity': 0, 'circle-radius': DCU_HIT_RADIUS },
+      })
+
       // 歸屬錯誤電表圖示畫在 DCU 之上（它是這張圖要凸顯的主角）
       map.addLayer({
         id: 'rel-mis-dot', type: 'symbol', source: 'rel-mis',
@@ -329,17 +350,15 @@ export function DcuRelationMap() {
         else setDistrict(name)
       })
 
-      // 正常/停用（圓點）與斷線（方形圖示）是兩個圖層，事件要各掛一次
-      ;(['rel-dcu-dots', 'rel-dcu-off'] as const).forEach((layer) => {
-        map.on('mousemove', layer, (e) => {
-          const f = e.features?.[0]; if (!f) return
-          map.getCanvas().style.cursor = 'pointer'
-          const id = f.properties!.id as string
-          setHoverDcu(id); setDcuPop(makeDcuPopRef.current(id, e.point.x, e.point.y))
-        })
-        map.on('mouseleave', layer, () => { map.getCanvas().style.cursor = ''; setHoverDcu(null); setDcuPop(null) })
-        map.on('click', layer, (e) => { const f = e.features?.[0]; if (f) selectDcu(f.properties!.id) })
+      // 事件掛在透明命中圈上（涵蓋正常圓點與斷線方形圖示的所有 DCU）
+      map.on('mousemove', 'rel-dcu-hit', (e) => {
+        const f = e.features?.[0]; if (!f) return
+        map.getCanvas().style.cursor = 'pointer'
+        const id = f.properties!.id as string
+        setHoverDcu(id); setDcuPop(makeDcuPopRef.current(id, e.point.x, e.point.y))
       })
+      map.on('mouseleave', 'rel-dcu-hit', () => { map.getCanvas().style.cursor = ''; setHoverDcu(null); setDcuPop(null) })
+      map.on('click', 'rel-dcu-hit', (e) => { const f = e.features?.[0]; if (f) selectDcu(f.properties!.id) })
 
       registerMap('relation', map)
       readyRef.current = true
@@ -363,11 +382,22 @@ export function DcuRelationMap() {
       map.on('mouseleave', 'rel-mis-dot', () => { map.getCanvas().style.cursor = ''; setMisPop(null) })
       map.on('click', 'rel-mis-dot', (e) => { const f = e.features?.[0]; if (f) selectMeter(f.properties!.id) })
 
-      // 一般電表：可點選，但不再有 hover 卡（依業主意見只有歸屬錯誤的才 hover）
-      map.on('click', 'rel-meter-dots', (e) => { const f = e.features?.[0]; if (!f) return; selectMeter(f.properties!.id) })
+      // 一般電表：可點選（命中圈），但不再有 hover 卡（依業主意見只有歸屬錯誤的才 hover）
+      map.on('click', 'rel-meter-hit', (e) => { const f = e.features?.[0]; if (!f) return; selectMeter(f.properties!.id) })
+      map.on('mousemove', 'rel-meter-hit', () => { map.getCanvas().style.cursor = 'pointer' })
+      map.on('mouseleave', 'rel-meter-hit', () => { map.getCanvas().style.cursor = '' })
+
+      /**
+       * 雙擊 → 退回上一個視角。
+       * 掛在整張地圖而不是裝置圖層：第一下點擊會把鏡頭移到該裝置並拉近，裝置因此
+       * 從游標底下滑走，第二下往往就落空了。改成整張地圖接手，雙擊必定生效。
+       * 沒有可退的視角時就什麼都不做（內建雙擊放大已於 constructor 關閉）。
+       */
+      map.on('dblclick', () => { popHistory('relation') })
+
       // 點空白處 → 只取消電表選取；DCU 選取與展開的電表列表保留，收合走列表的 ← 鈕
       map.on('click', (e) => {
-        const layers = ['rel-meter-dots', 'rel-dcu-dots', 'rel-dcu-off', 'rel-mis-dot'].filter((l) => map.getLayer(l))
+        const layers = [...DEVICE_LAYERS].filter((l) => map.getLayer(l))
         if (map.queryRenderedFeatures(e.point, { layers }).length) return
         const st = useWarroom.getState()
         if (st.selectedMeterId) st.selectMeter(null)
@@ -425,6 +455,8 @@ export function DcuRelationMap() {
       })
       wrap.addEventListener('mouseleave', () => { setHoverDcu(null); setDcuPop(null) })
       wrap.addEventListener('click', (ev) => { ev.stopPropagation(); selectDcu(dcu.id) })
+      // DOM marker 不走 maplibre 的圖層事件，雙擊退回要自己掛
+      wrap.addEventListener('dblclick', (ev) => { ev.stopPropagation(); ev.preventDefault(); popHistory('relation') })
       const marker = new maplibregl.Marker({ element: wrap, anchor: 'center' }).setLngLat([dcu.lng, dcu.lat]).addTo(map)
       dcuRefs.current.set(dcu.id, { dcu, cross, color, wrap, shape, marker })
     })
@@ -469,9 +501,10 @@ export function DcuRelationMap() {
     map.fitBounds([[W, S], [E, N]], { padding: 60, maxZoom: 15.5, duration: 600 })
   }
 
-  // 資料範圍 / 模式變更 → 重建圖層 + fit
+  // 資料範圍 / 模式變更 → 重建圖層 + fit（換了範圍，舊視角就沒有意義了）
   useEffect(() => {
     if (!readyRef.current) return
+    clearHistory('relation')
     applyPickMode()
     applyMeters(true)
     buildMarkers()
@@ -491,11 +524,14 @@ export function DcuRelationMap() {
   useEffect(() => { if (readyRef.current) fitScope() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [resetNonce])
   useEffect(() => { if (readyRef.current) fitScope() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [refitNonce])
 
-  // 清單/選取 DCU → 取景至該 DCU
+  // 清單/選取 DCU → 取景至該 DCU（先記下目前視角，雙擊裝置可退回）
   useEffect(() => {
     const map = mapRef.current; if (!map || !readyRef.current || !activeRef.current || !selectedDcuId) return
     const d = dcuById.get(selectedDcuId)
-    if (d) map.easeTo({ center: [d.lng, d.lat], zoom: Math.max(map.getZoom(), 15), duration: 600 })
+    if (d) {
+      pushHistory('relation')
+      map.easeTo({ center: [d.lng, d.lat], zoom: Math.max(map.getZoom(), 15), duration: 600 })
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDcuId])
   // 清單/選取電表 → 縮放至該電表並打上強化標記
@@ -503,7 +539,10 @@ export function DcuRelationMap() {
     const map = mapRef.current; if (!map || !readyRef.current) return
     const m = selectedMeterId ? lookupMeter(selectedMeterId) : null
     setSelectedMeter(map, m)
-    if (m && activeRef.current) map.easeTo({ center: [m.lng, m.lat], zoom: Math.max(map.getZoom(), 16), duration: 600 })
+    if (m && activeRef.current) {
+      pushHistory('relation')
+      map.easeTo({ center: [m.lng, m.lat], zoom: Math.max(map.getZoom(), 16), duration: 600 })
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedMeterId])
 
