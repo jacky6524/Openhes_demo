@@ -3,7 +3,7 @@
  * 色弱友善原則：資訊拆成多通道（形狀＝裝置類型、紅色中心＝斷線、外框色＝群組、
  * 虛線＝跨區/最後已知），不只靠單一顏色。
  */
-import { health } from '@/tokens'
+import { health, mag } from '@/tokens'
 
 /**
  * 行政區嚴重度色（故障地圖色塊）—— 直接沿用系統總覽的 health token，
@@ -98,6 +98,15 @@ export const FAULT_LEGEND = {
 export const MIS_COLOR = '#6B5E62'
 /** 兩個方向共用同一個灰色標記，方向以 popup／列表文字區分 */
 export const MIS_DIR_STROKE = { in: '#6B5E62', out: '#9AA0A6' } as const
+
+/**
+ * 斷線群集的漸層 —— 改用紫色量級階（`tokens.mag`）。
+ * 原本的紅色系落在「良好灰綠／注意黃／警告紅」的區塊底色上不夠跳，而群集數字本來
+ * 就是**量級**而非告警值（色彩規則：紫＝量級／趨勢，紅只給告警），換成紫色兩者兼顧。
+ * 數量越多越深；白字在四階上都讀得到。
+ */
+export const CLUSTER_RAMP = [mag[3], '#6F5FCC', mag[4], mag[5]] as const
+export const CLUSTER_TEXT = '#FFFFFF'
 
 /** 系統總覽的地圖底色（故障地圖改為純 GeoJSON 模式後沿用，兩頁視覺一致） */
 export const MAP_BG = '#F7F1F2'

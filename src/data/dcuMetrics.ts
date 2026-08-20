@@ -10,8 +10,11 @@
 import { dcuById, dcuMeterStat, metersOfDcu, metersExpectedOf, type Meter } from './dcuFleet'
 import { meterRange } from '@/lib/geoRange'
 
-/** 一台 DCU 的讀表彙總（API 欄位候選：total / online / read / read_rate） */
-export interface DcuStat { total: number; online: number; read: number; readRate: number }
+/**
+ * 一台 DCU 的電表彙總（API 欄位候選：total / online / read / connect_rate / lp_rate）。
+ * 統計基準：白名單（應屬本台）＋排除停用 —— 他台連入不計，連入他台的仍計入本台。
+ */
+export interface DcuStat { total: number; online: number; read: number; connectRate: number; lpRate: number }
 
 const statCache = new Map<string, DcuStat>()
 export function dcuStat(dcuId: string): DcuStat {
@@ -58,13 +61,13 @@ export type MisDir = 'in' | 'out'
 export const MIS_DIR_LABEL: Record<MisDir, string> = { in: '他台連入', out: '連入他台' }
 export interface MisMeter { meter: Meter; dir: MisDir }
 
-/** 他台連入：實際收容於本台、但白名單應屬別台 */
+/** 他台連入：實際收容於本台、但白名單應屬別台（統計排除停用） */
 export function misassignedIn(dcuId: string): Meter[] {
-  return metersOfDcu(dcuId).filter((m) => m.expectedDcuId !== dcuId)
+  return metersOfDcu(dcuId).filter((m) => m.expectedDcuId !== dcuId && !m.disabled)
 }
-/** 連入他台：白名單應屬本台、但實際收容於別台 */
+/** 連入他台：白名單應屬本台、但實際收容於別台（統計排除停用） */
 export function misassignedOut(dcuId: string): Meter[] {
-  return metersExpectedOf(dcuId)
+  return metersExpectedOf(dcuId).filter((m) => !m.disabled)
 }
 /** 兩個方向合併，帶方向標記（供列表與地圖圖層共用） */
 export function misassignedDetail(dcuId: string): MisMeter[] {

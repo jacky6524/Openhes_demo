@@ -72,7 +72,9 @@ function buildRow(r: () => number): DcuMeterRow {
  * 供 DCU 總覽的電表列表接上「詳細資料／電表資料」抽屜；屬性一律由表號 hash 推導，
  * 同一表號永遠得到同一份資料。TODO: 上線改接 API 後直接以真實欄位取代。
  */
-export function meterRowOf(meterNo: string, dcuSerial: string, online: boolean): DcuMeterRow {
+export function meterRowOf(meterNo: string, dcuSerial: string, online: boolean, elecPrefix?: string): DcuMeterRow {
   const row = buildRow(mulberry32(hash(meterNo)))
-  return { ...row, meterNo, dcuSerial, status: online ? 'online' : 'offline', signal: online ? row.signal || 95 : 0 }
+  // 電號前兩碼＝台電區處，需與該電表所屬 DCU 的區處一致
+  const elecNo = elecPrefix ? `${elecPrefix}${row.elecNo.slice(2)}` : row.elecNo
+  return { ...row, meterNo, dcuSerial, elecNo, status: online ? 'online' : 'offline', signal: online ? row.signal || 95 : 0 }
 }

@@ -3,8 +3,11 @@ import { DEFAULT_CITY, dcuById, meterById } from '@/data/dcuFleet'
 
 export type WarTab = 'fault' | 'relation'
 export type WarLevel = 'taiwan' | 'city' // 全台選縣市 / 縣市選行政區
-/** DCU 列表狀態篩選；'online' ＝ 連線（正常＋停用，即非斷線），供 KPI 卡點擊帶入 */
-export type DcuListFilter = 'all' | 'online' | 'active' | 'offline' | 'disabled'
+/**
+ * 右側清單的檢視／篩選；'online' ＝ 連線（正常＋停用，即非斷線），
+ * 'mis' ＝ 切換成「歸屬錯誤電表清單」（不是 DCU 篩選，是換一張清單）。供 KPI 方塊點擊帶入。
+ */
+export type DcuListFilter = 'all' | 'online' | 'active' | 'offline' | 'disabled' | 'mis'
 const MAX_PIN = 3
 
 interface WarroomState {
@@ -40,6 +43,8 @@ interface WarroomState {
   toggleDcu: (id: string) => void
   /** opts.pin 預設 true（來自地圖）；列表列點擊要傳 { pin: false } */
   selectMeter: (id: string | null, opts?: { pin?: boolean }) => void
+  /** 歸屬錯誤電表清單 → 跳到該電表在 L3 的點位 */
+  focusMisMeter: (meterId: string) => void
   setHoverDcuId: (id: string | null) => void
   /** 設定列表篩選；一併清除選取並開啟 DCU 列表，讓篩選結果直接可見 */
   setListFilter: (f: DcuListFilter) => void
@@ -78,7 +83,9 @@ export const useWarroom = create<WarroomState>((set) => ({
   setDistrict: (district) => set({ district, selectedDcuId: null, selectedMeterId: null, pinnedDcuIds: [] }),
   // 兩張地圖的範圍邏輯一致：切換頁籤不改變層級／行政區，各自照當前範圍撐滿畫面
   setTab: (tab) => set({ tab }),
-  selectDcu: (selectedDcuId) => set({ selectedDcuId, selectedMeterId: null, pinSelected: true }),
+  // 從地圖選 DCU：右側一併切到 DCU 列表（全台層級本來顯示的是縣市分布），
+  // 否則點了地圖右邊沒有任何反應
+  selectDcu: (selectedDcuId) => set({ selectedDcuId, selectedMeterId: null, pinSelected: true, dcuListOpen: true, listFilter: 'all' }),
   toggleDcu: (id) => set((s) => (s.selectedDcuId === id ? { selectedDcuId: null, selectedMeterId: null, pinSelected: false } : { selectedDcuId: id, selectedMeterId: null, pinSelected: false })),
   // 直接點電表時，一併帶出其收容 DCU，讓右側電表列表展開並定位到該列。
   // 故障地圖不畫電表，因此選電表一律切到關係地圖，才看得到目標與其歸屬。
@@ -87,8 +94,21 @@ export const useWarroom = create<WarroomState>((set) => ({
       const pinSelected = opts?.pin ?? true
       if (!selectedMeterId) return { selectedMeterId: null, pinSelected }
       const dcuId = meterById.get(selectedMeterId)?.dcuId ?? s.selectedDcuId
-      return { selectedMeterId, selectedDcuId: dcuId, tab: 'relation' as WarTab, pinSelected }
+      return { selectedMeterId, selectedDcuId: dcuId, tab: 'relation' as WarTab, pinSelected, dcuListOpen: true }
     }),
+  /**
+   * 從歸屬錯誤電表清單跳到該電表的點位：直接落在 L3（行政區）的關係地圖，
+   * 那是唯一畫得出「實際收容 ↔ 白名單應屬」兩條線的層級。
+   */
+  focusMisMeter: (meterId) => {
+    const m = meterById.get(meterId)
+    if (!m) return
+    set({
+      level: 'city', city: m.city, district: m.district, tab: 'relation',
+      selectedMeterId: meterId, selectedDcuId: m.dcuId, pinSelected: true,
+      dcuListOpen: true, listFilter: 'all',
+    })
+  },
   setHoverDcuId: (hoverDcuId) => set({ hoverDcuId }),
   setListFilter: (listFilter) => set({ listFilter, dcuListOpen: true, selectedDcuId: null, selectedMeterId: null }),
   closeDcuList: () => set({ dcuListOpen: false, listFilter: 'all', selectedDcuId: null, selectedMeterId: null }),

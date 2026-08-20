@@ -12,12 +12,15 @@ export function InfoDrawer({
   emphasisLabel,
   emphasisValue,
   rows,
+  footer,
   onClose,
 }: {
   title: string
   emphasisLabel: string
   emphasisValue: string
   rows: [string, string][]
+  /** 屬性列之後的自由區塊（例如可填寫的備註欄位） */
+  footer?: React.ReactNode
   onClose: () => void
 }) {
   useEffect(() => {
@@ -58,6 +61,7 @@ export function InfoDrawer({
               </div>
             ))}
           </dl>
+          {footer}
         </div>
       </aside>
     </>

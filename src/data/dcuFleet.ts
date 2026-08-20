@@ -61,23 +61,49 @@ export interface Dcu {
   online: boolean
   city: string
   district: string
-  lastSeen: string
+  lastSeen: string // 最後連線時間（顯示用 MM-DD HH:mm）
+  lastSeenMins: number // 距今幾分鐘（排序用）
   freq: number // 頻點 1..FREQ_COUNT
   state: DcuState // 啟用 / 停用 / 斷線
   serial: string // 序號
   address: string // 地址
   code: string // 編號
+  office: string // 台電區處（＝電號前兩碼 + 區處名）
+  officeCode: string // 區處代碼兩碼
+  model: string // 設備型號
 }
 export interface Meter {
   id: string
   lng: number
   lat: number
   online: boolean
+  disabled: boolean // 停用（統計一律排除，僅關係地圖圖面顯示）
   dcuId: string // 實際收容 DCU
   expectedDcuId: string // 白名單應屬 DCU；與 dcuId 不同＝歸屬錯誤
   city: string
   district: string
-  last: string
+  last: string // 最後連線時間（顯示用）
+  lastMins: number
+  lastLp: string // 最後 LP 時間（顯示用）
+  lastLpMins: number
+  lastMn: string // 最後 MN（午夜讀表）時間，每日 1 筆
+  lastMnMins: number
+}
+
+/* ---------- demo 時間基準 ----------
+   固定基準時間，讓「最後連線時間 / 最後 LP 時間」每次載入都一樣、且可排序。
+   TODO: 上線改用 API 回傳的 timestamp。 */
+const DEMO_NOW = Date.UTC(2026, 7, 20, 6, 0) // 2026-08-20 14:00 (UTC+8)
+const TZ_OFFSET = 8 * 3600_000
+/** 基準時間距當日 00:00 幾分鐘 —— 超過這個值就不是「當日」 */
+export const MINUTES_SINCE_MIDNIGHT = 14 * 60
+/** 該時間戳是否落在當日（列表的「非當日標紅」用同一個判定） */
+export const isSameDay = (minsAgo: number) => minsAgo <= MINUTES_SINCE_MIDNIGHT
+/** 距今 n 分鐘 → 'MM-DD HH:mm' */
+export function stampOf(minsAgo: number): string {
+  const d = new Date(DEMO_NOW + TZ_OFFSET - minsAgo * 60_000)
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`
 }
 
 /**
@@ -86,7 +112,8 @@ export interface Meter {
  * （原本的四級 normal/warn/abnormal/critical 已於 2026-08 依業主意見收斂為三級。）
  */
 export type Severity = 'normal' | 'warn' | 'alert'
-export const ONLINE_RATE_THRESHOLDS = { normal: 0.95, warn: 0.85 }
+// 2026-08-20 依業主意見：良好 ≥97%｜注意 90–97%｜警告 <90%
+export const ONLINE_RATE_THRESHOLDS = { normal: 0.97, warn: 0.90 }
 export function classifySeverity(onlineRate: number): Severity {
   if (onlineRate >= ONLINE_RATE_THRESHOLDS.normal) return 'normal'
   if (onlineRate >= ONLINE_RATE_THRESHOLDS.warn) return 'warn'
@@ -111,6 +138,16 @@ const METERS_PER_DCU = 80
 
 /** 縣市 → 編號前綴 */
 const CITY_CODE: Record<string, string> = { 台北市: 'TPE', 新北市: 'NTP', 台中市: 'TCH', 高雄市: 'KHH' }
+/** 縣市 → 台電區處（代碼＝電號前兩碼）。TODO: 上線改由 API 的區處欄位提供 */
+const CITY_OFFICE: Record<string, { code: string; name: string }> = {
+  台北市: { code: '01', name: '北市區處' },
+  新北市: { code: '02', name: '北縣區處' },
+  台中市: { code: '05', name: '中市區處' },
+  高雄市: { code: '08', name: '高市區處' },
+}
+export const officeOf = (city: string) => CITY_OFFICE[city] ?? { code: '00', name: '未指定區處' }
+/** DCU 設備型號（demo 用；抽屜標題以 () 呈現） */
+const DCU_MODELS = ['DCU-132', 'DCU-140', 'DCU-150S', 'DCU-160N']
 const STREETS = ['中山', '中正', '民生', '建國', '復興', '和平', '信義', '文化', '光明', '成功']
 /** 由 id 導出穩定序號（供顯示） */
 function serialFrom(id: string) {
@@ -141,11 +178,16 @@ function buildFleet() {
         const state: DcuState = !online ? 'offline' : disabled ? 'disabled' : 'active'
         const stNo = mulberry32(hash(id + ':addr'))
         const address = `${city.name}${d.name}${STREETS[Math.floor(stNo() * STREETS.length)]}路${1 + Math.floor(stNo() * 480)}號`
+        // 連線者最後連線在數分鐘內；斷線者停在數小時～三天前
+        const lastSeenMins = online ? 1 + Math.floor(r() * 28) : 65 + Math.floor(r() * 4200)
+        const office = officeOf(city.name)
         const dcu: Dcu = {
           id, lng, lat, online, city: city.name, district: d.name,
-          lastSeen: online ? '前一小時' : `${1 + Math.floor(r() * 46)} 分鐘前`,
+          lastSeen: stampOf(lastSeenMins), lastSeenMins,
           freq, state, serial: serialFrom(id), address,
           code: `${CITY_CODE[city.name] ?? 'FDC'}-${pad(dcuSeq, 4)}`,
+          office: `${office.code}${office.name}`, officeCode: office.code,
+          model: DCU_MODELS[hash(id + ':model') % DCU_MODELS.length],
         }
         dcus.push(dcu)
         const mCount = METERS_PER_DCU
@@ -154,13 +196,23 @@ function buildFleet() {
           const mr = mulberry32(hash(dcu.id + ':' + j))
           const mOffP = online ? 0.09 : 0.55
           const mOnline = mr() > mOffP
+          const mDisabled = mr() < 0.025 // 停用電表：統計一律排除，圖面仍畫
+          const lastMins = mOnline ? 1 + Math.floor(mr() * 55) : 70 + Math.floor(mr() * 2800)
+          // LP 每 15 分鐘一筆 → 正常情況比「最後連線」再晚一點點
+          const lastLpMins = mOnline ? lastMins + Math.floor(mr() * 15) : lastMins + 15 + Math.floor(mr() * 240)
+          // MN 每日 1 筆（00:0x）：正常者是今天凌晨，斷線者停在前幾天
+          const lastMnMins = mOnline
+            ? MINUTES_SINCE_MIDNIGHT - Math.floor(mr() * 55)
+            : MINUTES_SINCE_MIDNIGHT + 1440 * (1 + Math.floor(mr() * 3))
           // 一般電表都在 DCU 附近（不遠）
           meters.push({
             id: `KT${19000000 + meterSeq}`,
             lng: lng + (mr() - 0.5) * 0.006,
             lat: lat + (mr() - 0.5) * 0.0045,
-            online: mOnline, dcuId: dcu.id, expectedDcuId: dcu.id, city: city.name, district: d.name,
-            last: mOnline ? '前一小時' : `${1 + Math.floor(mr() * 58)} 分鐘前`,
+            online: mOnline, disabled: mDisabled, dcuId: dcu.id, expectedDcuId: dcu.id, city: city.name, district: d.name,
+            last: stampOf(lastMins), lastMins,
+            lastLp: stampOf(lastLpMins), lastLpMins,
+            lastMn: stampOf(lastMnMins), lastMnMins,
           })
         }
       }
@@ -182,12 +234,15 @@ function buildFleet() {
       for (let k = 0; k < 2; k++) {
         meterSeq++
         const t = 0.004 + k * 0.0012 // 約 400m 越界
+        const lastMins = 80 + Math.floor(cr() * 1600)
         meters.push({
           id: `KT${19000000 + meterSeq}`,
           lng: nearest.lng + (dirx / len) * t + (cr() - 0.5) * 0.0008,
           lat: nearest.lat + (diry / len) * t + (cr() - 0.5) * 0.0008,
-          online: false, dcuId: nearest.id, expectedDcuId: nearest.id, city: city.name, district: B.name,
-          last: `${1 + Math.floor(cr() * 40)} 分鐘前`,
+          online: false, disabled: false, dcuId: nearest.id, expectedDcuId: nearest.id, city: city.name, district: B.name,
+          last: stampOf(lastMins), lastMins,
+          lastLp: stampOf(lastMins + 30), lastLpMins: lastMins + 30,
+          lastMn: stampOf(MINUTES_SINCE_MIDNIGHT + 1440), lastMnMins: MINUTES_SINCE_MIDNIGHT + 1440,
         })
       }
     }
@@ -238,28 +293,42 @@ for (const m of METERS) {
 /** 白名單應屬本台、實際卻收容於別台的電表（連入他台） */
 export const metersExpectedOf = (id: string) => metersByExpected.get(id) ?? []
 
-/** 全部歸屬錯誤電表（實際收容 ≠ 白名單應屬） */
-export const MISASSIGNED_METERS = METERS.filter((m) => m.dcuId !== m.expectedDcuId)
+/** 白名單應屬本台的「全部」電表（含正常歸屬與連入他台）—— 統計基準 */
+const metersByWhitelist = new Map<string, Meter[]>()
+for (const m of METERS) {
+  if (!metersByWhitelist.has(m.expectedDcuId)) metersByWhitelist.set(m.expectedDcuId, [])
+  metersByWhitelist.get(m.expectedDcuId)!.push(m)
+}
+export const metersExpectedAll = (id: string) => metersByWhitelist.get(id) ?? []
+
+/** 全部歸屬錯誤電表（實際收容 ≠ 白名單應屬）；統計一律排除停用 */
+export const MISASSIGNED_METERS = METERS.filter((m) => m.dcuId !== m.expectedDcuId && !m.disabled)
 /** 某縣市（可再限行政區）的歸屬錯誤電表，依電表所在地判定 */
 export function misassignedInCity(city: string, district = ''): Meter[] {
   return MISASSIGNED_METERS.filter((m) => m.city === city && (!district || m.district === district))
 }
-
-/* ---------- 讀表率（一組 DCU 的收容電表上線比） ---------- */
-function readRateOf(dcus: Dcu[]): number {
-  let total = 0, online = 0
-  for (const d of dcus) { const s = dcuMeterStat(d.id); total += s.total; online += s.online }
-  return total ? (online / total) * 100 : 0
+/** 依地圖層級取範圍內的歸屬錯誤電表 */
+export function misassignedInScope(level: 'taiwan' | 'city', city: string, district: string): Meter[] {
+  return level === 'taiwan' ? MISASSIGNED_METERS : misassignedInCity(city, district)
 }
 
-/** 一組 DCU 的彙總：總數/連線數/斷線數/停用數/讀表率
+/* ---------- LP 讀表率（一組 DCU 的白名單電表 LP 讀取比） ---------- */
+function lpRateOf(dcus: Dcu[]): number {
+  let total = 0, read = 0
+  for (const d of dcus) { const s = dcuMeterStat(d.id); total += s.total; read += s.read }
+  return total ? (read / total) * 100 : 0
+}
+
+/** 一組 DCU 的彙總：總數/連線數/斷線數/停用數/LP讀表率/歸屬錯誤電表數
     註：停用 DCU 仍屬「連線」（state='disabled' 時 online=true），故 dcuOnline ⊇ dcuDisabled */
-export interface AggStat { dcuTotal: number; dcuOnline: number; dcuOffline: number; dcuDisabled: number; readRate: number }
+export interface AggStat { dcuTotal: number; dcuOnline: number; dcuOffline: number; dcuDisabled: number; lpRate: number; misassigned: number }
 export function aggStat(dcus: Dcu[]): AggStat {
   const dcuTotal = dcus.length
   const dcuOnline = dcus.filter((d) => d.online).length
   const dcuDisabled = dcus.filter((d) => d.state === 'disabled').length
-  return { dcuTotal, dcuOnline, dcuOffline: dcuTotal - dcuOnline, dcuDisabled, readRate: readRateOf(dcus) }
+  const ids = new Set(dcus.map((d) => d.id))
+  const misassigned = MISASSIGNED_METERS.filter((m) => ids.has(m.expectedDcuId) || ids.has(m.dcuId)).length
+  return { dcuTotal, dcuOnline, dcuOffline: dcuTotal - dcuOnline, dcuDisabled, lpRate: lpRateOf(dcus), misassigned }
 }
 
 /** 依地圖層級取範圍內 DCU（縣市層 district='' 代表整個縣市所有行政區） */
@@ -277,14 +346,14 @@ export function metersInScope(level: 'taiwan' | 'city', city: string, district: 
 }
 
 /* ---------- 統計（只依城市/行政區） ---------- */
-export interface DistrictStat { name: string; dcuTotal: number; dcuOnline: number; dcuOffline: number; onlineRate: number; offlineRate: number; severity: Severity; meterOffline: number; readRate: number }
+export interface DistrictStat { name: string; dcuTotal: number; dcuOnline: number; dcuOffline: number; onlineRate: number; offlineRate: number; severity: Severity; meterOffline: number; lpRate: number }
 export function districtStats(city: string): DistrictStat[] {
   return districtsOf(city).map((d) => {
     const inDcus = DCUS.filter((x) => x.city === city && x.district === d.name)
     const dcuOffline = inDcus.filter((x) => !x.online).length
     const onlineRate = inDcus.length ? (inDcus.length - dcuOffline) / inDcus.length : 1
-    const meterOffline = METERS.filter((m) => m.city === city && m.district === d.name && !m.online).length
-    return { name: d.name, dcuTotal: inDcus.length, dcuOnline: inDcus.length - dcuOffline, dcuOffline, onlineRate, offlineRate: 1 - onlineRate, severity: classifySeverity(onlineRate), meterOffline, readRate: readRateOf(inDcus) }
+    const meterOffline = METERS.filter((m) => m.city === city && m.district === d.name && !m.online && !m.disabled).length
+    return { name: d.name, dcuTotal: inDcus.length, dcuOnline: inDcus.length - dcuOffline, dcuOffline, onlineRate, offlineRate: 1 - onlineRate, severity: classifySeverity(onlineRate), meterOffline, lpRate: lpRateOf(inDcus) }
   })
 }
 export const statByDistrict = (city: string, name: string) => districtStats(city).find((s) => s.name === name)
@@ -295,23 +364,34 @@ export function offlineDcus(city: string, district?: string): Dcu[] {
 export const offlineDcusAll = (): Dcu[] => DCUS.filter((d) => !d.online)
 
 /** 全台層級：各縣市統計（斷線 DCU 佔比 → 嚴重度）；無 fleet 資料的縣市＝正常 */
-export interface CityStat { name: string; dcuTotal: number; dcuOnline: number; dcuOffline: number; onlineRate: number; offlineRate: number; severity: Severity; readRate: number }
+export interface CityStat { name: string; dcuTotal: number; dcuOnline: number; dcuOffline: number; onlineRate: number; offlineRate: number; severity: Severity; lpRate: number; lat: number }
+/** 依緯度由北到南排序（業主指定的預設順序） */
 export function cityStats(): CityStat[] {
   return CITIES.map((c) => {
     const inDcus = DCUS.filter((d) => d.city === c.name)
     const dcuOffline = inDcus.filter((d) => !d.online).length
     const onlineRate = inDcus.length ? (inDcus.length - dcuOffline) / inDcus.length : 1
-    return { name: c.name, dcuTotal: inDcus.length, dcuOnline: inDcus.length - dcuOffline, dcuOffline, onlineRate, offlineRate: 1 - onlineRate, severity: classifySeverity(onlineRate), readRate: readRateOf(inDcus) }
-  })
+    const lat = c.districts.reduce((s, d) => s + d.center[1], 0) / (c.districts.length || 1)
+    return { name: c.name, dcuTotal: inDcus.length, dcuOnline: inDcus.length - dcuOffline, dcuOffline, onlineRate, offlineRate: 1 - onlineRate, severity: classifySeverity(onlineRate), lpRate: lpRateOf(inDcus), lat }
+  }).sort((a, b) => b.lat - a.lat)
 }
 export const statByCity = (name: string) => cityStats().find((s) => s.name === name)
 
-/** 每台 DCU 電表統計（上線/總數/讀表/讀表率） */
+/**
+ * 每台 DCU 的電表統計 —— 依業主 2026-08-20 意見：
+ *   · 依「白名單」統計（expectedDcuId），不是實際收容 —— 他台連入不算，連入他台的要算
+ *   · 一律排除停用電表（停用只在關係地圖圖面上看得到，不進任何統計）
+ * 連線率＝連線數/白名單總數；LP 讀表率另有其值（LP 每 15 分鐘一筆，會低於連線率）。
+ */
 export function dcuMeterStat(dcuId: string) {
-  const ms = metersOfDcu(dcuId)
-  const online = ms.filter((m) => m.online).length
+  const ms = metersExpectedAll(dcuId).filter((m) => !m.disabled)
   const total = ms.length
-  return { total, online, read: online, readRate: total ? (online / total) * 100 : 0 }
+  const online = ms.filter((m) => m.online).length
+  const connectRate = total ? (online / total) * 100 : 0
+  // LP 讀表率 = 連線率 × 該台的穩定係數（0.88–1.00）；TODO: 上線改讀 API 的 lp_rate
+  const factor = Math.min(1, 0.88 + (hash(dcuId + ':lp') % 130) / 1000)
+  const lpRate = connectRate * factor
+  return { total, online, read: Math.round((lpRate / 100) * total), connectRate, lpRate }
 }
 
 /** 異常 DCU（默認列出）：範圍內「本身斷線」或「收容斷線電表」的 DCU。

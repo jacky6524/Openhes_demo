@@ -6,7 +6,7 @@ import {
   districtStats, statByDistrict, cityStats, statByCity,
   dcuById, meterById, CITIES, dcusInScope, ONLINE_RATE_THRESHOLDS, type Dcu,
 } from '@/data/dcuFleet'
-import { SEVERITY_COLOR, SEVERITY_STROKE, STATE_COLOR, STATE_LABEL, freqColor, MAP_BG } from './warroomConfig'
+import { SEVERITY_COLOR, SEVERITY_STROKE, STATE_COLOR, STATE_LABEL, MAP_BG, CLUSTER_RAMP, CLUSTER_TEXT } from './warroomConfig'
 import { addSelectedMeterLayer, setSelectedMeter } from './selectedMeterLayer'
 import { registerMap, unregisterMap, pushCamera, pullCamera, pushHistory, popHistory, clearHistory } from './mapCamera'
 import { registerMarkerIcons, ICON_DCU_OFFLINE } from './markerIcons'
@@ -38,23 +38,19 @@ function buildPoly(level: WarLevel, city: string) {
   const stats = new Map(districtStats(city).map((s) => [s.name, s]))
   return ({ type: 'FeatureCollection', features: townsGeo(city).features.map((f) => { const name = f.properties.rname as string; const sev = stats.get(name)?.severity ?? 'normal'; return { ...f, properties: { ...f.properties, name, sevColor: SEVERITY_COLOR[sev], sevStroke: SEVERITY_STROKE[sev] } } }) })
 }
-/** DCU 點著色：斷線→紅、停用→灰、啟用正常→頻點色 */
-function dcuColor(d: Dcu) {
-  return d.state === 'offline' ? STATE_COLOR.offline : d.state === 'disabled' ? STATE_COLOR.disabled : freqColor(d.freq)
-}
-/** 範圍內所有 DCU（首頁球 = DCU 群集） */
+/** 範圍內的斷線 DCU —— 依業主意見，故障地圖只標斷線（停用／頻點色點位移除） */
 function buildDcuPoints(level: WarLevel, city: string, district: string) {
-  const arr = dcusInScope(level, city, district)
+  const arr = dcusInScope(level, city, district).filter((d) => d.state === 'offline')
   return {
     type: 'FeatureCollection',
     features: arr.map((d) => ({
       type: 'Feature',
       geometry: { type: 'Point', coordinates: [d.lng, d.lat] },
-      properties: { id: d.id, dist: d.district, serial: d.serial, address: d.address, code: d.code, freq: d.freq, state: d.state, color: dcuColor(d) },
+      properties: { id: d.id, dist: d.district, serial: d.serial, address: d.address, code: d.code, freq: d.freq, state: d.state, color: STATE_COLOR.offline, lastSeen: d.lastSeen },
     })),
   }
 }
-interface DcuInfo { id: string; dist: string; serial: string; address: string; code: string; freq: number; state: keyof typeof STATE_LABEL; color: string; x: number; y: number }
+interface DcuInfo { id: string; dist: string; serial: string; address: string; code: string; freq: number; state: keyof typeof STATE_LABEL; color: string; lastSeen: string; x: number; y: number }
 
 export function DcuFaultMap() {
   const containerRef = useRef<HTMLDivElement | null>(null)
@@ -128,26 +124,24 @@ export function DcuFaultMap() {
         clusterProperties: { off: ['+', ['case', ['==', ['get', 'state'], 'offline'], 1, 0]] },
       })
       const clusterHasFault: any = ['all', ['has', 'point_count'], ['>', ['get', 'off'], 0]]
+      // 依業主意見：群集用漸層／透明度表達斷線量級，不要整片高飽和紅
       map.addLayer({
         id: 'clusters', type: 'circle', source: 'dcus', filter: clusterHasFault,
         paint: {
-          'circle-color': STATE_COLOR.offline,
+          'circle-color': ['interpolate', ['linear'], ['get', 'off'], 1, CLUSTER_RAMP[0], 8, CLUSTER_RAMP[1], 25, CLUSTER_RAMP[2], 60, CLUSTER_RAMP[3]],
           'circle-radius': ['step', ['get', 'off'], 15, 5, 19, 20, 24, 50, 29],
-          'circle-stroke-width': 2.5, 'circle-stroke-color': '#fff', 'circle-opacity': 0.94,
+          // 白色外框依業主意見移除；改以較高的不透明度維持辨識度
+          'circle-stroke-width': 0,
+          'circle-opacity': ['interpolate', ['linear'], ['get', 'off'], 1, 0.88, 25, 0.94, 60, 1],
         },
       })
       map.addLayer({
         id: 'cluster-count', type: 'symbol', source: 'dcus', filter: clusterHasFault,
         layout: { 'text-field': ['to-string', ['get', 'off']], 'text-size': 13, 'text-font': ['Open Sans Bold'] },
-        paint: { 'text-color': '#fff' },
+        paint: { 'text-color': CLUSTER_TEXT, 'text-halo-color': 'rgba(46,32,90,.55)', 'text-halo-width': 1 },
       })
 
-      // 未群集的 DCU：正常/停用畫圓點，斷線改用「方形 ✕」圖示（大而顯眼，最上層）
-      map.addLayer({
-        id: 'dcu-point', type: 'circle', source: 'dcus',
-        filter: ['all', ['!', ['has', 'point_count']], ['!=', ['get', 'state'], 'offline']],
-        paint: { 'circle-color': ['get', 'color'], 'circle-radius': 6.5, 'circle-stroke-width': 2, 'circle-stroke-color': '#fff' },
-      })
+      // 未群集：只畫斷線 DCU 的「方形 ✕」（停用與頻點色點位已依業主意見移除）
       map.addLayer({
         id: 'dcu-point-off', type: 'symbol', source: 'dcus',
         filter: ['all', ['!', ['has', 'point_count']], ['==', ['get', 'state'], 'offline']],
@@ -195,7 +189,7 @@ export function DcuFaultMap() {
         const f = e.features?.[0]; if (!f) return; map.getCanvas().style.cursor = 'pointer'
         const p = f.properties!
         setHover(null)
-        setDcuInfo({ id: p.id, dist: p.dist, serial: p.serial, address: p.address, code: p.code, freq: p.freq, state: p.state, color: p.color, x: e.point.x, y: e.point.y })
+        setDcuInfo({ id: p.id, dist: p.dist, serial: p.serial, address: p.address, code: p.code, freq: p.freq, state: p.state, color: p.color, lastSeen: p.lastSeen, x: e.point.x, y: e.point.y })
       })
       map.on('mouseleave', 'dcu-hit', () => { map.getCanvas().style.cursor = ''; setDcuInfo(null) })
       map.on('click', 'dcu-hit', (e) => { const f = e.features?.[0]; if (!f) return; selectDcu(f.properties!.id) })
@@ -264,9 +258,9 @@ export function DcuFaultMap() {
         <div className="pointer-events-none absolute z-20 w-[180px] rounded-lg bg-surface border border-border shadow-card px-3 py-2" style={{ left: hover.x + 12, top: hover.y + 12 }}>
           <div className="text-[13px] font-semibold text-ink mb-1">{hover.name}</div>
           <Row k="DCU 總數" v={String(hover.total)} />
-          <Row k="斷線 DCU" v={String(hover.off)} danger={hover.off > 0} />
-          {/* 連線率＝區塊塗色（告警層級）的判定基準 */}
-          <Row k="DCU 連線率" v={`${(hover.rate * 100).toFixed(1)}%`} danger={hover.rate < ONLINE_RATE_THRESHOLDS.normal} />
+          {/* 斷線數永遠紅字；連線率只有低於警告門檻(90%)才轉紅 */}
+          <Row k="斷線 DCU" v={String(hover.off)} danger />
+          <Row k="DCU 連線率" v={`${(hover.rate * 100).toFixed(1)}%`} danger={hover.rate < ONLINE_RATE_THRESHOLDS.warn} />
         </div>
       )}
       {dcuInfo && (
@@ -281,6 +275,7 @@ export function DcuFaultMap() {
           <Row k="編號" v={dcuInfo.code} mono />
           <Row k="地址" v={dcuInfo.address} />
           <Row k="頻點" v={`第 ${dcuInfo.freq} 頻點`} />
+          <Row k="最後連線時間" v={dcuInfo.lastSeen} danger />
         </div>
       )}
     </div>
