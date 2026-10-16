@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { X, Pencil, Cog, Trash2, Monitor, Loader2, Ban } from 'lucide-react'
+import { X, Pencil, Cog, Trash2, Monitor, Loader2, Ban, SlidersHorizontal } from 'lucide-react'
 import { dcuInfo } from '@/data/dcuInfo'
 import { dcuById } from '@/data/dcuFleet'
 import type { DcuRow } from '@/data/dcuList'
 import { status as statusTok } from '@/tokens'
 import { EnableToggle } from './EnableToggle'
 import { FeatureNotice } from '@/components/shared/FeatureNotice'
+import { ModePanel } from './ModePanel'
 
 /**
  * DCU裝置設定 modal — opened from 裝置設定 in the DCU資料 drawer。
@@ -16,22 +17,26 @@ import { FeatureNotice } from '@/components/shared/FeatureNotice'
  *   · 線上操作：由空狀態改為三列實際動作（設定功率／重啟 FAN／Ping IP）
  * 2026-10-01 業主意見：
  *   · 線上操作只留 重啟DCU／Ping IP（設定功率、重啟 FAN 移除），開窗預設就在這一頁
- *   · **三個頁籤全部暫不啟用**：頁籤帶禁止符號、仍可點開瀏覽，內容用 FeatureNotice 停用；
+ * 2026-10-16 業主意見：清單的「修改模式」搬進齒輪 → 新增第四個頁籤（只刻畫面）；
+ *   全部頁籤都不開放，所以右上「確定」一律停用（游標顯示禁止符號）。
+ *   · **頁籤全部暫不啟用**：頁籤帶禁止符號、仍可點開瀏覽，內容用 FeatureNotice 停用；
  *     重啟DCU／Ping 只是示意，按鈕不能執行（OnlinePanel 的模擬執行邏輯保留，要恢復把 online 的 inactive 拿掉）
  */
 const TABS = [
   { key: 'modify', label: '修改裝置', icon: Pencil, inactive: true },
   { key: 'remote', label: '遠端設定', icon: Cog, inactive: true },
   { key: 'online', label: '線上操作', icon: Monitor, inactive: true },
+  { key: 'mode', label: '修改模式', icon: SlidersHorizontal, inactive: true },
 ] as const
 type TabKey = (typeof TABS)[number]['key']
 const INACTIVE_NOTICE: Record<TabKey, string> = {
   modify: 'DCU 裝置資料修改暫無功能，畫面僅供瀏覽，無法修改或刪除。',
   remote: 'DCU 遠端設定暫無功能，畫面僅供瀏覽，無法修改。',
   online: '重啟DCU、Ping 僅為功能示意，畫面僅供瀏覽，無法執行。',
+  mode: 'DCU 模式修改暫無功能，畫面僅供瀏覽，無法修改。',
 }
 
-export function DcuSettingsModal({ dcu, onClose }: { dcu: DcuRow; onClose: () => void }) {
+export function DcuSettingsModal({ dcu, onClose, mode = '正常模式' }: { dcu: DcuRow; onClose: () => void; mode?: string }) {
   const [tab, setTab] = useState<TabKey>('online')
 
   useEffect(() => {
@@ -58,7 +63,12 @@ export function DcuSettingsModal({ dcu, onClose }: { dcu: DcuRow; onClose: () =>
             <button onClick={onClose} className="rounded-lg border border-border px-4 py-1.5 text-[13px] text-ink-sub hover:bg-inset">
               取消
             </button>
-            <button onClick={onClose} className="rounded-lg bg-brand px-4 py-1.5 text-[13px] font-medium text-white hover:bg-brand-deep">
+            {/* 所有頁籤都暫不啟用，沒有可儲存的內容 → 確定停用，游標顯示禁止符號 */}
+            <button
+              disabled
+              title="暫不啟用，無法儲存"
+              className="rounded-lg bg-brand px-4 py-1.5 text-[13px] font-medium text-white opacity-40 cursor-not-allowed"
+            >
               確定
             </button>
           </div>
@@ -91,7 +101,7 @@ export function DcuSettingsModal({ dcu, onClose }: { dcu: DcuRow; onClose: () =>
           {TABS.find((t) => t.key === tab)?.inactive ? (
             <div className="flex flex-col gap-4">
               <FeatureNotice text={INACTIVE_NOTICE[tab]}>
-                {tab === 'modify' ? <ModifyPanel dcu={dcu} onDeleted={onClose} /> : tab === 'remote' ? <RemotePanel dcu={dcu} /> : <OnlinePanel dcu={dcu} />}
+                {tab === 'modify' ? <ModifyPanel dcu={dcu} onDeleted={onClose} /> : tab === 'remote' ? <RemotePanel dcu={dcu} /> : tab === 'mode' ? <ModePanel device={dcu.model} current={mode} /> : <OnlinePanel dcu={dcu} />}
               </FeatureNotice>
             </div>
           ) : tab === 'online' ? (

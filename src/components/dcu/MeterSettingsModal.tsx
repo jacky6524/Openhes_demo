@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { X, Pencil, Monitor, Trash2, Loader2, Lock, Ban } from 'lucide-react'
+import { X, Pencil, Monitor, Trash2, Loader2, Lock, Ban, SlidersHorizontal } from 'lucide-react'
 import { EnableToggle } from './EnableToggle'
 import { FeatureNotice } from '@/components/shared/FeatureNotice'
+import { ModePanel } from './ModePanel'
 import { meterInfo } from '@/data/meterInfo'
 import type { DcuMeterRow } from '@/data/dcuMeters'
 import { status as statusTok, brand } from '@/tokens'
@@ -18,18 +19,23 @@ import { status as statusTok, brand } from '@/tokens'
 const TABS = [
   { key: 'edit', label: '修改裝置', icon: Pencil },
   { key: 'online', label: '線上操作', icon: Monitor },
+  { key: 'mode', label: '修改模式', icon: SlidersHorizontal },
 ] as const
 type TabKey = (typeof TABS)[number]['key']
 
 /** 2026-10-01 業主意見：齒輪（裝置設定）內的功能原則上都無法實際使用 → 預設一律暫不啟用 */
 const DEFAULT_INACTIVE_NOTICE = '電表裝置設定暫無功能，畫面僅供瀏覽，無法修改或執行操作。'
 
-export function MeterSettingsModal({ meter, onClose, inactiveNotice = DEFAULT_INACTIVE_NOTICE }: {
+export function MeterSettingsModal({ meter, onClose, inactiveNotice = DEFAULT_INACTIVE_NOTICE, showMode = false, mode = '正常模式' }: {
   meter: DcuMeterRow; onClose: () => void
+  /** 2026-10-16 業主意見：電表清單的「修改模式」搬進齒輪 → 只有電表清單開這個頁籤 */
+  showMode?: boolean; mode?: string
   /** 暫不啟用的說明：仍可瀏覽兩個頁籤，但上方顯示這段說明、所有欄位與按鈕停用。傳空字串＝啟用 */
   inactiveNotice?: string
 }) {
   const [tab, setTab] = useState<TabKey>('edit')
+  const tabs = showMode ? TABS : TABS.filter((t) => t.key !== 'mode')
+  const nextTab = tabs[tabs.findIndex((t) => t.key === tab) + 1]
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
@@ -55,19 +61,22 @@ export function MeterSettingsModal({ meter, onClose, inactiveNotice = DEFAULT_IN
             <button onClick={onClose} className="rounded-lg border border-border px-4 py-1.5 text-[13px] text-ink-sub hover:bg-inset">
               取消
             </button>
-            {/* 修改裝置頁的主要動作是「下一頁」，帶到線上操作；線上操作才是「確定」 */}
+            {/* 主要動作是「下一頁」，帶到下一個頁籤；最後一頁才是「確定」。
+                暫不啟用時沒有可儲存的內容 → 最後一頁的確定停用（游標顯示禁止符號） */}
             <button
-              onClick={() => (tab === 'edit' ? setTab('online') : onClose())}
-              className="rounded-lg bg-brand px-4 py-1.5 text-[13px] font-medium text-white hover:bg-brand-deep"
+              onClick={() => (nextTab ? setTab(nextTab.key) : onClose())}
+              disabled={!nextTab && !!inactiveNotice}
+              title={!nextTab && inactiveNotice ? '暫不啟用，無法儲存' : undefined}
+              className="rounded-lg bg-brand px-4 py-1.5 text-[13px] font-medium text-white hover:bg-brand-deep disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-brand"
             >
-              {tab === 'edit' ? '下一頁' : '確定'}
+              {nextTab ? '下一頁' : '確定'}
             </button>
           </div>
         </div>
 
         {/* tabs */}
         <div className="flex items-center gap-2 px-5 pt-3 shrink-0">
-          {TABS.map((t) => {
+          {tabs.map((t) => {
             const active = tab === t.key
             const Icon = t.icon
             return (
@@ -91,10 +100,10 @@ export function MeterSettingsModal({ meter, onClose, inactiveNotice = DEFAULT_IN
           {inactiveNotice ? (
             <div className="flex flex-col gap-4">
               <FeatureNotice text={inactiveNotice}>
-                {tab === 'edit' ? <EditPanel meter={meter} onDeleted={onClose} /> : <OnlinePanel meter={meter} />}
+                {tab === 'edit' ? <EditPanel meter={meter} onDeleted={onClose} /> : tab === 'mode' ? <ModePanel device={meter.meterNo} current={mode} /> : <OnlinePanel meter={meter} />}
               </FeatureNotice>
             </div>
-          ) : tab === 'edit' ? <EditPanel meter={meter} onDeleted={onClose} /> : <OnlinePanel meter={meter} />}
+          ) : tab === 'edit' ? <EditPanel meter={meter} onDeleted={onClose} /> : tab === 'mode' ? <ModePanel device={meter.meterNo} current={mode} /> : <OnlinePanel meter={meter} />}
         </div>
       </div>
     </div>

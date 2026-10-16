@@ -54,7 +54,7 @@ export function AccountAdmin() {
 
   return (
     <div className="flex h-full min-w-[1080px] flex-col">
-      {/* 頁面標題列（2026-09-23 依新版 Figma：標題與「申請帳號」在卡片外、頁面最上方） */}
+      {/* 頁面標題列（2026-09-23 依新版 Figma：標題與「新增帳號」在卡片外、頁面最上方） */}
       <div className="flex h-14 shrink-0 items-center gap-2 px-6">
         <ShieldCheck size={20} className="text-brand" />
         <h1 className="text-[16px] font-semibold text-ink">帳號管理</h1>
@@ -64,7 +64,7 @@ export function AccountAdmin() {
           onClick={() => setAdding(true)}
           className="rounded-lg bg-ink px-3 py-1.5 text-[14px] font-semibold text-white hover:opacity-90"
         >
-          申請帳號
+          新增帳號
         </button>
       </div>
 

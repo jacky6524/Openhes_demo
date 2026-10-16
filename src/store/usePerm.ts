@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import {
-  SEED_ACCOUNTS, SEED_ACTION_POOL, SEED_FUNC_ITEMS, SEED_ROLES, seedPerms, seedTemplates,
+  SEED_ACCOUNTS, SEED_FUNC_ITEMS, SEED_PAGE_SUPPORTED, SEED_ROLES, seedPerms, seedTemplates,
   type Account, type FuncItem, type PermTemplate, type Role,
 } from '@/data/permissions'
 
@@ -15,8 +15,8 @@ interface PermState {
   roles: Role[]
   /** 角色代碼 → 已開啟的權限鍵（見 permissions.ts 的 permKey） */
   perms: Record<string, string[]>
-  /** 可執行功能的候選池（新增可執行功能會加進來） */
-  actionPool: string[]
+  /** 頁面 → 該頁面實際支援的功能（編輯功能項目時左側的「可選功能」；新增功能會加進指定頁面） */
+  supported: Record<string, string[]>
   /** 角色權限範本 */
   templates: PermTemplate[]
 
@@ -24,7 +24,7 @@ interface PermState {
   updateAccount: (id: string, patch: Partial<Account>) => void
   removeAccount: (id: string) => void
 
-  addAction: (name: string) => void
+  addAction: (page: string, name: string) => void
   setFuncActions: (id: string, actions: string[]) => void
 
   addRole: (r: Role) => void
@@ -46,7 +46,7 @@ export const usePerm = create<PermState>((set, get) => ({
   funcItems: SEED_FUNC_ITEMS,
   roles: SEED_ROLES,
   perms: seedPerms(SEED_ROLES, SEED_FUNC_ITEMS),
-  actionPool: SEED_ACTION_POOL,
+  supported: SEED_PAGE_SUPPORTED,
   templates: seedTemplates(SEED_FUNC_ITEMS),
 
   addAccount: (a) =>
@@ -55,8 +55,11 @@ export const usePerm = create<PermState>((set, get) => ({
     set((s) => ({ accounts: s.accounts.map((a) => (a.id === id ? { ...a, ...patch } : a)) })),
   removeAccount: (id) => set((s) => ({ accounts: s.accounts.filter((a) => a.id !== id) })),
 
-  addAction: (name) =>
-    set((s) => (s.actionPool.includes(name) ? s : { actionPool: [...s.actionPool, name] })),
+  addAction: (page, name) =>
+    set((s) => {
+      const cur = s.supported[page] ?? []
+      return cur.includes(name) ? s : { supported: { ...s.supported, [page]: [...cur, name] } }
+    }),
   setFuncActions: (id, actions) =>
     set((s) => ({ funcItems: s.funcItems.map((f) => (f.id === id ? { ...f, actions, updatedAt: now() } : f)) })),
 

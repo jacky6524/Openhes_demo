@@ -8,13 +8,16 @@ import { EditFunctionModal, NewFunctionModal } from '@/components/perm/FunctionM
 /**
  * 權限管理 · 功能項目管理 (Figma 3901:30807)。
  * 一列一個頁面：頁面名稱（搜尋）／可執行功能（依功能篩選）／最後更新時間（排序）＋ 編輯。
- * 右上「新增功能」新增的是**可執行功能的名稱**（進入候選池），不是新增頁面。
+ * 右上「新增功能」新增的是**可執行功能的名稱**（掛到指定頁面的支援清單），不是新增頁面。
+ * 2026-10-16：編輯改成左右拖拉視窗，且只列該頁面實際支援的功能。
  */
 const ALL = 'ALL'
 
 export function FunctionAdmin() {
   const funcItems = usePerm((s) => s.funcItems)
-  const pool = usePerm((s) => s.actionPool)
+  const supported = usePerm((s) => s.supported)
+  // 篩選選單列出各頁面支援功能的聯集
+  const pool = useMemo(() => [...new Set(Object.values(supported).flat())], [supported])
 
   const [q, setQ] = useState('')
   const [menu, setMenu] = useState<null | 'page' | 'action'>(null)

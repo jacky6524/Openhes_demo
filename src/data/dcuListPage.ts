@@ -26,9 +26,16 @@ function hash(s: string) {
 const pad = (n: number, w: number) => String(n).padStart(w, '0')
 
 export const CHANNELS = ['D', 'E', 'F'] as const
-export const COMM_TYPES = ['LTE', 'RF', 'NB-IoT'] as const
+export const COMM_TYPES = ['4G-R', 'LTE', 'ADSL'] as const
 export const DCU_MODELS = ['SGDC-A16TF', 'SGDC-A14TF', 'SGDC-W61TF'] as const
-export const DCU_MODES = ['正常模式', '省電模式', '維護模式'] as const
+/** 模式選項（2026-10-16 業主指定）與各自的說明；順序依業主給的排列 */
+export const DCU_MODES = ['關閉RF', 'MN優先80%', '正常模式', '讀取1天LP'] as const
+export const DCU_MODE_DESC: Record<(typeof DCU_MODES)[number], string> = {
+  關閉RF: '關閉RF',
+  'MN優先80%': '80%資源MN讀表',
+  正常模式: '預設',
+  讀取1天LP: '只讀取1天的LP值',
+}
 export const DCU_GROUPS = ['北一組', '北二組', '中一組', '南一組'] as const
 
 export interface DcuListRow {
@@ -41,10 +48,11 @@ export interface DcuListRow {
   office: string // 區處及營業區
   whitelistOnline: number // 白名單電表連線數
   channel: (typeof CHANNELS)[number] // 頻道組別
-  comm: (typeof COMM_TYPES)[number] // 通訊方式
+  comm: (typeof COMM_TYPES)[number] // 連線類型（4G-R／LTE／ADSL）
   ip: string
   mode: (typeof DCU_MODES)[number]
   whitelisted: boolean // 白名單（已加入／未加入）
+  whitelistLock: boolean // 白名單鎖定（Y／N）
   model: (typeof DCU_MODELS)[number] // DCU型號（修改模式彈窗顯示）
   group: (typeof DCU_GROUPS)[number] // DCU群組（篩選用）
 }
@@ -71,9 +79,11 @@ export const DCU_LIST_ROWS: DcuListRow[] = Array.from({ length: 100 }, (_, i) =>
     channel: CHANNELS[Math.floor(r() * CHANNELS.length)],
     comm: COMM_TYPES[Math.floor(r() * COMM_TYPES.length)],
     ip: `172.17.${100 + Math.floor(r() * 60)}.${Math.floor(r() * 255)}`,
-    mode: DCU_MODES[r() < 0.86 ? 0 : 1 + Math.floor(r() * 2)],
+    mode: r() < 0.86 ? '正常模式' : (['關閉RF', 'MN優先80%', '讀取1天LP'] as const)[Math.floor(r() * 3)],
     whitelisted: r() > 0.35,
     model: DCU_MODELS[Math.floor(r() * DCU_MODELS.length)],
+    // 獨立雜湊判定，不動上面的亂數序列，其他欄位維持原值
+    whitelistLock: hash(serial + ':lock') % 5 === 0,
     group: DCU_GROUPS[Math.floor(r() * DCU_GROUPS.length)],
   }
 })

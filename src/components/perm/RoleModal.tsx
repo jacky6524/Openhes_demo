@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { usePerm } from '@/store/usePerm'
-import type { Role } from '@/data/permissions'
+import { ALL_CASE_IDS, ALL_REGION_CODES, type Role } from '@/data/permissions'
 import { Field, INPUT, ModalShell } from '@/components/perm/PermUi'
 
 /**
@@ -22,7 +22,8 @@ export function RoleModal({ role, onClose }: { role?: Role; onClose: () => void 
       updateRole(role.code, { name: name.trim() })
     } else {
       if (roles.some((r) => r.code === code.trim().toUpperCase())) return setErr('角色代碼已存在')
-      addRole({ code: code.trim().toUpperCase(), name: name.trim() })
+      // 資料範圍預設全選，建立後在「角色權限管理」右側調整
+      addRole({ code: code.trim().toUpperCase(), name: name.trim(), caseIds: ALL_CASE_IDS, regions: ALL_REGION_CODES })
     }
     onClose()
   }

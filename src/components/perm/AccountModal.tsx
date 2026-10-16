@@ -4,7 +4,7 @@ import type { Account } from '@/data/permissions'
 import { AccountPill, Field, INPUT, ModalShell, Panel, ReadOnly } from '@/components/perm/PermUi'
 
 /**
- * 申請帳號（Figma 3892:27082）—— 帳號／用戶名稱／電子郵件／設定密碼／再次輸入密碼。
+ * 新增帳號（Figma 3892:27082，原稱「申請帳號」，2026-10-16 業主改名）—— 帳號／用戶名稱／電子郵件／設定密碼／再次輸入密碼。
  * demo 不做真正的密碼規則檢核，只擋必填。
  */
 export function NewAccountModal({ onClose }: { onClose: () => void }) {
@@ -33,7 +33,7 @@ export function NewAccountModal({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <ModalShell title="申請帳號" onClose={onClose} onSubmit={submit}>
+    <ModalShell title="新增帳號" onClose={onClose} onSubmit={submit}>
       <div className="flex gap-4">
         <Field label="帳號" required>
           <input className={INPUT} value={f.account} onChange={(e) => set('account', e.target.value)} placeholder="請輸入" />

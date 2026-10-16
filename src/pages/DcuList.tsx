@@ -5,8 +5,8 @@ import {
   DCU_LIST_ROWS, CHANNELS, COMM_TYPES, DCU_MODELS, DCU_GROUPS,
   type DcuListRow,
 } from '@/data/dcuListPage'
-import { Th, StatusPill, SortHead, Pagination, type SortDir } from '@/components/table/tableBits'
-import { DcuModeModal } from '@/components/dcu/DcuModeModal'
+import { Th, StatusPill, SortHead, type SortDir } from '@/components/table/tableBits'
+import { STICKY_TH, useInfiniteRows } from '@/components/shared/Tabs'
 import { TopologyModal } from '@/components/dcu/TopologyModal'
 import { DcuDetailModal } from '@/components/dcu/DcuDetailModal'
 import { DcuSettingsModal } from '@/components/dcu/DcuSettingsModal'
@@ -17,10 +17,15 @@ import { status as statusTok } from '@/tokens'
  * 裝置管理 · DCU清單 (Figma 3677:24866)。
  *
  * 與「裝置列表」不同頁：這一頁沒有地圖，是純清單 + 六個篩選 + 欄位搜尋，
- * 每列動作：詳細資料／裝置設定（拓樸圖暫時取消，見 SHOW_TOPOLOGY），右上可匯出與批次「修改模式」。
+ * 每列動作：詳細資料／裝置設定（拓樸圖暫時取消，見 SHOW_TOPOLOGY），右上可匯出。
+ *
+ * 2026-10-16 業主意見：
+ *   · 「修改模式」搬進齒輪（只刻畫面、不開放），因此不需要勾選欄與批次按鈕；模式選項改為
+ *     關閉RF／MN優先80%／正常模式／讀取1天LP
+ *   · 欄位順序：區處及營業區、狀態、連線狀態、DCU序號、DCU編號、地址、IP、頻道組別、連線類型、模式、白名單鎖定(N/Y)
+ *   · 重要資料（序號、地址）放大；整張表不出現左右捲軸；版面撐滿視窗、下方不留白，改無限捲動
  */
-type SortKey = 'serial' | 'code' | 'enabled' | 'meterCount' | 'address' | 'whitelistOnline'
-  | 'channel' | 'comm' | 'ip' | 'mode' | 'whitelisted'
+type SortKey = 'serial' | 'code' | 'address' | 'ip' | 'channel' | 'comm' | 'mode' | 'whitelistLock'
 
 /** 欄位搜尋的可選欄位（設計稿的「搜尋」下拉） */
 const SEARCH_FIELDS = [
@@ -51,16 +56,9 @@ export function DcuList() {
   const [draft, setDraft] = useState<Query>(EMPTY_QUERY)
   const [applied, setApplied] = useState<Query | null>(null)
   const set = <K extends keyof Query>(k: K, v: Query[K]) => setDraft((d) => ({ ...d, [k]: v }))
-  const search = () => { setApplied(draft); setPage(1); setPicked(new Set()) }
-  const reset = () => { setDraft(EMPTY_QUERY); setApplied(null); setPage(1); setPicked(new Set()) }
 
   const [sortKey, setSortKey] = useState<SortKey | null>(null)
   const [sortDir, setSortDir] = useState<SortDir>('asc')
-  const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(10)
-  const [picked, setPicked] = useState<Set<string>>(new Set())
-
-  const [modeOpen, setModeOpen] = useState(false)
   const [topoSerial, setTopoSerial] = useState<string | null>(null)
   const [detailSerial, setDetailSerial] = useState<string | null>(null)
   const [settingsRow, setSettingsRow] = useState<DcuListRow | null>(null)
@@ -93,62 +91,43 @@ export function DcuList() {
     return rows
   }, [applied, sortKey, sortDir])
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize))
-  const safePage = Math.min(page, totalPages)
-  const pageRows = filtered.slice((safePage - 1) * pageSize, safePage * pageSize)
-  const allChecked = pageRows.length > 0 && pageRows.every((d) => picked.has(d.serial))
+  // 無限捲動：捲到底再多放一批；搜尋／排序變動就回到第一批
+  const { visible, onScroll, reset: resetScroll } = useInfiniteRows(filtered.length)
+  const rows = filtered.slice(0, visible)
 
-  const toggleAll = () =>
-    setPicked((s) => {
-      const n = new Set(s)
-      if (allChecked) pageRows.forEach((d) => n.delete(d.serial))
-      else pageRows.forEach((d) => n.add(d.serial))
-      return n
-    })
-  const toggleOne = (serial: string) =>
-    setPicked((s) => {
-      const n = new Set(s)
-      n.has(serial) ? n.delete(serial) : n.add(serial)
-      return n
-    })
+  const search = () => { setApplied(draft); resetScroll() }
+  const reset = () => { setDraft(EMPTY_QUERY); setApplied(null); resetScroll() }
 
   const toggleSort = (k: SortKey) => {
     if (k === sortKey) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
     else { setSortKey(k); setSortDir('asc') }
-    setPage(1)
+    resetScroll()
   }
   const head = (k: SortKey, label: string) => (
-    <Th><SortHead label={label} active={sortKey === k} dir={sortDir} onClick={() => toggleSort(k)} /></Th>
+    <Th className={STICKY_TH}><SortHead label={label} active={sortKey === k} dir={sortDir} onClick={() => toggleSort(k)} /></Th>
   )
 
-  const pickedRows = DCU_LIST_ROWS.filter((d) => picked.has(d.serial))
-
   return (
-    <div className="flex flex-col gap-3 p-4 min-w-[1280px]">
-      <div className="rounded-card bg-surface border border-border shadow-card">
+    <div className="flex h-full flex-col p-4">
+      <div className="flex min-h-0 flex-1 flex-col rounded-card bg-surface border border-border shadow-card">
         {/* 標題列 */}
-        <div className="flex items-center justify-between gap-4 px-4 py-3 border-b border-border">
+        <div className="flex shrink-0 items-center justify-between gap-4 px-4 py-3 border-b border-border">
           <div className="flex items-center gap-2">
             <FileText size={17} className="text-brand" />
             <h2 className="text-[15px] font-semibold text-ink">DCU清單</h2>
+            {applied && (
+              <span className="ml-2 text-[12px] text-ink-mut tabular-nums">
+                共 {filtered.length} 筆{visible < filtered.length && `（已載入 ${visible}）`}
+              </span>
+            )}
           </div>
-          <div className="flex items-center gap-2">
-            <button className="rounded-lg border border-border px-4 py-1.5 text-[13px] text-ink-sub hover:bg-inset">
-              匯出
-            </button>
-            <button
-              onClick={() => setModeOpen(true)}
-              disabled={!picked.size}
-              title={picked.size ? `修改 ${picked.size} 台的模式` : '請先勾選要修改的 DCU'}
-              className="rounded-lg bg-brand px-4 py-1.5 text-[13px] font-medium text-white hover:bg-brand-deep disabled:opacity-40"
-            >
-              修改模式
-            </button>
-          </div>
+          <button className="rounded-lg border border-border px-4 py-1.5 text-[13px] text-ink-sub hover:bg-inset">
+            匯出
+          </button>
         </div>
 
         {/* 搜尋列（最上層）—— 2026-09-23 業主意見：搜尋在上、篩選在下 */}
-        <div className="flex flex-wrap items-end gap-3 px-4 pt-3 pb-2">
+        <div className="flex shrink-0 flex-wrap items-end gap-3 px-4 pt-3 pb-2">
           <FilterField label="搜尋">
             <div className="flex items-center gap-2">
               <select
@@ -173,7 +152,7 @@ export function DcuList() {
         </div>
 
         {/* 篩選列 —— 與搜尋欄一起在按下「搜尋」時套用 */}
-        <div className="flex flex-wrap items-end gap-3 px-4 pt-1 pb-3 border-b border-border">
+        <div className="flex shrink-0 flex-wrap items-end gap-3 px-4 pt-1 pb-3 border-b border-border">
           <FilterField label="營業區">
             <input
               value={draft.office}
@@ -193,7 +172,7 @@ export function DcuList() {
               options={[{ value: 'enabled', label: '啟用' }, { value: 'disabled', label: '停用' }]}
             />
           </FilterField>
-          <FilterField label="通訊方式">
+          <FilterField label="連線類型">
             <Select value={draft.comm} onChange={(v) => set('comm', v)} options={COMM_TYPES} />
           </FilterField>
           <FilterField label="頻道組別">
@@ -204,64 +183,63 @@ export function DcuList() {
           </FilterField>
         </div>
 
-        {/* 表格 */}
-        <div className="overflow-x-auto px-4">
-          <table className="w-full min-w-[1560px] text-[13px] border-collapse">
+        {/* 表格 —— 自己是捲動容器、表頭 sticky；欄寬隨視窗伸縮，不出現左右捲軸 */}
+        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-4" onScroll={onScroll}>
+          <table className="w-full table-fixed text-[13px] border-collapse">
+            <colgroup>
+              <col style={{ width: '9%' }} />{/* 區處及營業區 */}
+              <col style={{ width: '5%' }} />{/* 狀態 */}
+              <col style={{ width: '6%' }} />{/* 連線狀態 */}
+              <col style={{ width: '11%' }} />{/* DCU序號 */}
+              <col style={{ width: '11%' }} />{/* DCU編號 */}
+              <col style={{ width: '20%' }} />{/* 地址 */}
+              <col style={{ width: '9%' }} />{/* IP */}
+              <col style={{ width: '6%' }} />{/* 頻道組別 */}
+              <col style={{ width: '7%' }} />{/* 連線類型 */}
+              <col style={{ width: '9%' }} />{/* 模式 */}
+              <col style={{ width: '7%' }} />{/* 白名單鎖定 */}
+              <col style={{ width: SHOW_TOPOLOGY ? '96px' : '64px' }} />{/* 動作 */}
+            </colgroup>
             <thead>
-              <tr className="text-ink-sub border-b border-border">
-                <Th className="w-[42px]">
-                  <input type="checkbox" checked={allChecked} onChange={toggleAll} className="accent-brand h-3.5 w-3.5 align-middle" />
-                </Th>
+              <tr className="text-ink-sub">
+                <Th className={`${STICKY_TH} !whitespace-normal`}>區處及營業區</Th>
+                <Th className={STICKY_TH}>狀態</Th>
+                <Th className={STICKY_TH}>連線狀態</Th>
                 {head('serial', 'DCU序號')}
                 {head('code', 'DCU編號')}
-                <Th>連線狀態</Th>
-                {head('enabled', '狀態')}
-                {head('meterCount', '電表數')}
                 {head('address', '地址')}
-                <Th>區處及營業區</Th>
-                {head('whitelistOnline', '白名單電表連線數')}
-                {head('channel', '頻道組別')}
-                {head('comm', '通訊方式')}
                 {head('ip', 'IP')}
+                {head('channel', '頻道組別')}
+                {head('comm', '連線類型')}
                 {head('mode', '模式')}
-                {head('whitelisted', '白名單')}
-                <Th className={SHOW_TOPOLOGY ? 'w-[104px]' : 'w-[76px]'} />
+                {head('whitelistLock', '白名單鎖定')}
+                <Th className={STICKY_TH} />
               </tr>
             </thead>
             <tbody>
-              {pageRows.map((d) => (
-                <tr key={d.serial} className="border-b border-divider hover:bg-inset/40">
-                  <td className="px-3 py-2.5">
-                    <input
-                      type="checkbox"
-                      checked={picked.has(d.serial)}
-                      onChange={() => toggleOne(d.serial)}
-                      className="accent-brand h-3.5 w-3.5 align-middle"
-                    />
+              {rows.map((d) => (
+                <tr key={d.serial} className="border-b border-divider align-middle hover:bg-inset/40">
+                  <td className="px-3 py-3 text-ink-sub">{d.office}</td>
+                  <td className="px-3 py-3" style={{ color: d.enabled ? undefined : statusTok.danger.fg }}>
+                    <span className={d.enabled ? 'text-ink-sub' : ''}>{d.enabled ? '啟用' : '停用'}</span>
                   </td>
-                  <td className="px-3 py-2.5 font-mono text-ink">{d.serial}</td>
-                  <td className="px-3 py-2.5 font-mono text-ink-sub">{d.code}</td>
-                  <td className="px-3 py-2.5"><StatusPill status={d.online ? 'online' : 'offline'} /></td>
-                  <td className="px-3 py-2.5 text-ink-sub">{d.enabled ? '啟用' : '停用'}</td>
-                  <td className="px-3 py-2.5 tabular-nums text-ink">{d.meterCount}</td>
-                  <td className="px-3 py-2.5 text-ink-sub whitespace-nowrap">{d.address}</td>
-                  <td className="px-3 py-2.5 text-ink-sub whitespace-nowrap">{d.office}</td>
-                  <td className="px-3 py-2.5 tabular-nums text-ink">{d.whitelistOnline}</td>
-                  <td className="px-3 py-2.5 text-ink-sub">{d.channel}</td>
-                  <td className="px-3 py-2.5 text-ink-sub">{d.comm}</td>
-                  <td className="px-3 py-2.5 font-mono text-ink-sub whitespace-nowrap">{d.ip}</td>
-                  <td className="px-3 py-2.5 text-ink-sub whitespace-nowrap">{d.mode}</td>
-                  {/* 未加入白名單是需要處理的狀態，標紅 */}
-                  <td className="px-3 py-2.5 whitespace-nowrap" style={{ color: d.whitelisted ? undefined : statusTok.danger.fg }}>
-                    {d.whitelisted ? '已加入' : '未加入'}
-                  </td>
-                  <td className="px-3 py-2.5">
+                  <td className="px-3 py-3"><StatusPill status={d.online ? 'online' : 'offline'} /></td>
+                  <td className="px-3 py-3 font-mono text-[14px] font-semibold text-ink break-all">{d.serial}</td>
+                  <td className="px-3 py-3 font-mono text-[14px] font-semibold text-ink break-all">{d.code}</td>
+                  <td className="px-3 py-3 text-[14px] leading-snug text-ink">{d.address}</td>
+                  <td className="px-3 py-3 font-mono text-ink-sub break-all">{d.ip}</td>
+                  <td className="px-3 py-3 text-ink-sub">{d.channel}</td>
+                  <td className="px-3 py-3 text-ink-sub">{d.comm}</td>
+                  {/* 非預設模式用主色標出，一眼看得出哪些 DCU 被調整過 */}
+                  <td className={`px-3 py-3 ${d.mode === '正常模式' ? 'text-ink-sub' : 'font-medium text-brand'}`}>{d.mode}</td>
+                  <td className="px-3 py-3 text-ink-sub">{d.whitelistLock ? 'Y' : 'N'}</td>
+                  <td className="px-2 py-3">
                     <div className="flex items-center justify-end gap-2">
                       <button onClick={() => setDetailSerial(d.serial)} title="詳細資料" className="text-ink-mut hover:text-brand">
                         <ClipboardList size={15} />
                       </button>
-                      {/* 2026-10-01 業主意見：齒輪一律標「暫不啟用」（重啟DCU／Ping 也只是示意） */}
-                      <button onClick={() => setSettingsRow(d)} title="裝置設定（暫不啟用，僅供瀏覽）" className="relative inline-grid place-items-center text-ink-mut hover:text-brand">
+                      {/* 2026-10-01 業主意見：齒輪一律標「暫不啟用」（重啟DCU／Ping 也只是示意）；2026-10-16 起「修改模式」也在齒輪內 */}
+                      <button onClick={() => setSettingsRow(d)} title="裝置設定（含修改模式；暫不啟用，僅供瀏覽）" className="relative inline-grid place-items-center text-ink-mut hover:text-brand">
                         <Settings size={15} />
                         <Ban size={10} strokeWidth={2.6} className="absolute -bottom-1 -right-1.5 rounded-full bg-surface text-ink-mut" />
                       </button>
@@ -275,38 +253,27 @@ export function DcuList() {
                   </td>
                 </tr>
               ))}
-              {pageRows.length === 0 && (
+              {rows.length === 0 && (
                 <tr>
-                  <td colSpan={15} className="px-3 py-10 text-center text-ink-mut">
+                  <td colSpan={12} className="px-3 py-10 text-center text-ink-mut">
                     {applied ? '查無符合條件的 DCU' : <NotSearched />}
                   </td>
                 </tr>
               )}
             </tbody>
           </table>
+          {applied && rows.length > 0 && (
+            <div className="py-3 text-center text-[12px] text-ink-mut">
+              {visible < filtered.length ? '向下捲動載入更多…' : `已顯示全部 ${filtered.length} 筆`}
+            </div>
+          )}
         </div>
-
-        {applied && (
-          <div className="px-4 pb-3">
-            <Pagination
-              page={safePage}
-              totalPages={totalPages}
-              onPage={setPage}
-              pageSize={pageSize}
-              onPageSize={(s) => { setPageSize(s); setPage(1) }}
-              totalCount={filtered.length}
-            />
-          </div>
-        )}
       </div>
 
-      {modeOpen && (
-        <DcuModeModal models={pickedRows.map((d) => d.model)} count={pickedRows.length} onClose={() => setModeOpen(false)} />
-      )}
       {topoSerial && <TopologyModal serial={topoSerial} onClose={() => setTopoSerial(null)} />}
       {detailSerial && <DcuDetailModal model={detailSerial} onClose={() => setDetailSerial(null)} />}
       {settingsRow && (
-        <DcuSettingsModal dcu={toDcuRow(settingsRow)} onClose={() => setSettingsRow(null)} />
+        <DcuSettingsModal dcu={toDcuRow(settingsRow)} mode={settingsRow.mode} onClose={() => setSettingsRow(null)} />
       )}
     </div>
   )

@@ -14,14 +14,35 @@ export interface Role {
   /** 角色代碼（唯一鍵） */
   code: string
   name: string
+  /**
+   * 資料範圍（2026-10-16 業主意見：角色要能依案別、區處區分權限，預設全選、可調成部分）。
+   * 存的是「可看的」案別 id（見 useCaseFilter 的 CASES）與區處代碼（見下方 REGIONS）。
+   */
+  caseIds: string[]
+  regions: string[]
 }
 
+/** 台電區處（代碼＝電號前兩碼；與 dcuFleet 的縣市→區處對照一致） */
+export const REGIONS: { code: string; name: string }[] = [
+  { code: '01', name: '北市區處' }, { code: '02', name: '北縣區處' }, { code: '03', name: '基隆區處' },
+  { code: '04', name: '宜蘭區處' }, { code: '05', name: '中市區處' }, { code: '06', name: '桃園區處' },
+  { code: '07', name: '新桃區處' }, { code: '08', name: '高市區處' }, { code: '09', name: '苗栗區處' },
+  { code: '10', name: '彰化區處' }, { code: '11', name: '南投區處' }, { code: '12', name: '雲林區處' },
+  { code: '13', name: '嘉義區處' }, { code: '14', name: '台南區處' }, { code: '15', name: '屏東區處' },
+  { code: '16', name: '花蓮區處' }, { code: '17', name: '台東區處' }, { code: '18', name: '澎湖區處' },
+  { code: '19', name: '金門區處' }, { code: '20', name: '馬祖區處' },
+]
+export const ALL_CASE_IDS = ['case1', 'case2', 'case3', 'case4', 'case5']
+export const ALL_REGION_CODES = REGIONS.map((r) => r.code)
+
+const ALL_SCOPE = { caseIds: ALL_CASE_IDS, regions: ALL_REGION_CODES }
+
 export const SEED_ROLES: Role[] = [
-  { code: 'SYSADMIN', name: '系統管理者' },
-  { code: 'AMIADMIN', name: 'AMI管理者' },
-  { code: 'ENGMGR', name: '工程管理人員' },
-  { code: 'ENGINEER', name: '工程師' },
-  { code: 'AUDITOR', name: '稽核人員' },
+  { code: 'SYSADMIN', name: '系統管理者', ...ALL_SCOPE },
+  { code: 'AMIADMIN', name: 'AMI管理者', ...ALL_SCOPE },
+  { code: 'ENGMGR', name: '工程管理人員', caseIds: ['case2', 'case3'], regions: ALL_REGION_CODES },
+  { code: 'ENGINEER', name: '工程師', caseIds: ['case2'], regions: ['01', '02', '03', '06', '07'] },
+  { code: 'AUDITOR', name: '稽核人員', ...ALL_SCOPE },
 ]
 
 /* ------------------------------------------------------------ 帳號 */
@@ -104,17 +125,34 @@ export interface FuncItem {
  */
 export const SEED_ACTION_POOL = [
   '新增', '編輯', '刪除', '匯出', '下載', '清單下載', '清單匯出', '修改模式', '轉移電表', '遠端設定', '線上操作',
-  '新增角色', '編輯角色', '申請帳號', '編輯帳號', '刪除帳號',
+  '新增角色', '編輯角色', '新增帳號', '編輯帳號', '刪除帳號',
 ]
+
+/**
+ * 各頁面**實際支援**的功能（2026-10-16 業主意見：編輯功能項目時，預設只列該頁面做得出來的功能，
+ * 不要把整個系統的功能全列出來）。左右拖拉的「可選功能」就是從這裡來；
+ * 新增功能時也是加到指定頁面的這份清單。
+ */
+export const SEED_PAGE_SUPPORTED: Record<string, string[]> = {
+  系統總覽: ['匯出'],
+  DCU總覽: ['匯出', '編輯'],
+  裝置列表: ['新增', '編輯', '刪除', '匯出'],
+  DCU清單: ['清單下載', '清單匯出', '修改模式', '遠端設定', '線上操作'],
+  電表清單: ['清單下載', '清單匯出', '修改模式', '線上操作'],
+  DCU詳細資料: ['轉移電表', '遠端設定', '線上操作'],
+  帳號管理: ['新增帳號', '編輯帳號', '刪除帳號'],
+  功能項目管理: ['新增', '編輯'],
+  角色權限管理: ['新增角色', '編輯角色'],
+}
 
 /**
  * 頁面 → 開放的功能（頁面名稱與側欄一致）。
  * 2026-09-23 依 Figma 3901:35929 / 3901:39601 更新：帳號管理、DCU清單、電表清單、
- * 角色權限管理四組的功能名稱改成設計稿上的寫法（申請帳號／清單下載／清單匯出／編輯角色…）。
+ * 角色權限管理四組的功能名稱改成設計稿上的寫法（新增帳號／清單下載／清單匯出／編輯角色…；2026-10-16 起「申請帳號」改稱「新增帳號」）。
  */
 export const SEED_FUNC_ITEMS: FuncItem[] = [
   { id: 'FN-009', page: '角色權限管理', actions: ['新增角色', '編輯角色'] },
-  { id: 'FN-007', page: '帳號管理', actions: ['申請帳號', '刪除帳號', '編輯帳號'] },
+  { id: 'FN-007', page: '帳號管理', actions: ['新增帳號', '刪除帳號', '編輯帳號'] },
   { id: 'FN-004', page: 'DCU清單', actions: ['清單下載', '修改模式', '清單匯出'] },
   { id: 'FN-005', page: '電表清單', actions: ['清單下載', '修改模式', '清單匯出'] },
   { id: 'FN-001', page: '系統總覽', actions: ['匯出'] },
