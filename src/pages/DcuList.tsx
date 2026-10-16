@@ -227,7 +227,7 @@ export function DcuList() {
                   <td className="px-3 py-3 font-mono text-[14px] font-semibold text-ink break-all">{d.serial}</td>
                   <td className="px-3 py-3 font-mono text-[14px] font-semibold text-ink break-all">{d.code}</td>
                   <td className="px-3 py-3 text-[14px] leading-snug text-ink">{d.address}</td>
-                  <td className="px-3 py-3 font-mono text-ink-sub break-all">{d.ip}</td>
+                  <td className="px-3 py-3 font-mono text-ink-sub whitespace-nowrap">{d.ip}</td>
                   <td className="px-3 py-3 text-ink-sub">{d.channel}</td>
                   <td className="px-3 py-3 text-ink-sub">{d.comm}</td>
                   {/* 非預設模式用主色標出，一眼看得出哪些 DCU 被調整過 */}

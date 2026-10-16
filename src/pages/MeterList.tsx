@@ -244,7 +244,7 @@ export function MeterList() {
                   </td>
                   {/* 沒有掛 DCU 的電表明寫「無」，不留空白（避免被當成資料缺漏） */}
                   <td className="px-3 py-3 font-mono text-ink-sub break-all">{m.dcuSerial || <span className="font-sans text-ink-mut">無</span>}</td>
-                  <td className="px-3 py-3 font-mono text-ink-sub break-all">{m.ip}</td>
+                  <td className="px-3 py-3 font-mono text-ink-sub whitespace-nowrap">{m.ip}</td>
                   <td className="px-3 py-3 tabular-nums" style={{ color: stale(m.lastLpSameDay) }}><StampLines value={hm(m.lastLp)} /></td>
                   <td className="px-3 py-3 tabular-nums" style={{ color: stale(m.lastMnSameDay) }}><StampLines value={hm(m.lastMn)} /></td>
                   <td className="px-2 py-3">

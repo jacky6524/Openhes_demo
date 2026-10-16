@@ -3,13 +3,14 @@ import { Search } from 'lucide-react'
 import { METER_LIST_ROWS, DCU_LIST_ROWS, type MeterListRow, type DcuListRow } from '@/data/dcuListPage'
 import { Th, Pagination } from '@/components/table/tableBits'
 import { status as statusTok } from '@/tokens'
+import { PageTitle } from '@/components/shared/PageTitle'
 
 /**
  * 裝置管理 · 即裝即查（Figma 3966:26671／3966:28710／3966:29593，同一頁依「搜尋模式」變三種版面）：
  *   表號         → 電表註冊／最後連線回報／最後LP時間
  *   FAN IMEI/MAC → 電表註冊／事件資料（表格）
  *   DCU序號      → 電表註冊（DCU 版欄位）／最後連線回報／網管資料（表格）
- * 另有 3971:30755、3977:31162… 等同名畫面，經確認是註冊衝突、裝置群集，各自獨立成頁。
+ * 另有 3971:30755、3977:31162… 等同名畫面，經確認是註冊衝突、裝置群組，各自獨立成頁。
  * 資料全為 mock，取自電表清單／DCU清單；清單沒有的欄位用序號 hash 補。
  */
 const MODES = [
@@ -40,6 +41,7 @@ export function InstantQuery() {
 
   return (
     <div className="flex flex-col gap-3 p-4 min-w-[1280px]">
+      <PageTitle title="即裝即查" />
       <div className="flex flex-wrap items-end gap-2">
         <label className="flex flex-col gap-1">
           <span className="px-2 text-[12px] text-ink-sub">搜尋模式</span>

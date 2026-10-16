@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { Search } from 'lucide-react'
 import { Th, Pagination } from '@/components/table/tableBits'
 import { PillTabs } from '@/components/shared/PillTabs'
+import { PageTitle } from '@/components/shared/PageTitle'
 
 /**
  * 裝置管理 · 裝置紀錄（Figma 4182:31479 DCU 修改紀錄／4188:27161 Meter 修改紀錄）。
@@ -156,6 +157,7 @@ export function DeviceRecord() {
 
   return (
     <div className="flex flex-col gap-3 p-4 min-w-[1280px]">
+      <PageTitle title="裝置紀錄" />
       <PillTabs tabs={TABS} value={kind} onChange={switchKind} />
 
       {/* 篩選（搜尋列＋條件列） */}

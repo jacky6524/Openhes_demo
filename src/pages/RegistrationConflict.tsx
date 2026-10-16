@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Pagination } from '@/components/table/tableBits'
 import { status as statusTok } from '@/tokens'
+import { PageTitle } from '@/components/shared/PageTitle'
 
 /**
  * 裝置管理 · 註冊衝突（Figma 3971:30755，內層 Content 3971:30761）。
@@ -53,6 +54,7 @@ export function RegistrationConflict() {
 
   return (
     <div className="flex flex-col gap-3 p-4 min-w-[1280px]">
+      <PageTitle title="註冊衝突" />
       <div className="rounded-card bg-surface border border-border shadow-card pb-3">
         <div className="max-h-[calc(100vh-250px)] overflow-auto">
           <table className="w-full text-[13px] border-collapse">

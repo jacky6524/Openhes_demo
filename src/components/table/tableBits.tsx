@@ -30,8 +30,9 @@ export function StampLines({ value }: { value: string }) {
   if (i < 0) return <>{value}</>
   return (
     <span className="inline-flex flex-col leading-tight">
-      <span>{value.slice(0, i)}</span>
-      <span className="text-[0.92em] opacity-80">{value.slice(i + 1)}</span>
+      {/* 日期不在「-」處斷開（業主 2026-10-16：年與月日要同一行） */}
+      <span className="whitespace-nowrap">{value.slice(0, i)}</span>
+      <span className="whitespace-nowrap text-[0.92em] opacity-80">{value.slice(i + 1)}</span>
     </span>
   )
 }

@@ -12,13 +12,15 @@ export const INPUT =
   'w-full rounded-lg border border-border bg-inset/40 px-3 py-2 text-[13.5px] text-ink placeholder:text-ink-mut focus:outline-none focus:border-brand focus:bg-surface'
 
 export function ModalShell({
-  title, onClose, onSubmit, submitLabel = '送出', width = 520, children,
+  title, onClose, onSubmit, submitLabel = '送出', width = 520, hideCancel = false, children,
 }: {
   title: string
   onClose: () => void
   onSubmit?: () => void
   submitLabel?: string
   width?: number
+  /** 純檢視／管理用彈窗（如範本管理）不顯示右上「取消」 */
+  hideCancel?: boolean
   children: ReactNode
 }) {
   useEffect(() => {
@@ -40,9 +42,11 @@ export function ModalShell({
           </button>
           <h2 className="text-[15.5px] font-semibold text-ink">{title}</h2>
           <span className="flex-1" />
-          <button onClick={onClose} className="rounded-lg border border-border px-4 py-1.5 text-[13px] text-ink-sub hover:bg-inset">
-            取消
-          </button>
+          {!hideCancel && (
+            <button onClick={onClose} className="rounded-lg border border-border px-4 py-1.5 text-[13px] text-ink-sub hover:bg-inset">
+              取消
+            </button>
+          )}
           {onSubmit && (
             <button onClick={onSubmit} className="rounded-lg bg-brand px-4 py-1.5 text-[13px] font-medium text-white hover:bg-brand-deep">
               {submitLabel}

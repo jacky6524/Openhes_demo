@@ -6,12 +6,13 @@ import { CASES, caseFullName } from '@/store/useCaseFilter'
 import { CheckBox, ConfirmDialog } from '@/components/perm/PermUi'
 import { RoleModal } from '@/components/perm/RoleModal'
 import { TemplateModal } from '@/components/perm/TemplateModal'
+import { TemplateManageModal } from '@/components/perm/TemplateManageModal'
 
 /**
  * 權限管理 · 角色權限管理 —— 2026-09-23 依新版 Figma（3901:35929 / 3901:39601）改版。
  *   左：角色列表（搜尋、新增角色；hover 才出現編輯／刪除）
  *   右：
- *     ① 角色權限範本 —— 選範本後「套用範本」一次勾好；目前勾選可「儲存為範本」
+ *     ① 角色權限範本 —— 選範本後「套用範本」一次勾好；目前勾選可「儲存為範本」；「範本管理」可刪除範本
  *     ② 一個頁面一個區塊：標題列有全選框（部分勾選顯示「－」）與「已勾選 x / 共 y 項權限」，
  *        下方平鋪該頁面的可執行功能勾選框。原本的權限關鍵字搜尋、全部展開／收合已移除。
  *   改動（含套用範本）後右上「取消／儲存變更」才會亮起（設計稿註記：預設為 Disabled）。
@@ -42,6 +43,7 @@ export function RolePermission() {
 
   const [adding, setAdding] = useState(false)
   const [savingTemplate, setSavingTemplate] = useState(false)
+  const [managingTemplates, setManagingTemplates] = useState(false)
   const [editingRole, setEditingRole] = useState<Role | null>(null)
   const [removingRole, setRemovingRole] = useState<Role | null>(null)
 
@@ -187,6 +189,7 @@ export function RolePermission() {
             <div className="flex shrink-0 flex-col gap-4 rounded-xl bg-brand-soft p-4">
               <div className="flex items-center justify-between">
                 <h3 className="text-[16px] font-semibold text-ink">角色權限範本</h3>
+                <div className="flex items-center gap-1">
                 <button
                   onClick={() => setSavingTemplate(true)}
                   disabled={!role}
@@ -195,6 +198,14 @@ export function RolePermission() {
                 >
                   儲存為範本
                 </button>
+                <button
+                  onClick={() => setManagingTemplates(true)}
+                  title="檢視、刪除已存的範本"
+                  className="rounded-lg px-3 py-1.5 text-[14px] font-semibold text-ink-sub hover:bg-surface/70"
+                >
+                  範本管理
+                </button>
+                </div>
               </div>
               <div className="flex items-end gap-3">
                 <select
@@ -295,6 +306,12 @@ export function RolePermission() {
       {adding && <RoleModal onClose={() => setAdding(false)} />}
       {savingTemplate && (
         <TemplateModal perms={draft} onSaved={setTemplateId} onClose={() => setSavingTemplate(false)} />
+      )}
+      {managingTemplates && (
+        <TemplateManageModal
+          onRemoved={(id) => setTemplateId((cur) => (cur === id ? '' : cur))}
+          onClose={() => setManagingTemplates(false)}
+        />
       )}
       {editingRole && <RoleModal role={editingRole} onClose={() => setEditingRole(null)} />}
       {removingRole && (

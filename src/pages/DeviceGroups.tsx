@@ -4,13 +4,14 @@ import { DCU_LIST_ROWS, METER_LIST_ROWS } from '@/data/dcuListPage'
 import { Th, Pagination } from '@/components/table/tableBits'
 import { PillTabs } from '@/components/shared/PillTabs'
 import { SimpleModal, BTN_GHOST, BTN_PRIMARY } from '@/components/shared/SimpleModal'
+import { PageTitle } from '@/components/shared/PageTitle'
 
 /**
- * 裝置管理 · 裝置群集（Figma 3977:31162 DCU 頁籤／4304:31797 電表頁籤、勾選狀態）。
+ * 裝置管理 · 裝置群組（Figma 3977:31162 DCU 頁籤／4304:31797 電表頁籤、勾選狀態）。
  *
  * 左：群組列表（搜尋、建立群組、刪除群組）；右：該群組的裝置表（勾選、分頁）。
  * 勾選後右上換成「取消／刪除裝置」。DCU 與電表各自一組群組。
- * 「建立群組／群組資訊／新增裝置」三個彈窗的設計稿（3808:24018、4304:32893、4204:29352、3812:33344）
+ * 「新增裝置」依業主參考圖（2026-10-16）；「建立群組／群組資訊」彈窗的設計稿（3808:24018、4304:32893）
  * 還沒讀，目前是依功能推測的簡易版，欄位待比對。資料全為 mock。
  */
 type Kind = 'dcu' | 'meter'
@@ -86,6 +87,7 @@ export function DeviceGroups() {
 
   return (
     <div className="flex flex-col gap-3 p-4 min-w-[1280px]">
+      <PageTitle title="裝置群組" />
       <PillTabs tabs={TABS} value={kind} onChange={switchKind} />
 
       <div className="flex gap-3 items-stretch">
@@ -211,9 +213,10 @@ export function DeviceGroups() {
       {modal === 'add' && group && (
         <AddDevicesModal
           kind={kind}
-          candidates={CATALOG[kind].filter((d) => !group.ids.includes(d.id))}
+          catalog={CATALOG[kind]}
+          existing={group.ids}
           onClose={() => setModal(null)}
-          onAdd={(ids) => { patchGroups((gs) => gs.map((g) => (g.name === group.name ? { ...g, ids: [...g.ids, ...ids] } : g))); setModal(null) }}
+          onAdd={(ids) => patchGroups((gs) => gs.map((g) => (g.name === group.name ? { ...g, ids: [...g.ids, ...ids] } : g)))}
         />
       )}
     </div>
@@ -254,44 +257,55 @@ function CreateGroupModal({ taken, onClose, onCreate }: { taken: string[]; onClo
   )
 }
 
-function AddDevicesModal({ kind, candidates, onClose, onAdd }: { kind: Kind; candidates: Device[]; onClose: () => void; onAdd: (ids: string[]) => void }) {
+/**
+ * 新增裝置（2026-10-16 業主參考圖）：一個多行輸入框，DCU 填序號、電表填表號，可一筆或貼上多筆（換行分隔）。
+ * 送出時加入找得到且尚未在群組內的；查無的留在輸入框並提示，已在群組內的直接略過。
+ */
+function AddDevicesModal({ kind, catalog, existing, onClose, onAdd }: {
+  kind: Kind
+  catalog: Device[]
+  existing: string[]
+  onClose: () => void
+  onAdd: (ids: string[]) => void
+}) {
   const [text, setText] = useState('')
-  const [pick, setPick] = useState<Set<string>>(new Set())
-  const t = text.trim().toLowerCase()
-  const rows = candidates.filter((d) => !t || d.id.toLowerCase().includes(t) || d.code.toLowerCase().includes(t)).slice(0, 50)
-  const [c1, c2] = COLS[kind]
+  const [missing, setMissing] = useState<string[]>([])
+  const idLabel = kind === 'dcu' ? '序號' : '表號'
+
+  const submit = () => {
+    const entries = [...new Set(text.split(/\r?\n/).map((s) => s.trim()).filter(Boolean))]
+    const known = new Set(catalog.map((d) => d.id))
+    const have = new Set(existing)
+    const found = entries.filter((id) => known.has(id) && !have.has(id))
+    const notFound = entries.filter((id) => !known.has(id))
+    if (found.length) onAdd(found)
+    if (notFound.length) { setText(notFound.join('\n')); setMissing(notFound) }
+    else onClose()
+  }
+
   return (
     <SimpleModal
       title="新增裝置"
-      width={640}
+      width={480}
       onClose={onClose}
       actions={<>
         <button onClick={onClose} className={BTN_GHOST}>取消</button>
-        <button disabled={pick.size === 0} onClick={() => onAdd([...pick])} className={BTN_PRIMARY}>加入 {pick.size || ''}</button>
+        <button disabled={!text.trim()} onClick={submit} className={BTN_PRIMARY}>送出</button>
       </>}
     >
-      <input value={text} onChange={(e) => setText(e.target.value)} placeholder={`搜尋${c1}或${c2}（最多列出 50 筆）`} className={`${BOX} mb-3 w-full`} />
-      <div className="max-h-[360px] overflow-auto rounded-lg border border-divider">
-        <table className="w-full text-[13px] border-collapse">
-          <thead>
-            <tr className="text-ink-sub">
-              <Th className="sticky top-0 w-[44px] bg-inset" />
-              <Th className="sticky top-0 bg-inset">{c1}</Th>
-              <Th className="sticky top-0 bg-inset">{c2}</Th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((d) => (
-              <tr key={d.id} className="border-b border-divider hover:bg-inset/40">
-                <td className="px-3 py-2"><Check checked={pick.has(d.id)} onChange={() => setPick((s) => { const n = new Set(s); n.has(d.id) ? n.delete(d.id) : n.add(d.id); return n })} /></td>
-                <td className="px-3 py-2 font-mono text-ink">{d.id}</td>
-                <td className="px-3 py-2 font-mono text-ink">{d.code}</td>
-              </tr>
-            ))}
-            {rows.length === 0 && <tr><td colSpan={3} className="px-3 py-8 text-center text-ink-mut">沒有可加入的裝置</td></tr>}
-          </tbody>
-        </table>
-      </div>
+      <textarea
+        autoFocus
+        value={text}
+        onChange={(e) => { setText(e.target.value); setMissing([]) }}
+        placeholder={`請輸入${idLabel}`}
+        rows={7}
+        className="w-full resize-y rounded-md border border-transparent bg-inset px-3 py-2 font-mono text-[13px] text-ink placeholder:font-sans placeholder:text-ink-mut focus:border-brand focus:outline-none"
+      />
+      {missing.length > 0 ? (
+        <p className="mt-1 px-2 text-[12px] text-danger">查無以下{idLabel}，請確認後再送出（其餘已加入）：{missing.join('、')}</p>
+      ) : (
+        <p className="mt-1 px-2 text-[12px] text-ink-mut">可輸入一筆或貼上多筆，以換行分隔。</p>
+      )}
     </SimpleModal>
   )
 }

@@ -33,6 +33,7 @@ interface PermState {
   setPerms: (code: string, keys: string[]) => void
   /** 儲存為範本；同名範本直接覆寫。回傳範本 id */
   saveTemplate: (name: string, perms: string[]) => string
+  removeTemplate: (id: string) => void
 }
 
 const now = () => {
@@ -83,4 +84,5 @@ export const usePerm = create<PermState>((set, get) => ({
     }))
     return id
   },
+  removeTemplate: (id) => set((s) => ({ templates: s.templates.filter((t) => t.id !== id) })),
 }))
