@@ -14,6 +14,13 @@ import type { Dcu, Health } from '@/types'
  * 每個欄位皆可排序，預設以 LP 狀態由差→好排序。LP狀態 uses the SAME LP-rate
  * thresholds as the map, so drawer ↔ map stay consistent；DCU序號 click-to-copy。
  * 標題以「返回」鍵回到 L2 縣市層（不再使用叉叉）。
+ *
+ * 外觀對齊前端 `.dcu-detail-panel`：
+ *   header  min-height 54 / padding 10 16；返回鍵 30×30 圓角 6，hover #f5eff1/#b83257
+ *           標題 18px、附註 13px #9a8c91
+ *   head    sticky、bg #f4f1f2、11px/700 #6f6267
+ *   row     min-height 39、下框 #eee6e8、欄間左框 #f0e9eb、12px #3a3336
+ *   pill    radius 6 / 11px/800 / 前置 6px 圓點（正常 / 注意 / 警告）
  */
 
 type SortKey = 'serial' | 'status' | 'meterTotal' | 'connected' | 'read' | 'connectRate' | 'lpRate'
@@ -75,30 +82,36 @@ export function MeterDrawer() {
   }
 
   return (
-    <div className="absolute inset-0 z-20 flex flex-col bg-surface rounded-card border border-border shadow-drawer animate-[slideIn_240ms_ease]">
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-        <div className="flex items-center gap-2.5 min-w-0">
-          <button
-            onClick={backToL2}
-            className="inline-flex items-center gap-1 shrink-0 text-[12px] text-ink-sub hover:text-brand px-2 py-1.5 rounded-lg hover:bg-inset"
-            title="返回縣市層"
-          >
-            <ArrowLeft size={15} />返回
-          </button>
-          <div className="min-w-0">
-            <div className="text-[11px] text-ink-mut">DCU 詳情</div>
-            {/* 地名字體樣式比照「全台」層級字樣（hover 說明依會議決議移除） */}
-            <div className="inline-flex items-center gap-1.5">
-              <span className="text-[15px] font-semibold text-ink">{region.name}</span>
-              <span className="text-[12px] text-ink-sub">共 {rows.length} 台</span>
-            </div>
-          </div>
+    <div className="absolute inset-0 z-20 flex flex-col overflow-hidden rounded-card border-[0.5px] border-card-border bg-surface shadow-drawer animate-[slideIn_240ms_ease]">
+      {/* .dcu-detail-header */}
+      <header className="flex min-h-[54px] shrink-0 items-center justify-start gap-2.5 px-4 py-2.5">
+        <button
+          onClick={backToL2}
+          className="inline-flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-md transition-colors hover:bg-[#F5EFF1] hover:text-[#B83257]"
+          style={{ color: '#7B7074' }}
+          title="返回縣市層"
+          aria-label="返回上一層"
+        >
+          <ArrowLeft size={20} strokeWidth={1.8} />
+        </button>
+        <div className="flex min-w-0 items-baseline gap-2.5">
+          <strong className="whitespace-nowrap text-[18px] font-extrabold leading-[1.2] text-ink">DCU詳情</strong>
+          <span className="whitespace-nowrap text-[13px]" style={{ color: '#9A8C91' }}>
+            {region.name}
+          </span>
+          <span className="whitespace-nowrap text-[13px]" style={{ color: '#9A8C91' }}>
+            共{rows.length}台
+          </span>
         </div>
-      </div>
+      </header>
 
-      <div className="flex-1 overflow-auto">
-        <table className="w-full text-[12px]">
-          <thead className="sticky top-0 bg-inset/80 backdrop-blur text-ink-sub z-10">
+      {/* .dcu-detail-table */}
+      <div
+        className="min-h-0 flex-1 overflow-auto border-t"
+        style={{ borderColor: '#EADFE1', overscrollBehavior: 'contain' }}
+      >
+        <table className="w-full min-w-[540px] border-collapse text-[12px]" style={{ color: '#3A3336' }}>
+          <thead className="sticky top-0 z-10" style={{ background: '#F4F1F2', color: '#6F6267' }}>
             <tr>
               <SortHead label="DCU 序號" col="serial" {...{ sortKey, sortDir, toggleSort }} align="left" />
               <SortHead label="LP 狀態" col="status" {...{ sortKey, sortDir, toggleSort }} align="left" />
@@ -111,11 +124,15 @@ export function MeterDrawer() {
           </thead>
           <tbody>
             {rows.map((d) => (
-              <tr key={d.serial} className="border-t border-divider hover:bg-inset/40">
-                <td className="px-3 py-2">
+              <tr
+                key={d.serial}
+                className="border-b hover:bg-inset/60 [&>td+td]:border-l [&>td]:h-[39px] [&>td]:px-1.5"
+                style={{ borderColor: '#EEE6E8' }}
+              >
+                <td className="!px-3">
                   <button
                     onClick={() => copySerial(d.serial)}
-                    className="group inline-flex items-center gap-1.5 font-mono text-ink hover:text-brand"
+                    className="group inline-flex items-center gap-1.5 font-mono hover:text-[#B83257]"
                     title="點選複製 DCU 序號"
                   >
                     {d.serial}
@@ -126,15 +143,18 @@ export function MeterDrawer() {
                     )}
                   </button>
                 </td>
-                <td className="px-3 py-2">
+                <td>
                   <StatusPill status={lpStatus(d.lpRate)} />
                 </td>
-                <td className="px-3 py-2 text-right tabular-nums text-ink">{fmtInt(d.meterTotal)}</td>
-                <td className="px-3 py-2 text-right tabular-nums text-ink">{fmtInt(d.connected)}</td>
-                <td className="px-3 py-2 text-right tabular-nums text-ink">{fmtInt(d.read)}</td>
-                <td className="px-3 py-2 text-right tabular-nums text-ink">{d.connectRate.toFixed(1)}%</td>
-                <td className="px-3 py-2 text-right tabular-nums" style={{ color: rateColor(d.lpRate) }}>
-                  {d.lpRate.toFixed(1)}%
+                <td className="text-right tabular-nums">{fmtInt(d.meterTotal)}</td>
+                <td className="text-right tabular-nums">{fmtInt(d.connected)}</td>
+                <td className="text-right tabular-nums">{fmtInt(d.read)}</td>
+                <td className="text-right tabular-nums">{d.connectRate.toFixed(2)}%</td>
+                <td
+                  className={`text-right tabular-nums ${d.lpRate < THRESHOLDS.lp.warn ? 'font-bold' : ''}`}
+                  style={{ color: rateColor(d.lpRate) }}
+                >
+                  {d.lpRate.toFixed(2)}%
                 </td>
               </tr>
             ))}
@@ -145,9 +165,9 @@ export function MeterDrawer() {
   )
 }
 
-/** LP讀表率 turns red below the 告警 cut, matching the KPI-card rule (<95%) */
+/** LP讀表率 turns red below the 告警 cut — 前端 `.is-danger-text` */
 function rateColor(lpRate: number) {
-  return lpRate < THRESHOLDS.lp.warn ? healthTok.alert.accent : '#2A2125'
+  return lpRate < THRESHOLDS.lp.warn ? healthTok.alert.accent : '#3A3336'
 }
 
 function SortHead({
@@ -167,11 +187,16 @@ function SortHead({
 }) {
   const active = sortKey === col
   return (
-    <th className={`font-medium px-3 py-2 ${align === 'right' ? 'text-right' : 'text-left'}`}>
+    <th
+      className={`h-[42px] border-l px-1.5 text-[11px] font-bold first:border-l-0 first:px-3 ${
+        align === 'right' ? 'text-right' : 'text-left'
+      }`}
+      style={{ borderColor: '#F0E9EB' }}
+    >
       <button
         onClick={() => toggleSort(col)}
-        className={`inline-flex items-center gap-1 hover:text-ink ${align === 'right' ? 'flex-row-reverse' : ''} ${
-          active ? 'text-ink font-semibold' : ''
+        className={`inline-flex items-center gap-1 hover:text-[#B83257] ${align === 'right' ? 'flex-row-reverse' : ''} ${
+          active ? 'text-[#B83257]' : ''
         }`}
       >
         {label}
@@ -189,16 +214,21 @@ function SortHead({
   )
 }
 
+/** .status-pill — 前端 DCU 明細用的狀態標籤（底色 + 前置圓點，文字一律深灰） */
 function StatusPill({ status }: { status: Health }) {
-  const map: Record<Health, { bg: string; fg: string; label: string }> = {
-    good: { bg: '#E0F4ED', fg: healthTok.good.accent, label: '正常' },
-    warning: { bg: '#FCEFD6', fg: healthTok.warning.accent, label: '注意' },
-    alert: { bg: '#FBE0DF', fg: healthTok.alert.accent, label: '告警' },
+  const map: Record<Health, { bg: string; dot: string; label: string }> = {
+    good: { bg: '#E6FAF4', dot: '#22D3A1', label: '正常' },
+    warning: { bg: '#FFF7DF', dot: '#FFD230', label: '注意' },
+    alert: { bg: '#FFEBED', dot: healthTok.alert.accent, label: '警告' },
   }
   const s = map[status]
   return (
-    <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold" style={{ background: s.bg, color: s.fg }}>
+    <i
+      className="inline-flex min-w-[34px] items-center justify-center gap-1.5 rounded-md px-2 py-[5px] text-[11px] font-extrabold not-italic leading-none"
+      style={{ background: s.bg, color: '#303039' }}
+    >
+      <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: s.dot }} />
       {s.label}
-    </span>
+    </i>
   )
 }

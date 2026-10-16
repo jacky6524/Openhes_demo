@@ -5,42 +5,48 @@ import { useDashboard } from '@/store/useDashboard'
 import { getById } from '@/data/mockData'
 import { countyGeoById } from '@/data/geo/geo'
 import { metricHealth } from '@/lib/health'
-import { health as healthTokens, noMeter, HEALTH_FILL_OPACITY } from '@/tokens'
+import { health as healthTokens, noMeter, mapOutline, HEALTH_FILL_OPACITY } from '@/tokens'
 import type { RegionNode } from '@/types'
 
 /**
  * 離島 inset 小圖 — 金門 / 馬祖(連江) 因真實位置遠離台灣本島，畫在主圖會被投影
  * 裁掉或拉遠本島，故以獨立小圖固定呈現於地圖左側。著色 / 無電表斜線紋 / 可否下鑽
  * 邏輯與主圖一致。
+ *
+ * 外觀對齊前端 `.island-shortcuts button`：整格滿版、min-height 62、
+ * border #eee5e7 / radius 7 / bg #fff，hover 轉 #c78a9b 外框並微微上浮；
+ * 島形以 72×38 的 viewport 呈現，描邊 #a77752（同主圖 regions-outline）。
  */
 export function IslandInset({
   countyNodes,
   regionId,
   label,
-  size = 58,
+  width = 72,
+  height = 38,
 }: {
   countyNodes: RegionNode[]
   regionId: string
   label: string
-  size?: number
+  width?: number
+  height?: number
 }) {
   const drillInto = useDashboard((s) => s.drillInto)
 
   const { fc, projection } = useMemo(() => {
     const collection = countyGeoById(countyNodes, regionId)
     const proj = geoMercator()
-    const pad = 6
+    const pad = 3
     if (collection.features.length) {
       proj.fitExtent(
         [
           [pad, pad],
-          [size - pad, size - pad],
+          [width - pad, height - pad],
         ],
         collection as any,
       )
     }
     return { fc: collection, projection: proj }
-  }, [countyNodes, regionId, size])
+  }, [countyNodes, regionId, width, height])
 
   const region = getById(regionId)
   const noData = !region || region.metrics.meterTotal === 0
@@ -48,7 +54,7 @@ export function IslandInset({
   const tone = healthTokens[h]
   const patternId = `noMeterHatch-inset-${regionId}`
   const fill = noData ? `url(#${patternId})` : tone.fill
-  const stroke = noData ? noMeter.stroke : tone.stroke
+
   const clickable = !!region && !noData
 
   return (
@@ -61,15 +67,18 @@ export function IslandInset({
       onClick={() => clickable && drillInto(region!)}
       title={region ? region.name : label}
       className={[
-        'group flex flex-col items-center gap-0.5 rounded-md px-2 py-1 transition-colors',
-        clickable ? 'cursor-pointer hover:bg-inset' : 'cursor-not-allowed',
+        'group box-border grid w-full min-h-[62px] place-items-center gap-[3px] rounded-[7px] border bg-surface px-1 py-[5px] text-[12px] transition-[border-color,box-shadow,transform] duration-150',
+        clickable
+          ? 'cursor-pointer hover:-translate-y-px hover:border-[#C78A9B] hover:shadow-[0_5px_12px_rgba(89,55,66,.16)]'
+          : 'cursor-not-allowed',
       ].join(' ')}
+      style={{ borderColor: '#EEE5E7', color: '#4F4549' }}
     >
       <ComposableMap
         projection={projection as any}
-        width={size}
-        height={size}
-        style={{ width: size, height: size, pointerEvents: 'none' }}
+        width={width}
+        height={height}
+        style={{ width, height, pointerEvents: 'none', overflow: 'visible', display: 'block' }}
       >
         <defs>
           <pattern id={patternId} width={6} height={6} patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
@@ -87,22 +96,22 @@ export function IslandInset({
                   default: {
                     fill,
                     fillOpacity: noData ? 1 : HEALTH_FILL_OPACITY,
-                    stroke,
-                    strokeWidth: 0.6,
+                    stroke: mapOutline,
+                    strokeWidth: 0.45,
                     outline: 'none',
                   },
                   hover: {
                     fill,
-                    fillOpacity: noData ? 1 : 1,
-                    stroke,
-                    strokeWidth: 0.6,
+                    fillOpacity: 1,
+                    stroke: mapOutline,
+                    strokeWidth: 0.45,
                     outline: 'none',
                   },
                   pressed: {
                     fill,
                     fillOpacity: 1,
-                    stroke,
-                    strokeWidth: 0.6,
+                    stroke: mapOutline,
+                    strokeWidth: 0.45,
                     outline: 'none',
                   },
                 }}
@@ -111,11 +120,7 @@ export function IslandInset({
           }
         </Geographies>
       </ComposableMap>
-      <span
-        className={`text-[10px] leading-none whitespace-nowrap ${clickable ? 'text-ink-sub group-hover:text-brand' : 'text-ink-sub'}`}
-      >
-        {label}
-      </span>
+      <span className="w-full whitespace-nowrap text-center text-[12px] leading-none">{label}</span>
     </button>
   )
 }

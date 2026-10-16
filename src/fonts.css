@@ -1,0 +1,59 @@
+/**
+ * 字體 — 與前端正式包一致（Rubik + Noto Sans TC，見 openhes-front/nuxt.config.ts
+ * 的 googleFonts 設定與 shared/assets/font.css）。
+ *
+ * 前端是走 Google Fonts CDN；prototype 的交付包必須離線雙擊即開，所以字檔隨包
+ * 附帶。這裡刻意「不」直接 import @fontsource 的 CSS 進入點 —— 那些進入點同時
+ * 宣告 woff 與 woff2，Vite 會把兩種格式都打包（多出約 4 MB 沒人會用到的 woff）。
+ * 手寫 @font-face 只保留 woff2（Chrome / Edge 皆支援，見交接文件的瀏覽器需求）。
+ *
+ * 只載 400 / 500 / 700 三個字重：CSS 字重比對會挑「最接近的既有字面」，
+ * 所以 600 與 800 會落到真正的 700，不會出現合成假粗體。
+ * 中文字檔每個字重約 1 MB，加字重前先想清楚交付包大小。
+ */
+
+/* ---- Rubik（拉丁字母與數字，約 19 KB / 字重） ---- */
+@font-face {
+  font-family: 'Rubik';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('@fontsource/rubik/files/rubik-latin-400-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Rubik';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('@fontsource/rubik/files/rubik-latin-500-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Rubik';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('@fontsource/rubik/files/rubik-latin-700-normal.woff2') format('woff2');
+}
+
+/* ---- Noto Sans TC（繁體中文，約 1 MB / 字重） ---- */
+@font-face {
+  font-family: 'Noto Sans TC';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('@fontsource/noto-sans-tc/files/noto-sans-tc-chinese-traditional-400-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Noto Sans TC';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('@fontsource/noto-sans-tc/files/noto-sans-tc-chinese-traditional-500-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Noto Sans TC';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('@fontsource/noto-sans-tc/files/noto-sans-tc-chinese-traditional-700-normal.woff2') format('woff2');
+}

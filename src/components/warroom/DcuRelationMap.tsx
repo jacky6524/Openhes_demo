@@ -1,23 +1,27 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { Info, X } from 'lucide-react'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import {
   dcuById, meterById as allMeterById, metersInScope, dcusInScope,
-  MISASSIGNED_METERS, misassignedInCity, CITIES, cityStats, districtStats,
+  MISASSIGNED_METERS, misassignedInCity, CITIES, cityStats, districtStats, FREQ_COUNT, districtsOf, areaMeterCount, metersExpectedAll, metersOfDcu,
   type Dcu, type DcuState, type Meter,
 } from '@/data/dcuFleet'
 import { dcuStat, misassignedIn, misassignedOut, type MisDir } from '@/data/dcuMetrics'
 import { dcuInfo } from '@/data/dcuInfo'
-import { townsGeo, countiesGeoAll } from '@/data/geo/geo'
+import { townsGeo, countiesGeoAll, INSET_COUNTY_IDS } from '@/data/geo/geo'
+import { IslandShortcuts } from './IslandShortcuts'
 import { addSelectedMeterLayer, setSelectedMeter } from './selectedMeterLayer'
-import { registerMap, unregisterMap, pushCamera, pullCamera, pushHistory, popHistory, clearHistory } from './mapCamera'
+import { registerMap, unregisterMap, pushCamera, pullCamera, pushHistory, popHistory, clearHistory, setCameraScope, scopeKey } from './mapCamera'
+import { aggregateByArea, separateAggPoints, toAggFeatureCollection, MIN_SEP_DEG, citySepDeg } from './aggPoints'
 import {
-  GROUP_COLORS, DIM_OPACITY, STATE_COLOR, STATE_LABEL, freqColor, pinColor, MIS_COLOR,
-  SEVERITY_COLOR, SEVERITY_STROKE, MAP_BG,
+  GROUP_COLORS, DIM_OPACITY, STATE_COLOR, STATE_LABEL, freqColor, pinColor, MIS_COLOR, STATUS,
+  SEVERITY_COLOR, SEVERITY_STROKE, MAP_BG, FREQ_COLORS, OUTSIDE_FILL, OUTSIDE_OPACITY,
+  AREA_HOVER_LINE, AREA_HOVER_LINE_WIDTH, AREA_HOVER_FILL_OPACITY,
 } from './warroomConfig'
-import { registerMarkerIcons, ICON_MIS_METER, ICON_DCU_OFFLINE } from './markerIcons'
+import { registerMarkerIcons, ICON_MIS_METER, ICON_METER_DISABLED, ICON_MIS_AGG, dcuIconName } from './markerIcons'
 import { buildLabelPoints } from './polyLabels'
-import { useWarroom } from '@/store/useWarroom'
+import { useWarroom, MAX_WATCH } from '@/store/useWarroom'
 
 const STYLE = 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json'
 /** 與故障地圖同一組取景常數，兩個頁籤切換時畫面才不會跳 */
@@ -33,9 +37,11 @@ function bboxOf(geom: any): [number, number, number, number] {
 interface DcuRef { dcu: Dcu; cross: boolean; color: string; wrap: HTMLDivElement; shape: HTMLDivElement; marker: maplibregl.Marker }
 
 /**
- * DCU DOM marker builder —— 與故障地圖同一套編碼（依業主意見「故障 DCU 一律方形畫叉」）：
- *   斷線 → 較大的紅色圓角方塊 + 白色 ✕（形狀本身就是編碼，不只靠顏色）
- *   正常／停用 → 圓形，底色＝頻點色（停用＝灰）
+ * DCU DOM marker builder —— 2026-08-27 依業主意見**一律方形**，底色＝頻點色：
+ *   方形（頻點色）      ＝ 正常
+ *   方形（灰）          ＝ 停用
+ *   方形 + 白 ✕（紅）   ＝ 斷線（與正常同尺寸）
+ * 形狀規則因此變得乾淨：**方形＝DCU、圓形＝電表**，不必靠顏色分辨裝置類型。
  */
 function dcuElement(state: DcuState, cross: boolean, color: string) {
   const off = state === 'offline'
@@ -45,13 +51,14 @@ function dcuElement(state: DcuState, cross: boolean, color: string) {
   const shape = document.createElement('div')
   shape.className = 'war-shape'
   Object.assign(shape.style, {
-    width: off ? '26px' : '20px', height: off ? '26px' : '20px',
-    borderRadius: off ? '6px' : '9999px',
+    // 2026-09-03 依業主意見：斷線 DCU 與正常 DCU 同尺寸（原本斷線大一號）
+    width: '20px', height: '20px',
+    borderRadius: '5px',
     background: off ? STATE_COLOR.offline : state === 'disabled' ? STATE_COLOR.disabled : color,
     border: '3px solid #FFFFFF', display: 'grid', placeItems: 'center',
     boxShadow: '0 1px 4px rgba(42,33,37,.35)', outline: cross ? '2px dashed #2A2125' : 'none', outlineOffset: '2px',
   })
-  if (off) shape.innerHTML = '<span style="color:#fff;font-size:15px;font-weight:800;line-height:1;text-shadow:0 1px 2px rgba(0,0,0,.45)">✕</span>'
+  if (off) shape.innerHTML = '<span style="color:#fff;font-size:12px;font-weight:800;line-height:1;text-shadow:0 1px 2px rgba(0,0,0,.45)">✕</span>'
   wrap.appendChild(shape)
   if (cross) {
     const tag = document.createElement('span')
@@ -74,6 +81,24 @@ interface DcuPop {
 }
 
 /**
+ * 區塊 hover 卡（L1 縣市／L2 行政區）。欄位格式比照斷線地圖的區塊 hover，
+ * 內容換成這張圖關心的：DCU 數、電表數、歸屬錯誤電表數（歸屬錯誤率 2026-09-29 移除）。
+ * 電表數與歸屬錯誤都依「電表所在地」、排除停用，兩者同口徑。
+ */
+interface PolyPop { name: string; dcu: number; meters: number; mis: number; x: number; y: number }
+function makePolyPop(name: string, x: number, y: number): PolyPop {
+  const st = useWarroom.getState()
+  const city = st.level === 'taiwan' ? name : st.city
+  const district = st.level === 'taiwan' ? '' : name
+  return {
+    name, x, y,
+    dcu: dcusInScope('city', city, district).length,
+    meters: areaMeterCount(city, district),
+    mis: misassignedInCity(city, district).length,
+  }
+}
+
+/**
  * 電表點：默認略弱化（比聚焦小一號）讓 DCU 標記仍是主角，但顏色保持可辨識；
  * 聚焦某台 DCU 時該台放大提亮、無關者淡出。
  */
@@ -92,6 +117,13 @@ const DOM_MARKER_MAX = 60
 const EMPTY_FC_DATA = { type: 'FeatureCollection' as const, features: [] as any[] }
 
 /**
+ * 歸屬錯誤六邊形在 L2 的縮放 —— 圖示本身 40px，L2 縮成約 25px，
+ * 市區的小行政區才不會整塊被蓋掉（2026-09-29 業主意見「L2 幾乎看不到區域」）。
+ */
+const MIS_AGG_L2_SCALE = 0.62
+const MIS_AGG_L2_PX = 40 * MIS_AGG_L2_SCALE
+
+/**
  * 電表圖層的最小縮放層級 —— 低於此縮放不載入任何電表點。
  * 百萬級電表時電表只該存在於街道級視野內；這裡先把「縮放層級決定圖層存在與否」這條路鋪好。
  */
@@ -102,6 +134,19 @@ const DEVICE_LAYERS = ['rel-meter-hit', 'rel-dcu-hit', 'rel-mis-dot'] as const
 
 /** L3 的行政區界線（街道底圖上只留淡淡一條當方位參照，不搶裝置的視覺） */
 const BOUNDARY_LINE = '#A2989C'
+/**
+ * L3 的縣市（L2）外框 —— 2026-09-29 業主意見：L3 看不出縣市邊界在哪。
+ * 行政區界線刻意畫得很淡，縣市外框跟著一樣淡就分不出來；改成深灰實線＋白色外暈，
+ * 灰色遮罩上、街道底圖上都看得清楚。
+ */
+const COUNTY_LINE = '#4A5565'
+/** 目前縣市的外框（不含其他縣市） */
+function countyOutline(city: string) {
+  return {
+    type: 'FeatureCollection' as const,
+    features: countiesGeoAll().features.filter((f: any) => f.properties.name === city),
+  }
+}
 
 /** 電表 → GeoJSON（純函式，供地圖事件在元件外重建） */
 function meterFeatures(meters: Meter[]) {
@@ -114,7 +159,8 @@ function meterFeatures(meters: Meter[]) {
         type: 'Feature' as const,
         geometry: { type: 'Point' as const, coordinates: [m.lng, m.lat] },
         properties: {
-          id: m.id, dcuId: m.dcuId, freq: d?.freq ?? 0, on: m.online ? 1 : 0,
+          id: m.id, dcuId: m.dcuId, expected: m.expectedDcuId, freq: d?.freq ?? 0,
+          on: m.online ? 1 : 0, dis: m.disabled ? 1 : 0,
           color: d ? freqColor(d.freq) : STATE_COLOR.disabled,
           mis: mis ? 1 : 0,
         },
@@ -129,6 +175,8 @@ export function DcuRelationMap() {
   const readyRef = useRef(false)
   const dcuRefs = useRef<Map<string, DcuRef>>(new Map())
   const polyFC = useRef<any>(null)
+  const navRef = useRef<maplibregl.NavigationControl | null>(null)
+  const navOnRef = useRef(false)
 
   const level = useWarroom((s) => s.level)
   const city = useWarroom((s) => s.city)
@@ -139,6 +187,8 @@ export function DcuRelationMap() {
   const resetNonce = useWarroom((s) => s.resetNonce)
   const refitNonce = useWarroom((s) => s.refitNonce)
   const selectDcu = useWarroom((s) => s.selectDcu)
+  const unwatchDcu = useWarroom((s) => s.unwatchDcu)
+  const clearWatch = useWarroom((s) => s.clearWatch)
   const selectMeter = useWarroom((s) => s.selectMeter)
   const setCity = useWarroom((s) => s.setCity)
   const setDistrict = useWarroom((s) => s.setDistrict)
@@ -159,16 +209,48 @@ export function DcuRelationMap() {
   const listHoverDcu = useWarroom((s) => s.hoverDcuId)
   const [misPop, setMisPop] = useState<MisPop | null>(null)
   const [dcuPop, setDcuPop] = useState<DcuPop | null>(null)
-  const [polyHover, setPolyHover] = useState<{ name: string; mis: number; x: number; y: number } | null>(null)
+  const [polyHover, setPolyHover] = useState<PolyPop | null>(null)
   // 電表圖層是否存在（由縮放層級決定）
   const [metersOn, setMetersOn] = useState(false)
-  /** 「只顯示歸屬錯誤」圖層：獨立呈現歸屬錯誤電表與其相關 DCU（取代原本的歸屬範圍圈） */
-  const [misOnly, setMisOnly] = useState(false)
-  const misOnlyRef = useRef(misOnly)
-  misOnlyRef.current = misOnly
+  /**
+   * 歸屬錯誤圖層 —— **疊加式**，不是模式切換。
+   * 打開＝把範圍內「全部」歸屬錯誤電表與它們的兩條歸屬線畫出來（關閉時只畫選取 DCU 的）。
+   * 2026-08-27 依業主意見改的：原本它會把 DCU 換成只剩相關那幾台、並強制關掉一般電表，
+   * 等於和「正常電表」互斥；現在兩個開關各自獨立，要一起開也可以。
+   */
+  const [showMis, setShowMis] = useState(true)
+  /**
+   * 一般（正常）電表圖層的**手動**開關 —— 業主要求可以自己關掉。
+   * 唯一的另一個條件是縮放門檻 `METER_MIN_ZOOM`（AND）：關掉一定不畫，
+   * 打開仍要放大到街道級才會載入（百萬級電表的守門條件不能拿掉）。
+   * 不再受歸屬錯誤圖層影響 —— 兩層可以同時存在。
+   */
+  /** 歸屬錯誤的兩條指向線 —— 線多的時候很吵，獨立成一個開關（2026-09-03 業主意見） */
+  const [showMisLines, setShowMisLines] = useState(true)
+  /**
+   * 「全部電表」—— 2026-09-23 依業主意見（效能）**預設關閉**。
+   * 平常只畫「觀察中 DCU」的電表（見 watchMeters）；要看整區分佈才手動打開，
+   * 打開後仍受 z13 門檻與 bbox 裁切保護。
+   */
+  const [showMeters, setShowMeters] = useState(false)
+  const showMetersRef = useRef(showMeters)
+  showMetersRef.current = showMeters
+  /**
+   * 隱藏中的頻點 —— 業主要在關係地圖上直接分辨／篩選不同頻點的電表。
+   * 頻點是 DCU 的屬性，電表跟著實際收容 DCU 的頻點走；隱藏某頻點＝該頻點的 DCU 與電表一起收掉。
+   * 歸屬錯誤圖層不受影響（它本來就是要跨頻點對照的）。
+   */
+  const [hiddenFreqs, setHiddenFreqs] = useState<number[]>([])
+  const hiddenFreqsRef = useRef(hiddenFreqs)
+  hiddenFreqsRef.current = hiddenFreqs
 
   // 範圍內「所有」電表 → GPU 圖層，依所屬 DCU 頻點著色
-  const districtMeters = useMemo(() => (pickMode ? [] : metersInScope(level, city, district)), [level, city, district, pickMode])
+  /**
+   * L3 的電表 —— 2026-09-03 依業主意見改為載入**整個縣市**，
+   * 選取區域以外的鄰區也要看得到電表與 DCU（跨區歸屬才讀得出來）；
+   * 視覺重心由「區域外塗灰」維持，資料量仍受 z13 門檻與 bbox 裁切保護。
+   */
+  const districtMeters = useMemo(() => (pickMode ? [] : metersInScope(level, city, '')), [level, city, pickMode])
 
   /** 範圍內的歸屬錯誤電表（不受縮放門檻限制，數量本來就少） */
   const scopeMis = useMemo(
@@ -177,12 +259,36 @@ export function DcuRelationMap() {
   )
 
   /**
+   * 觀察中 DCU 的電表 —— 白名單應屬它的（含跑去別台的「連入他台」）＋實際收容於它的
+   * （含別台跑進來的「他台連入」）。最多 3 台 × 約 80 具，數量小，所以**不受 z13 門檻限制**。
+   */
+  const watchMeters = useMemo(() => {
+    if (pickMode) return [] as Meter[]
+    const byId = new Map<string, Meter>()
+    pinnedDcuIds.forEach((id) => {
+      metersExpectedAll(id).forEach((m) => byId.set(m.id, m))
+      metersOfDcu(id).forEach((m) => byId.set(m.id, m))
+    })
+    return [...byId.values()]
+  }, [pinnedDcuIds, pickMode])
+
+  /** 觀察中 DCU 相關的歸屬錯誤電表（兩個方向） */
+  const watchMis = useMemo(() => {
+    const byId = new Map<string, Meter>()
+    pinnedDcuIds.forEach((id) => {
+      misassignedIn(id).forEach((m) => byId.set(m.id, m))
+      misassignedOut(id).forEach((m) => byId.set(m.id, m))
+    })
+    return [...byId.values()]
+  }, [pinnedDcuIds])
+
+  /**
    * 範圍內「全部」DCU —— 狀態一律 正常／斷線／停用。
    * 跨區：DCU 在範圍外、但其收容電表跨界落在範圍內 → 補進來並標示跨區。
    */
   const dcus = useMemo(() => {
     if (pickMode) return [] as { dcu: Dcu; cross: boolean }[]
-    const scoped = dcusInScope(level, city, district)
+    const scoped = dcusInScope(level, city, '')
     const seen = new Set(scoped.map((d) => d.id))
     const out = scoped.map((dcu) => ({ dcu, cross: false }))
     districtMeters.forEach((m) => {
@@ -191,22 +297,51 @@ export function DcuRelationMap() {
       if (d) { seen.add(d.id); out.push({ dcu: d, cross: true }) }
     })
     return out
-  }, [level, city, district, districtMeters, pickMode])
+  }, [level, city, districtMeters, pickMode])
 
-  /** 只顯示歸屬錯誤時，地圖上要出現的 DCU＝這些電表的「實際收容」與「白名單應屬」兩端 */
+/**
+   * 歸屬錯誤電表的兩端 DCU（實際收容 / 白名單應屬）。
+   * 歸屬錯誤圖層打開時要補進地圖，否則虛線會指向一台沒畫出來的 DCU。
+   */
   const misRelatedDcus = useMemo(() => {
     const ids = new Set<string>()
-    scopeMis.forEach((m) => { ids.add(m.dcuId); ids.add(m.expectedDcuId) })
+    // 觀察中 DCU 的歸屬錯誤一律要畫兩端；整層歸屬錯誤圖層打開時再併上範圍內全部
+    ;[...watchMis, ...(showMis ? scopeMis : [])].forEach((m) => { ids.add(m.dcuId); ids.add(m.expectedDcuId) })
     return [...ids].map((id) => dcuById.get(id)).filter(Boolean) as Dcu[]
-  }, [scopeMis])
+  }, [scopeMis, watchMis, showMis])
 
-  // DCU 太多時（整個縣市）改用 GPU 圓點，避免上百個 DOM marker 拖累拖曳
-  const gpuDcus = misOnly ? misRelatedDcus.length > DOM_MARKER_MAX : dcus.length > DOM_MARKER_MAX
+  /**
+   * 這張圖要畫的 DCU＝範圍內的 DCU，**再併上**歸屬錯誤兩端跑到範圍外的那幾台。
+   * （原本歸屬錯誤圖層是把清單整個換掉，等於順手把其他 DCU 藏起來，那才是互斥的來源。）
+   */
+  const dcuList = useMemo(() => {
+    const seen = new Set(dcus.map((d) => d.dcu.id))
+    const extra = misRelatedDcus
+      .filter((d) => !seen.has(d.id))
+      .map((dcu) => ({ dcu, cross: true })) // 範圍外補進來的，比照跨區標示
+    return extra.length ? [...dcus, ...extra] : dcus
+  }, [dcus, misRelatedDcus])
+
+  /** 選取行政區內各頻點的電表數（排除停用，與統計口徑一致） */
+  const freqCounts = useMemo(() => {
+    const counts = new Array(FREQ_COUNT).fill(0) as number[]
+    if (pickMode) return counts
+    metersInScope(level, city, district).forEach((m) => {
+      if (m.disabled) return
+      const f = dcuById.get(m.dcuId)?.freq
+      if (f) counts[f - 1]++
+    })
+    return counts
+  }, [level, city, district, pickMode])
+
+  // DCU 太多時（整個縣市）改用 GPU 標記，避免上百個 DOM marker 拖累拖曳
+  const gpuDcus = dcuList.length > DOM_MARKER_MAX
   const lookupMeter = (id: string) => allMeterById.get(id) ?? null
 
   // 電表圖層只在街道級縮放才存在（見 applyMeters）；metersRef 給地圖事件用最新的資料
   const metersRef = useRef<Meter[]>(districtMeters)
-  useEffect(() => { metersRef.current = districtMeters })
+  const watchMetersRef = useRef<Meter[]>(watchMeters)
+  useEffect(() => { metersRef.current = districtMeters; watchMetersRef.current = watchMeters })
 
   /** 組 DCU hover 卡的內容（收容統計向 dcuMetrics 要，有快取） */
   const makeDcuPop = (dcuId: string, x: number, y: number): DcuPop | null => {
@@ -223,15 +358,27 @@ export function DcuRelationMap() {
   const makeDcuPopRef = useRef(makeDcuPop)
   makeDcuPopRef.current = makeDcuPop
 
-  /** DCU GPU 圓點：底色＝頻點色（停用＝灰），斷線者紅框 —— 與 DOM 圓形標記同一套編碼 */
+/**
+   * DCU GPU 標記：與 DOM marker 同一套編碼（方形、底色＝頻點色）。
+   * symbol 圖層沒辦法像 circle 那樣吃 `['get','color']`，所以每個頻點各註冊一張
+   * 方形圖示（見 markerIcons.ts），feature 自帶 `icon` 指名要用哪一張。
+   */
   const buildDcuPoints = () => {
-    const list = misOnly ? misRelatedDcus.map((dcu) => ({ dcu })) : dcus
+    const list = dcuList
     return {
       type: 'FeatureCollection' as const,
       features: list.map(({ dcu }) => ({
         type: 'Feature' as const,
         geometry: { type: 'Point' as const, coordinates: [dcu.lng, dcu.lat] },
-        properties: { id: dcu.id, color: dcu.state === 'disabled' ? STATE_COLOR.disabled : freqColor(dcu.freq), off: dcu.state === 'offline' ? 1 : 0 },
+        properties: {
+          id: dcu.id,
+          freq: dcu.freq,
+          color: dcu.state === 'disabled' ? STATE_COLOR.disabled : freqColor(dcu.freq),
+          off: dcu.state === 'offline' ? 1 : 0,
+          icon: dcuIconName(dcu.state, dcu.freq),
+          // 觀察中的 DCU 在 GPU 模式也要有外環（DOM 模式由 marker 的 box-shadow 畫）
+          ring: pinColor(pinnedDcuIds, dcu.id) ?? '',
+        },
       })),
     }
   }
@@ -245,7 +392,8 @@ export function DcuRelationMap() {
       const stats = new Map(cityStats().map((s) => [s.name, s]))
       return ({
         type: 'FeatureCollection' as const,
-        features: countiesGeoAll().features.map((f: any) => {
+        // 金門／馬祖畫進主圖會被取景裁掉，比照系統總覽與斷線地圖排除、改由 IslandShortcuts 呈現
+        features: countiesGeoAll().features.filter((f: any) => !INSET_COUNTY_IDS.includes(f.properties.rid)).map((f: any) => {
           const name = f.properties.name as string
           const sev = stats.get(name)?.severity ?? 'normal'
           return { ...f, properties: { ...f.properties, name, sevColor: SEVERITY_COLOR[sev], sevStroke: SEVERITY_STROKE[sev] } }
@@ -258,19 +406,44 @@ export function DcuRelationMap() {
       features: townsGeo(city).features.map((f: any) => {
         const name = f.properties.rname as string
         const sev = stats.get(name)?.severity ?? 'normal'
-        return { ...f, properties: { ...f.properties, name, sevColor: SEVERITY_COLOR[sev], sevStroke: SEVERITY_STROKE[sev] } }
+        // outside＝L3 時「選取區域以外」的鄰區，畫面上塗灰
+        const outside = !!district && name !== district
+        return { ...f, properties: { ...f.properties, name, outside, sevColor: SEVERITY_COLOR[sev], sevStroke: SEVERITY_STROKE[sev] } }
       }),
     })
   }
-  /** L1／L2：以群集呈現歸屬錯誤電表數（點位本身在這個層級沒有意義） */
-  const buildMisPoints = () => ({
-    type: 'FeatureCollection' as const,
-    features: scopeMis.map((m) => ({
-      type: 'Feature' as const,
-      geometry: { type: 'Point' as const, coordinates: [m.lng, m.lat] },
-      properties: { id: m.id },
-    })),
-  })
+/**
+   * L1／L2 的歸屬錯誤電表匯總球（點位本身在這個層級沒有意義）。
+   *
+   * 2026-08-27 依業主意見「不用太分裂」，從 maplibre 的地理群聚（supercluster）
+   * 改成**依行政層級聚合**：L1 一個縣市一顆、L2 一個行政區一顆。
+   * 地理群聚是照螢幕距離分群的，一放大就裂成一堆小球、位置還會飄；
+   * 改成照行政區聚合之後只有「縣市」「行政區」兩級，縮放不會再改變分群，
+   * 也不會有落單的點掉到群集外面。
+   *
+   * 位置取該區歸屬錯誤電表的平均座標 —— 落在問題實際發生的地方，
+   * 也不會和區名標籤（畫在多邊形的標記點）疊在一起。
+   */
+  const buildMisPoints = () => {
+    const agg = aggregateByArea(scopeMis, (m) => (level === 'taiwan' ? m.city : m.district), (m) => m.lng, (m) => m.lat)
+    // 與斷線地圖同一套：平均座標可能互相重疊（台北／新北），推開再畫。L2 間距依縣市大小換算
+    let sep: number = MIN_SEP_DEG.taiwan
+    if (level !== 'taiwan') {
+      let W = 180, S = 90, E = -180, N = -90
+      townsGeo(city).features.forEach((f: any) => { const [w, s, e, n] = bboxOf(f.geometry); W = Math.min(W, w); S = Math.min(S, s); E = Math.max(E, e); N = Math.max(N, n) })
+      sep = citySepDeg([W, S, E, N], containerRef.current, MIS_AGG_L2_PX)
+    }
+    return toAggFeatureCollection(separateAggPoints(agg, sep))
+  }
+
+  /**
+   * 最新一次 render 的建圖函式。load 事件可能晚到（街道底圖樣式從網路載入），
+   * 期間若已切換範圍，直接呼叫 effect 閉包裡的舊版本會以「初始範圍」建圖、停在錯的層級。
+   */
+  const latestRef = useRef<{
+    buildPoly: typeof buildPoly; buildMisPoints: typeof buildMisPoints
+    applyPickMode: () => void; buildMarkers: () => void; fitScope: () => void
+  } | null>(null)
 
   /* ---- init map ---- */
   useEffect(() => {
@@ -282,8 +455,8 @@ export function DcuRelationMap() {
       // （內建 handler 早於使用者監聽器執行，光靠 preventDefault() 攔不住）
       doubleClickZoom: false,
     })
-    // 右上角讓給地圖頁籤，縮放控制移到右下
-    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right')
+    // 右上角讓給地圖頁籤，縮放控制移到右下（L1／L2 會整個收起，見 applyLock）
+    navRef.current = new maplibregl.NavigationControl({ showCompass: false })
     mapRef.current = map
     map.on('load', () => {
       registerMarkerIcons(map)
@@ -294,10 +467,31 @@ export function DcuRelationMap() {
       map.addLayer({ id: 'rel-blank', type: 'background', paint: { 'background-color': MAP_BG } })
 
       // 行政區選取層（L1／L2）—— 告警色與故障地圖同一組
-      polyFC.current = buildPoly()
+      polyFC.current = latestRef.current!.buildPoly()
       map.addSource('rel-poly', { type: 'geojson', data: polyFC.current })
       map.addLayer({ id: 'rel-poly-fill', type: 'fill', source: 'rel-poly', paint: { 'fill-color': ['get', 'sevColor'], 'fill-opacity': 0.8 } })
       map.addLayer({ id: 'rel-poly-line', type: 'line', source: 'rel-poly', paint: { 'line-color': ['get', 'sevStroke'], 'line-width': 0.9 } })
+      // 滑過的區塊（各層級都有）：提亮＋灰色描邊。L3 的鄰區平常塗灰，滑過時要看得出「可以點過去」
+      map.addLayer({
+        id: 'rel-poly-hover-fill', type: 'fill', source: 'rel-poly', filter: ['==', ['get', 'name'], ''],
+        paint: { 'fill-color': '#FFFFFF', 'fill-opacity': AREA_HOVER_FILL_OPACITY },
+      })
+      map.addLayer({
+        id: 'rel-poly-hover-line', type: 'line', source: 'rel-poly', filter: ['==', ['get', 'name'], ''],
+        paint: { 'line-color': AREA_HOVER_LINE, 'line-width': AREA_HOVER_LINE_WIDTH },
+      })
+      // 縣市外框（只在 L3 顯示，見 applyPickMode）：白色外暈墊底，再畫深灰實線
+      map.addSource('rel-county', { type: 'geojson', data: EMPTY_FC_DATA as any })
+      map.addLayer({
+        id: 'rel-county-halo', type: 'line', source: 'rel-county',
+        layout: { visibility: 'none', 'line-join': 'round' },
+        paint: { 'line-color': '#FFFFFF', 'line-width': 5, 'line-opacity': 0.75 },
+      })
+      map.addLayer({
+        id: 'rel-county-line', type: 'line', source: 'rel-county',
+        layout: { visibility: 'none', 'line-join': 'round' },
+        paint: { 'line-color': COUNTY_LINE, 'line-width': 2.2, 'line-opacity': 0.9 },
+      })
       // 區名另用「一名一點」的 source（直接掛多邊形會讓離島各標一次）
       map.addSource('rel-poly-labels', { type: 'geojson', data: buildLabelPoints(polyFC.current) as any })
       map.addLayer({
@@ -306,38 +500,35 @@ export function DcuRelationMap() {
         paint: { 'text-color': '#3A2F33', 'text-halo-color': '#fff', 'text-halo-width': 1.4 },
       })
 
-      /* ---- L1／L2：歸屬錯誤電表的群集（這個層級只看得出「哪裡多」） ---- */
-      map.addSource('rel-mis-cluster', {
-        type: 'geojson', data: buildMisPoints() as any,
-        cluster: true, clusterRadius: 48, clusterMaxZoom: 12,
-      })
+      /* ---- L1／L2：歸屬錯誤電表匯總球（一個行政區一顆，見 buildMisPoints） ---- */
+      map.addSource('rel-mis-agg', { type: 'geojson', data: latestRef.current!.buildMisPoints() as any })
+      // 2026-09-23 依業主意見統一一個尺寸，數量只看球上的數字（原本依數量分兩級大小）
+      // 形狀是六邊形（2026-08-28 業主意見）：和電表的小圓點區隔開，一眼看出是「一群」
       map.addLayer({
-        id: 'rel-mis-cluster-circle', type: 'circle', source: 'rel-mis-cluster',
-        filter: ['has', 'point_count'],
-        paint: {
-          'circle-color': MIS_COLOR,
-          'circle-radius': ['step', ['get', 'point_count'], 14, 10, 18, 40, 23, 120, 28],
-          'circle-opacity': ['interpolate', ['linear'], ['get', 'point_count'], 1, 0.75, 40, 0.88, 120, 0.95],
-          'circle-stroke-width': 0,
+        id: 'rel-mis-agg-circle', type: 'symbol', source: 'rel-mis-agg',
+        layout: {
+          'icon-image': ICON_MIS_AGG,
+          'icon-allow-overlap': true,
+          'icon-ignore-placement': true,
         },
+        paint: { 'icon-opacity': 0.9 },
       })
       map.addLayer({
-        id: 'rel-mis-cluster-count', type: 'symbol', source: 'rel-mis-cluster',
-        filter: ['has', 'point_count'],
-        layout: { 'text-field': ['to-string', ['get', 'point_count']], 'text-size': 13, 'text-font': ['Open Sans Bold'] },
+        id: 'rel-mis-agg-count', type: 'symbol', source: 'rel-mis-agg',
+        layout: {
+          'text-field': ['to-string', ['get', 'count']],
+          'text-size': 12,
+          'text-font': ['Open Sans Bold'],
+          'text-allow-overlap': true,
+        },
         paint: { 'text-color': '#fff' },
-      })
-      // 未成群的零星幾顆（縮放較深時）也要看得到
-      map.addLayer({
-        id: 'rel-mis-cluster-dot', type: 'circle', source: 'rel-mis-cluster',
-        filter: ['!', ['has', 'point_count']],
-        paint: { 'circle-color': MIS_COLOR, 'circle-radius': 5, 'circle-opacity': 0.9, 'circle-stroke-width': 0 },
       })
 
       // 電表 GPU 圖層（所有電表，依所屬 DCU 頻點色）
       map.addSource('rel-meters', { type: 'geojson', data: EMPTY_FC_DATA as any, promoteId: 'id' })
       map.addLayer({
         id: 'rel-meter-dots', type: 'circle', source: 'rel-meters',
+        filter: ['!=', ['get', 'dis'], 1],
         paint: {
           'circle-color': ['get', 'color'],
           'circle-radius': METER_RADIUS_SOFT,
@@ -348,6 +539,16 @@ export function DcuRelationMap() {
       })
       // 透明的加大命中範圍 —— 電表點在 z14 只有 2.8px 半徑，實際上很難點到。
       // 視覺維持小點（密度圖需要），只把可點擊的範圍放大。
+      // 停用電表：灰色空心圓圈（與實心小圓點、畫叉圓圈區分）——2026-09-03 業主意見
+      map.addLayer({
+        id: 'rel-meter-disabled', type: 'symbol', source: 'rel-meters',
+        filter: ['==', ['get', 'dis'], 1],
+        layout: {
+          'icon-image': ICON_METER_DISABLED,
+          'icon-size': ['interpolate', ['linear'], ['zoom'], 12, 0.42, 14, 0.62, 16, 0.86],
+          'icon-allow-overlap': true, 'icon-ignore-placement': true,
+        },
+      })
       map.addLayer({
         id: 'rel-meter-hit', type: 'circle', source: 'rel-meters',
         paint: { 'circle-color': '#000', 'circle-opacity': 0, 'circle-radius': METER_HIT_RADIUS },
@@ -369,25 +570,27 @@ export function DcuRelationMap() {
         layout: { 'line-cap': 'round' },
       })
 
-      // DCU GPU 圓點（DCU 數量大時取代 DOM marker）
+      // DCU GPU 標記（DCU 數量大時取代 DOM marker）—— 方形，底色＝頻點色。
+      // 正常／停用／斷線走同一層，差別只在 feature 的 `icon` 指到哪一張圖示。
       map.addSource('rel-dcus', { type: 'geojson', data: EMPTY_FC_DATA })
+      // 觀察中 DCU 的外環（GPU 模式）—— 觀察組別色，畫在方形圖示底下
       map.addLayer({
-        id: 'rel-dcu-dots', type: 'circle', source: 'rel-dcus',
-        filter: ['!=', ['get', 'off'], 1], // 斷線者改由方形 ✕ 圖示呈現
+        id: 'rel-dcu-ring', type: 'circle', source: 'rel-dcus',
+        filter: ['!=', ['get', 'ring'], ''],
         paint: {
-          'circle-color': ['get', 'color'],
-          'circle-radius': ['interpolate', ['linear'], ['zoom'], 7, 2.6, 10, 4, 13, 6, 16, 9],
-          'circle-stroke-width': 1.4,
-          'circle-stroke-color': '#FFFFFF',
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 7, 9, 10, 11, 13, 14, 16, 18],
+          'circle-color': '#FFFFFF',
+          'circle-opacity': 0.9,
+          'circle-stroke-color': ['get', 'ring'],
+          'circle-stroke-width': 3,
         },
       })
-      // 斷線 DCU：與故障地圖同一個方形 ✕ 圖示
       map.addLayer({
-        id: 'rel-dcu-off', type: 'symbol', source: 'rel-dcus',
-        filter: ['==', ['get', 'off'], 1],
+        id: 'rel-dcu-dots', type: 'symbol', source: 'rel-dcus',
         layout: {
-          'icon-image': ICON_DCU_OFFLINE,
-          'icon-size': ['interpolate', ['linear'], ['zoom'], 8, 0.6, 12, 0.85, 16, 1.1],
+          'icon-image': ['get', 'icon'],
+          // 斷線圖示本身畫得比較大，這裡用同一組 size，視覺上斷線自然大一號
+          'icon-size': ['interpolate', ['linear'], ['zoom'], 7, 0.42, 10, 0.6, 13, 0.85, 16, 1.1],
           'icon-allow-overlap': true, 'icon-ignore-placement': true,
         },
       })
@@ -418,38 +621,57 @@ export function DcuRelationMap() {
         const layers = [...DEVICE_LAYERS].filter((l) => map.getLayer(l))
         return map.queryRenderedFeatures(pt, { layers }).length > 0
       }
+      /** 滑過區塊的描邊／提亮（name='' 代表清除） */
+      const hoverArea = (name: string) => {
+        ;['rel-poly-hover-fill', 'rel-poly-hover-line'].forEach((id) => map.getLayer(id) && map.setFilter(id, ['==', ['get', 'name'], name]))
+      }
+      /**
+       * 區塊 hover —— L1／L2：描邊＋提示卡。L3（畫整個縣市、鄰區塗灰）：滑過鄰區只提亮＋描邊、
+       * 游標變手指，**不出提示卡**（2026-09-24 業主意見）；目前這一區不做任何反應。
+       * 游標在裝置上時讓位給裝置。
+       */
       map.on('mousemove', 'rel-poly-fill', (e) => {
         const f = e.features?.[0]; if (!f) return
         const name = f.properties!.name as string
-        const st = useWarroom.getState()
-        // L3：站在目前這一區上不必提示，游標也維持一般狀態
-        if (!pickModeRef.current && (name === st.district || onDevice(e.point))) { setPolyHover(null); return }
-        map.getCanvas().style.cursor = 'pointer'
-        const mis = st.level === 'taiwan' ? misassignedInCity(name).length : misassignedInCity(st.city, name).length
-        setPolyHover({ name, mis, x: e.point.x, y: e.point.y })
+        if (!pickModeRef.current && onDevice(e.point)) { hoverArea(''); setPolyHover(null); return }
+        const current = !pickModeRef.current && name === useWarroom.getState().district
+        hoverArea(current ? '' : name)
+        map.getCanvas().style.cursor = current ? '' : 'pointer'
+        // 2026-09-24 業主意見：L3 只要提亮＋描邊，不出提示卡；提示卡只留給 L1／L2
+        setPolyHover(pickModeRef.current ? makePolyPop(name, e.point.x, e.point.y) : null)
       })
-      map.on('mouseleave', 'rel-poly-fill', () => { map.getCanvas().style.cursor = ''; setPolyHover(null) })
+      map.on('mouseleave', 'rel-poly-fill', () => { map.getCanvas().style.cursor = ''; hoverArea(''); setPolyHover(null) })
       map.on('click', 'rel-poly-fill', (e) => {
         const f = e.features?.[0]; if (!f) return
+        // 點在匯總球上 → 交給匯總球處理。兩個 handler 同一次點擊都會觸發：
+        // 先跑的這個若先下鑽，匯總球的 handler 讀到的就已是新層級，會把縣市名當行政區名
+        // 設進去，畫面跳到一個不存在、完全沒數值的行政區（2026-09-23 業主回報）。
+        if (map.getLayer('rel-mis-agg-circle') && map.queryRenderedFeatures(e.point, { layers: ['rel-mis-agg-circle'] }).length) return
         const name = f.properties!.name as string
         const st = useWarroom.getState()
+        if (pickModeRef.current || !onDevice(e.point)) hoverArea('')
         if (st.level === 'taiwan') { setPolyHover(null); if (CITIES.some((c) => c.name === name)) setCity(name); return }
         // L2 選區下鑽；L3 點鄰區＝直接移動過去（點到裝置就不算）
         if (pickModeRef.current) { setPolyHover(null); setDistrict(name); return }
         if (name !== st.district && !onDevice(e.point)) { setPolyHover(null); setDistrict(name) }
       })
-      // 群集：點一下展開（與故障地圖同樣的行為）
-      map.on('click', 'rel-mis-cluster-circle', (e) => {
-        const f = map.queryRenderedFeatures(e.point, { layers: ['rel-mis-cluster-circle'] })[0]
-        if (!f) return
-        const cid = f.properties!.cluster_id
-        ;(map.getSource('rel-mis-cluster') as any).getClusterExpansionZoom(cid, (err: any, zoom: number) => {
-          if (err) return
-          map.easeTo({ center: (f.geometry as any).coordinates, zoom: zoom + 0.4, duration: 600 })
-        })
+      /* 匯總球：點一下＝下鑽到該區（和直接點區塊同一個行為，不再是「展開群集」）。
+         球蓋住底下的多邊形，所以 hover 也要自己接手，否則游標移上去提示會消失。 */
+      map.on('click', 'rel-mis-agg-circle', (e) => {
+        const f = e.features?.[0]; if (!f) return
+        const name = f.properties!.name as string
+        const st = useWarroom.getState()
+        setPolyHover(null); hoverArea('')
+        // 只往下一層：L1 → 該縣市（L2）；L2 → 該行政區（L3）。匯總球只存在於 L1／L2。
+        if (st.level === 'taiwan') { if (CITIES.some((c) => c.name === name)) setCity(name) }
+        else if (!st.district && districtsOf(st.city).some((d) => d.name === name)) setDistrict(name)
       })
-      map.on('mouseenter', 'rel-mis-cluster-circle', () => (map.getCanvas().style.cursor = 'pointer'))
-      map.on('mouseleave', 'rel-mis-cluster-circle', () => (map.getCanvas().style.cursor = ''))
+      map.on('mousemove', 'rel-mis-agg-circle', (e) => {
+        const f = e.features?.[0]; if (!f) return
+        map.getCanvas().style.cursor = 'pointer'
+        setPolyHover(makePolyPop(f.properties!.name as string, e.point.x, e.point.y))
+      })
+      map.on('mouseleave', 'rel-mis-agg-circle', () => { map.getCanvas().style.cursor = ''; setPolyHover(null) })
 
       // 事件掛在透明命中圈上（涵蓋正常圓點與斷線方形圖示的所有 DCU）
       map.on('mousemove', 'rel-dcu-hit', (e) => {
@@ -461,12 +683,13 @@ export function DcuRelationMap() {
       map.on('mouseleave', 'rel-dcu-hit', () => { map.getCanvas().style.cursor = ''; setHoverDcu(null); setDcuPop(null) })
       map.on('click', 'rel-dcu-hit', (e) => { const f = e.features?.[0]; if (f) selectDcu(f.properties!.id) })
 
+      applyLock(pickModeRef.current)
       registerMap('relation', map)
       readyRef.current = true
-      applyPickMode() // L3 進場時要先把 dashboard 圖層關掉，街道底圖才看得到
-      buildMarkers()
+      latestRef.current!.applyPickMode() // L3 進場時要先把 dashboard 圖層關掉，街道底圖才看得到
+      latestRef.current!.buildMarkers()
       if (!pickModeRef.current) applyMeters(true)
-      fitScope()
+      latestRef.current!.fitScope()
 
       // 縮放/平移結束 → 決定電表圖層是否存在、同步鏡頭
       map.on('moveend', () => {
@@ -497,12 +720,17 @@ export function DcuRelationMap() {
        */
       map.on('dblclick', () => { popHistory('relation') })
 
-      // 點空白處 → 只取消電表選取；DCU 選取與展開的電表列表保留，收合走列表的 ← 鈕
+      /**
+       * 點空白處 → 退回上一步的選取狀態：電表 → DCU → 無。
+       * 2026-09-03 依業主意見補的：原本只清電表，選了 DCU 之後就沒有任何
+       * 「退回」的點擊路徑，只能再去點另一台。雙擊仍是「退回上一個視角」，兩者不衝突。
+       */
       map.on('click', (e) => {
         const layers = [...DEVICE_LAYERS].filter((l) => map.getLayer(l))
         if (map.queryRenderedFeatures(e.point, { layers }).length) return
         const st = useWarroom.getState()
         if (st.selectedMeterId) st.selectMeter(null)
+        else if (st.selectedDcuId) st.clearSelection()
       })
     })
     return () => { unregisterMap('relation'); map.remove(); mapRef.current = null; readyRef.current = false }
@@ -514,24 +742,38 @@ export function DcuRelationMap() {
    * 低縮放層級不持有任何電表 feature（百萬級時這是唯一守得住的做法）。
    * 選取模式（L1／L2）與「只顯示歸屬錯誤」時一律不畫一般電表。
    */
+  /**
+   * 電表圖層＝「觀察中 DCU 的電表」（永遠畫，數量小）＋「全部電表」（手動開關，預設關）。
+   * 全部電表才需要縮放門檻與 bbox 裁切；只有觀察電表時，平移縮放不必重建 source。
+   */
   const meterLayerOnRef = useRef(false)
   const applyMeters = (dataChanged = false) => {
     const map = mapRef.current
     if (!map || !readyRef.current) return
     const src = map.getSource('rel-meters') as maplibregl.GeoJSONSource | undefined
     if (!src) return
-    const on = !pickModeRef.current && !misOnlyRef.current && map.getZoom() >= METER_MIN_ZOOM
+    const on = !pickModeRef.current && showMetersRef.current && map.getZoom() >= METER_MIN_ZOOM
+    const watched = pickModeRef.current ? [] : watchMetersRef.current
     if (on) {
       // 縮放門檻擋層級、bbox（外擴 25%）擋視窗 —— 只建可視範圍內的電表 feature。
       const b = map.getBounds()
       const mx = (b.getEast() - b.getWest()) * 0.25, my = (b.getNorth() - b.getSouth()) * 0.25
       const W = b.getWest() - mx, E = b.getEast() + mx, S = b.getSouth() - my, N = b.getNorth() + my
-      src.setData(meterFeatures(metersRef.current.filter((m) => m.lng >= W && m.lng <= E && m.lat >= S && m.lat <= N)) as any)
+      const byId = new Map<string, Meter>()
+      metersRef.current.forEach((m) => { if (m.lng >= W && m.lng <= E && m.lat >= S && m.lat <= N) byId.set(m.id, m) })
+      watched.forEach((m) => byId.set(m.id, m))
+      src.setData(meterFeatures([...byId.values()]) as any)
     } else if (meterLayerOnRef.current || dataChanged) {
-      src.setData(EMPTY_FC_DATA as any)
+      src.setData((watched.length ? meterFeatures(watched) : EMPTY_FC_DATA) as any)
     }
     if (on !== meterLayerOnRef.current) { meterLayerOnRef.current = on; setMetersOn(on) }
   }
+
+  // 手動開關切換／觀察清單變動 → 立刻重算電表圖層（不必等下一次 moveend）
+  useEffect(() => {
+    if (readyRef.current) applyMeters(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showMeters, watchMeters])
 
   const clearMarkers = () => { dcuRefs.current.forEach((r) => r.marker.remove()); dcuRefs.current.clear() }
 
@@ -546,8 +788,7 @@ export function DcuRelationMap() {
     }
     ;(map.getSource('rel-dcus') as maplibregl.GeoJSONSource | undefined)?.setData((gpuDcus ? buildDcuPoints() : EMPTY_FC_DATA) as any)
     if (gpuDcus) return // 大範圍：DCU 走 GPU 圖層，不建 DOM marker
-    const list = misOnly ? misRelatedDcus.map((dcu) => ({ dcu, cross: false })) : dcus
-    list.forEach(({ dcu, cross }) => {
+    dcuList.forEach(({ dcu, cross }) => {
       const color = freqColor(dcu.freq)
       const { wrap, shape } = dcuElement(dcu.state, cross, color)
       wrap.addEventListener('mouseenter', () => {
@@ -562,7 +803,35 @@ export function DcuRelationMap() {
       const marker = new maplibregl.Marker({ element: wrap, anchor: 'center' }).setLngLat([dcu.lng, dcu.lat]).addTo(map)
       dcuRefs.current.set(dcu.id, { dcu, cross, color, wrap, shape, marker })
     })
+    applyFreqFilter()
   }
+
+  /**
+   * 頻點篩選 —— GPU 圖層（電表點／停用電表／命中圈／DCU）走 layer filter，
+   * DOM marker 直接收起。選取中的 DCU 一律保留，避免篩掉之後找不到自己點的那台。
+   */
+  const applyFreqFilter = () => {
+    const map = mapRef.current
+    if (!map || !readyRef.current) return
+    const hidden = hiddenFreqsRef.current
+    const keep: any = hidden.length ? ['!', ['in', ['get', 'freq'], ['literal', hidden]]] : true
+    const sel = useWarroom.getState().selectedDcuId
+    const keepDcu: any = hidden.length && sel ? ['any', keep, ['==', ['get', 'id'], sel]] : keep
+    const set = (id: string, f: any) => { if (map.getLayer(id)) map.setFilter(id, f) }
+    set('rel-meter-dots', ['all', ['!=', ['get', 'dis'], 1], keep])
+    set('rel-meter-disabled', ['all', ['==', ['get', 'dis'], 1], keep])
+    set('rel-meter-hit', keep)
+    set('rel-dcu-dots', keepDcu)
+    set('rel-dcu-hit', keepDcu)
+    dcuRefs.current.forEach((r, id) => {
+      r.wrap.style.display = hidden.includes(r.dcu.freq) && id !== sel ? 'none' : 'flex'
+    })
+  }
+
+  useEffect(() => {
+    applyFreqFilter()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hiddenFreqs, selectedDcuId])
 
   /**
    * 層級樣式。
@@ -574,24 +843,46 @@ export function DcuRelationMap() {
     const map = mapRef.current
     if (!map || !readyRef.current) return
     const pickOnly = pickMode ? 'visible' : 'none'
-    ;['rel-blank', 'rel-mis-cluster-circle', 'rel-mis-cluster-count', 'rel-mis-cluster-dot'].forEach((id) => {
+    ;['rel-blank', 'rel-mis-agg-circle', 'rel-mis-agg-count'].forEach((id) => {
       if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', pickOnly)
     })
+    /* L1／L2 的歸屬錯誤一律只用群集呈現 —— 逐顆的圖示與兩條歸屬線在這個層級要關掉。
+       原本沒關：選了某台 DCU 之後，全台層級會同時出現群集球與散落的 ✕ 圖示＋連線，
+       看起來就像「群集以外還有一堆歸屬錯誤電表」。 */
+    const deviceOnly = pickMode ? 'none' : 'visible'
+    ;['rel-mis-line-actual', 'rel-mis-line-expected', 'rel-mis-dot'].forEach((id) => {
+      if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', deviceOnly)
+    })
+    // 縣市外框：只在 L3（L1／L2 的色塊本身就看得出縣市範圍）
+    ;['rel-county-halo', 'rel-county-line'].forEach((id) => {
+      if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', deviceOnly)
+    })
+    ;(map.getSource('rel-county') as maplibregl.GeoJSONSource | undefined)
+      ?.setData((pickMode ? EMPTY_FC_DATA : countyOutline(city)) as any)
     // 界線與區名兩個層級都留著（L3 是為了知道自己在哪一區、旁邊是哪一區）
     ;['rel-poly-fill', 'rel-poly-line', 'rel-poly-label'].forEach((id) => {
       if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', 'visible')
     })
-    // L3 的色塊留 0.04 不透明度：視覺上等於透明，但仍接得到 hover／click
-    map.setPaintProperty('rel-poly-fill', 'fill-opacity', (pickMode ? 0.8 : 0.04) as any)
+    // L3：區域外塗灰；選取那一區完全不上色（2026-09-29 業主意見：原本留的 4% 黑在街道底圖上
+    // 看起來像一層灰色遮罩）。點目前這一區本來就不做事，不需要靠填色接 click
+    map.setPaintProperty('rel-poly-fill', 'fill-color',
+      (pickMode ? ['get', 'sevColor'] : ['case', ['get', 'outside'], OUTSIDE_FILL, '#FFFFFF']) as any)
+    map.setPaintProperty('rel-poly-fill', 'fill-opacity',
+      (pickMode ? 0.8 : ['case', ['get', 'outside'], OUTSIDE_OPACITY, 0]) as any)
     map.setPaintProperty('rel-poly-line', 'line-color', (pickMode ? ['get', 'sevStroke'] : BOUNDARY_LINE) as any)
     map.setPaintProperty('rel-poly-line', 'line-width', (pickMode ? 0.9 : 1) as any)
     map.setPaintProperty('rel-poly-line', 'line-opacity', (pickMode ? 1 : 0.28) as any)
     map.setPaintProperty('rel-poly-label', 'text-opacity', (pickMode ? 1 : 0.55) as any)
 
+    // L2 的六邊形小一號（L1 維持原尺寸）
+    const l2 = level !== 'taiwan'
+    if (map.getLayer('rel-mis-agg-circle')) map.setLayoutProperty('rel-mis-agg-circle', 'icon-size', l2 ? MIS_AGG_L2_SCALE : 1)
+    if (map.getLayer('rel-mis-agg-count')) map.setLayoutProperty('rel-mis-agg-count', 'text-size', l2 ? 10 : 12)
+
     polyFC.current = buildPoly()
     ;(map.getSource('rel-poly') as maplibregl.GeoJSONSource | undefined)?.setData(polyFC.current)
     ;(map.getSource('rel-poly-labels') as maplibregl.GeoJSONSource | undefined)?.setData(buildLabelPoints(polyFC.current) as any)
-    if (pickMode) (map.getSource('rel-mis-cluster') as maplibregl.GeoJSONSource | undefined)?.setData(buildMisPoints() as any)
+    if (pickMode) (map.getSource('rel-mis-agg') as maplibregl.GeoJSONSource | undefined)?.setData(buildMisPoints() as any)
   }
 
   /**
@@ -603,6 +894,7 @@ export function DcuRelationMap() {
     if (!map) return
     // 非顯示中的那張不自行取景 —— 鏡頭一律由顯示中的那張決定，切過來時再對齊
     if (!activeRef.current) return
+    setCameraScope('relation', scopeKey({ level, city, district }))
     if (level === 'taiwan') { map.fitBounds(TAIWAN_BOUNDS, { padding: 20, duration: 600 }); return }
     const feats = townsGeo(city).features.filter((f: any) => !district || f.properties.rname === district)
     if (feats.length) {
@@ -618,22 +910,79 @@ export function DcuRelationMap() {
     map.fitBounds([[W, S], [E, N]], { padding: 60, maxZoom: 15.5, duration: 600 })
   }
 
-  // 資料範圍 / 模式變更 → 重建圖層 + fit（換了範圍，舊視角就沒有意義了）
+  /**
+   * 圖層重建 —— 只重畫，不動鏡頭。
+   *
+   * `dcuList` 會因為「顯示圖層」的歸屬錯誤開關而改變（開啟時要補進兩端跑到範圍外的
+   * DCU），若在這裡一併 fitScope，等於**勾一次圖層就把視角重設一次**，使用者剛拉近
+   * 看的位置會被彈開。2026-09-07 依業主意見拆開：取景只跟著「範圍」變動走（見下一個
+   * effect），圖層開關一律不動鏡頭。
+   */
   useEffect(() => {
     if (!readyRef.current) return
-    clearHistory('relation')
     applyPickMode()
     applyMeters(true)
     buildMarkers()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dcuList, districtMeters, pickMode])
+
+  /**
+   * 換行政區 → 區塊的「選取區／區域外」要重算。
+   * 上面那個 effect 不一定會跑：L3 同縣市換區時 dcuList／districtMeters／pickMode 常常都沒變，
+   * 區塊就停在舊的選取狀態 —— 新選的區還蓋著灰、舊的那區反而是亮的（2026-09-29 業主回報）。
+   */
+  useEffect(() => {
+    if (readyRef.current) applyPickMode()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [district])
+
+  // 觀察清單變動 → GPU 模式的 DCU 外環要跟著更新（DOM 模式的外環由樣式 effect 處理）
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !readyRef.current || pickMode || !gpuDcus) return
+    ;(map.getSource('rel-dcus') as maplibregl.GeoJSONSource | undefined)?.setData(buildDcuPoints() as any)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pinnedDcuIds])
+
+/**
+ * L1／L2 的地圖是「區域選取模式」—— 取景一律由層級決定（全台框／縣市框），
+ * 比照系統總覽的地圖：**不可縮放、不可拖曳**，縮放鈕也一併收起。
+ * 進到 L3 才是裝置視圖，那時才需要自由縮放與拖曳去看點位。
+ * （2026-09-07 業主意見：L1／L2 兩張圖都要與系統總覽一致。）
+ */
+  const applyLock = (locked: boolean) => {
+    const map = mapRef.current
+    if (!map) return
+    const nav = navRef.current
+    if (locked) {
+      map.scrollZoom.disable(); map.dragPan.disable()
+      map.touchZoomRotate.disable(); map.boxZoom.disable(); map.keyboard.disable()
+      if (nav && navOnRef.current) { map.removeControl(nav); navOnRef.current = false }
+    } else {
+      map.scrollZoom.enable(); map.dragPan.enable()
+      map.touchZoomRotate.enable(); map.boxZoom.enable(); map.keyboard.enable()
+      if (nav && !navOnRef.current) { map.addControl(nav, 'bottom-right'); navOnRef.current = true }
+    }
+  }
+
+  useEffect(() => {
+    if (readyRef.current) applyLock(pickMode)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pickMode])
+
+  // 範圍（層級／縣市／行政區）變更 → 重新取景；換了範圍，舊視角才真的沒有意義
+  useEffect(() => {
+    if (!readyRef.current) return
+    clearHistory('relation')
     fitScope()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dcus, districtMeters, pickMode, misOnly, misRelatedDcus])
+  }, [level, city, district, pickMode])
 
   // 切換成顯示中的那張 → 對齊另一張的鏡頭（並重算尺寸、補上電表圖層）
   useEffect(() => {
     const map = mapRef.current; if (!map || !readyRef.current || !active) return
     map.resize()
-    if (!pullCamera('relation')) fitScope() // 沒有另一張可參照才自行取景
+    if (!pullCamera('relation', scopeKey({ level, city, district }))) fitScope() // 沒有另一張可參照才自行取景
     applyMeters()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active])
@@ -698,27 +1047,45 @@ export function DcuRelationMap() {
 
   /**
    * 歸屬錯誤圖層資料：
-   *   misOnly 開 → 範圍內全部歸屬錯誤電表（獨立檢視）
-   *   misOnly 關 → 只畫選取 DCU 相關的（兩個方向：他台連入 / 連入他台）
+   *   一律畫 → 觀察中 DCU 相關的（兩個方向：他台連入 / 連入他台）
+   *   圖層開 → 再併上範圍內全部歸屬錯誤電表
    * 每顆電表配兩條線：實線＝實際收容、虛線＝白名單應屬。
+   * 方向以「選取中的 DCU」為參照；沒有選取時只標歸屬錯誤、不標方向。
    */
   const misMeters = useMemo((): { meter: Meter; dir: MisDir | '' }[] => {
-    if (misOnly) {
-      // 獨立圖層沒有「本台」可參照 —— 有選取 DCU 時才標得出方向，否則只標歸屬錯誤
-      return scopeMis.map((meter) => ({
-        meter,
-        dir: !selectedDcuId ? ''
-          : meter.dcuId === selectedDcuId ? 'in'
-            : meter.expectedDcuId === selectedDcuId ? 'out'
-              : '',
-      }))
+    const byId = new Map<string, Meter>()
+    watchMis.forEach((m) => byId.set(m.id, m))
+    if (showMis) scopeMis.forEach((m) => byId.set(m.id, m))
+    return [...byId.values()].map((meter) => ({
+      meter,
+      dir: !selectedDcuId ? ''
+        : meter.dcuId === selectedDcuId ? 'in'
+          : meter.expectedDcuId === selectedDcuId ? 'out'
+            : '',
+    }))
+  }, [showMis, scopeMis, watchMis, selectedDcuId])
+
+  /** Esc 與「點空白處」同一條退回路徑：電表 → DCU → 無 */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || !activeRef.current) return
+      const st = useWarroom.getState()
+      if (st.selectedMeterId) st.selectMeter(null)
+      else if (st.selectedDcuId) st.clearSelection()
     }
-    if (!selectedDcuId) return []
-    return [
-      ...misassignedIn(selectedDcuId).map((meter) => ({ meter, dir: 'in' as MisDir })),
-      ...misassignedOut(selectedDcuId).map((meter) => ({ meter, dir: 'out' as MisDir })),
-    ]
-  }, [misOnly, scopeMis, selectedDcuId])
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  /** 歸屬線的顯示／隱藏 —— 標記留著，只收線 */
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !readyRef.current) return
+    const vis = showMisLines ? 'visible' : 'none'
+    ;['rel-mis-line-actual', 'rel-mis-line-expected'].forEach((id) => {
+      if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', vis)
+    })
+  }, [showMisLines])
 
   useEffect(() => {
     const map = mapRef.current
@@ -745,55 +1112,118 @@ export function DcuRelationMap() {
     if (!map || !readyRef.current || !map.getLayer('rel-meter-dots')) return
     const ids = [...focus.focusedDcu]
     if (ids.length) {
+      // 2026-09-03 依業主意見：聚焦某台 DCU 時，浮出的是它的**白名單**電表
+      // （expectedDcuId），而不是實際收容的那批 —— 歸屬錯誤才看得出「該我的表跑掉了」
       map.setPaintProperty('rel-meter-dots', 'circle-opacity',
-        ['match', ['get', 'dcuId'], ids, ['case', ['==', ['get', 'on'], 0], 0.6, 0.95], 0.1] as any)
+        ['match', ['get', 'expected'], ids, ['case', ['==', ['get', 'on'], 0], 0.6, 0.95], 0.1] as any)
       map.setPaintProperty('rel-meter-dots', 'circle-radius', METER_RADIUS_FOCUS as any)
       map.setPaintProperty('rel-meter-dots', 'circle-stroke-width', ['case', ['==', ['get', 'on'], 0], 0, 0.6] as any)
       const dcuOp: any = ['case', ['match', ['get', 'id'], ids, true, false], 1, DIM_OPACITY]
-      map.setPaintProperty('rel-dcu-dots', 'circle-opacity', dcuOp)
-      map.setPaintProperty('rel-dcu-dots', 'circle-stroke-opacity', dcuOp)
-      if (map.getLayer('rel-dcu-off')) map.setPaintProperty('rel-dcu-off', 'icon-opacity', dcuOp)
+      map.setPaintProperty('rel-dcu-dots', 'icon-opacity', dcuOp)
+      // 歸屬錯誤電表同一套邏輯：只有「白名單應屬聚焦 DCU」的那幾顆維持全亮，其餘弱化
+      if (map.getLayer('rel-mis-dot')) {
+        map.setPaintProperty('rel-mis-dot', 'icon-opacity',
+          ['match', ['get', 'expectedId'], ids, 1, DIM_OPACITY] as any)
+      }
+      if (map.getLayer('rel-meter-disabled')) {
+        map.setPaintProperty('rel-meter-disabled', 'icon-opacity',
+          ['match', ['get', 'expected'], ids, 1, DIM_OPACITY] as any)
+      }
     } else {
       map.setPaintProperty('rel-meter-dots', 'circle-opacity', METER_OPACITY_SOFT as any)
       map.setPaintProperty('rel-meter-dots', 'circle-radius', METER_RADIUS_SOFT as any)
       map.setPaintProperty('rel-meter-dots', 'circle-stroke-width', 0 as any)
-      map.setPaintProperty('rel-dcu-dots', 'circle-opacity', 1 as any)
-      map.setPaintProperty('rel-dcu-dots', 'circle-stroke-opacity', 1 as any)
-      if (map.getLayer('rel-dcu-off')) map.setPaintProperty('rel-dcu-off', 'icon-opacity', 1 as any)
+      map.setPaintProperty('rel-dcu-dots', 'icon-opacity', 1 as any)
+      if (map.getLayer('rel-mis-dot')) map.setPaintProperty('rel-mis-dot', 'icon-opacity', 1 as any)
+      if (map.getLayer('rel-meter-disabled')) map.setPaintProperty('rel-meter-disabled', 'icon-opacity', 1 as any)
     }
   }, [focus])
+
+  /**
+   * hover 卡定位：預設在游標右下；靠近地圖右緣／下緣時翻到左側／上方，
+   * 不然卡片會被地圖容器裁掉（L3 滑過右側鄰區時最明顯）。
+   */
+  const popPos = (x: number, y: number, w: number, h: number) => {
+    const W = containerRef.current?.clientWidth ?? Infinity
+    const H = containerRef.current?.clientHeight ?? Infinity
+    const left = x + 14 + w > W - 8 ? Math.max(8, x - 14 - w) : x + 14
+    const top = y + 12 + h > H - 8 ? Math.max(8, y - 12 - h) : y + 12
+    return { left, top }
+  }
+
+  latestRef.current = { buildPoly, buildMisPoints, applyPickMode, buildMarkers, fitScope }
 
   return (
     <div className="absolute inset-0">
       <div ref={containerRef} className="absolute inset-0" />
-      <MisLayerSwitch
-        on={misOnly}
-        onChange={setMisOnly}
-        count={scopeMis.length}
+      <LayerPanel
+        showMis={showMis}
+        onShowMis={setShowMis}
+        showMisLines={showMisLines}
+        onShowMisLines={setShowMisLines}
+        misCount={scopeMis.length}
+        showMeters={showMeters}
+        onShowMeters={setShowMeters}
         metersOn={metersOn}
         pickMode={pickMode}
+        freqCounts={freqCounts}
+        hiddenFreqs={hiddenFreqs}
+        onToggleFreq={(f) => setHiddenFreqs((h) => (h.includes(f) ? h.filter((x) => x !== f) : [...h, f]))}
+        onSoloFreq={(f) => setHiddenFreqs((h) =>
+          // 再雙擊一次已獨顯的頻點＝恢復全部
+          h.length === FREQ_COUNT - 1 && !h.includes(f) ? [] : Array.from({ length: FREQ_COUNT }, (_, i) => i + 1).filter((x) => x !== f))}
+        onShowAllFreqs={() => setHiddenFreqs([])}
+        watchIds={pinnedDcuIds}
+        selectedDcuId={selectedDcuId}
+        onPickWatch={selectDcu}
+        onUnwatch={unwatchDcu}
+        onClearWatch={clearWatch}
       />
+      <WatchNotice />
+      {/* 離島 inset —— 與 DCU 斷線地圖同一個位置與樣式，只在全台層級出現 */}
+      {level === 'taiwan' && (
+        <div className="absolute bottom-[84px] right-3.5 z-[2]">
+          <IslandShortcuts />
+        </div>
+      )}
       <StatsNote />
       {polyHover && (
-        <div className="pointer-events-none absolute z-30 rounded-lg bg-surface border border-border shadow-card px-2.5 py-1.5 text-[12.5px] font-semibold text-ink" style={{ left: polyHover.x + 14, top: polyHover.y + 12 }}>
-          {polyHover.name}
-          <span className="ml-1.5 font-normal tabular-nums" style={{ color: MIS_COLOR }}>歸屬錯誤 {polyHover.mis} 顆</span>
-          <span className="ml-1.5 font-normal text-ink-mut">{level === 'taiwan' ? '點選進入' : pickMode ? '點選檢視歸屬' : '點選移動至此區'}</span>
+        /* 外觀與 DCU 斷線地圖的區塊 hover 一致（2026-09-03 業主意見：兩張圖要一樣） */
+        <div className="pointer-events-none absolute z-30 w-[196px] rounded-lg bg-surface border border-border shadow-card px-3 py-2" style={popPos(polyHover.x, polyHover.y, 196, 145)}>
+          <div className="text-[13px] font-semibold text-ink mb-1">{polyHover.name}</div>
+          <MRow k="DCU 總數" v={polyHover.dcu.toLocaleString()} />
+          <MRow k="電表數" v={polyHover.meters.toLocaleString()} />
+          {/* 歸屬錯誤用與 DCU hover 卡同一個醒目橘；0 顆就維持一般字色 */}
+          {/* 歸屬錯誤率 2026-09-29 依業主意見移除 */}
+          <MRow k="歸屬錯誤電表" v={polyHover.mis.toLocaleString()} color={polyHover.mis ? STATUS.dcuCarries : undefined} />
+          <div className="mt-1 border-t border-divider pt-1 text-[11px] text-ink-mut">
+            {level === 'taiwan' ? '點選進入縣市' : '點選進入行政區'}
+          </div>
         </div>
       )}
       {dcuPop && (
-        <div className="pointer-events-none absolute z-30 w-[250px] rounded-lg bg-surface border border-border shadow-card p-3" style={{ left: dcuPop.x + 14, top: dcuPop.y + 12 }}>
+        <div className="pointer-events-none absolute z-30 w-[250px] rounded-lg bg-surface border border-border shadow-card p-3" style={popPos(dcuPop.x, dcuPop.y, 250, 300)}>
           {/* 標題＝DCU 序號，右側＝區處（電號前兩碼） */}
           <div className="flex items-center justify-between gap-2 mb-1.5">
             <span className="font-mono text-[13.5px] font-semibold text-ink">{dcuPop.dcu.id}</span>
             <span className="text-[11.5px] font-semibold text-ink-sub whitespace-nowrap">{dcuPop.dcu.office}</span>
           </div>
-          <div className="mb-1.5">
-            <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold" style={{ color: dcuPop.dcu.state === 'offline' ? STATE_COLOR.offline : dcuPop.dcu.state === 'disabled' ? STATE_COLOR.disabled : '#2A2125' }}>
-              <span className="h-2.5 w-2.5 rounded-full" style={{ background: dcuPop.dcu.state === 'offline' ? STATE_COLOR.offline : dcuPop.dcu.state === 'disabled' ? STATE_COLOR.disabled : freqColor(dcuPop.dcu.freq) }} />
-              {STATE_LABEL[dcuPop.dcu.state]}
-            </span>
-          </div>
+          {/* 狀態列只在**不正常**時出現 —— 依業主意見，正常 DCU 不必特地寫一行「啟用」，
+              沒有這一行本身就代表正常，也讓斷線／停用在 hover 卡上更跳。 */}
+          {dcuPop.dcu.state !== 'active' && (
+            <div className="mb-1.5">
+              <span
+                className="inline-flex items-center gap-1.5 text-[11px] font-semibold"
+                style={{ color: dcuPop.dcu.state === 'offline' ? STATE_COLOR.offline : STATE_COLOR.disabled }}
+              >
+                <span
+                  className="h-2.5 w-2.5 rounded-[3px]"
+                  style={{ background: dcuPop.dcu.state === 'offline' ? STATE_COLOR.offline : STATE_COLOR.disabled }}
+                />
+                {STATE_LABEL[dcuPop.dcu.state]}
+              </span>
+            </div>
+          )}
           <MRow k="DCU編號" v={dcuPop.dcu.code} />
           <MRow k="地址" v={dcuPop.dcu.address} wrap />
           <MRow k="IP" v={dcuPop.ip} />
@@ -805,17 +1235,19 @@ export function DcuRelationMap() {
             <MRow k="LP 讀表率" v={`${dcuPop.lpRate.toFixed(1)}%`} />
           </div>
           {(dcuPop.misIn > 0 || dcuPop.misOut > 0) && (
-            <div className="mt-1.5 rounded-[4px] px-1.5 py-1 text-[11px] font-semibold flex flex-col gap-0.5" style={{ background: '#EFECEC', color: MIS_COLOR }}>
+            /* 2026-09-03 依業主意見：兩個方向併成同一行、以 : 區隔，並用醒目橘色 */
+            <div className="mt-1.5 flex items-baseline gap-1.5 rounded-[4px] px-1.5 py-1 text-[11px] font-semibold" style={{ background: '#FFF3E6' }}>
               <span className="text-ink-sub">歸屬錯誤</span>
-              {dcuPop.misIn > 0 && <span>他台連入 {dcuPop.misIn} 顆</span>}
-              {dcuPop.misOut > 0 && <span>連入他台 {dcuPop.misOut} 顆</span>}
+              <span className="tabular-nums" style={{ color: STATUS.dcuCarries }}>
+                他台連入 {dcuPop.misIn} : 連入他台 {dcuPop.misOut}
+              </span>
             </div>
           )}
         </div>
       )}
       {misPop && (
         /* 一般電表不彈卡；只有歸屬錯誤電表 hover，且只留三個欄位 */
-        <div className="pointer-events-none absolute z-30 w-[218px] rounded-lg bg-surface border border-border shadow-card p-3" style={{ left: misPop.x + 14, top: misPop.y + 12 }}>
+        <div className="pointer-events-none absolute z-30 w-[218px] rounded-lg bg-surface border border-border shadow-card p-3" style={popPos(misPop.x, misPop.y, 218, 100)}>
           <MRow k="表號" v={misPop.id} />
           <MRow k="連線 DCU" v={misPop.actualId} />
           <MRow k="歸屬 DCU" v={misPop.expectedId} />
@@ -826,67 +1258,281 @@ export function DcuRelationMap() {
 }
 
 /**
- * 統計口徑備註（地圖右側）—— 業主要求把「圖面看得到 ≠ 統計算得到」寫清楚：
+ * 統計口徑備註（地圖右上）—— 業主要求把「圖面看得到 ≠ 統計算得到」寫清楚：
  * 停用設備只在這張圖有圖示，所有數據一律排除；歸屬統計以白名單為準。
+ *
+ * 2026-08-27 依業主意見改為 **hover 標題才展開**：常駐的四行字太佔畫面，
+ * 而且它是「讀一次就知道」的說明，不需要一直佔著右上角。
+ * 與系統總覽的 KPI 說明一致，用純 CSS group-hover，不進 state。
  */
 function StatsNote() {
   return (
-    <div className="pointer-events-none absolute right-3 top-3 z-10 w-[212px] rounded-lg bg-surface/92 backdrop-blur border border-border shadow-card px-3 py-2">
-      <div className="text-[11.5px] font-semibold text-ink mb-1">備註</div>
-      <ul className="flex flex-col gap-1 text-[11px] leading-snug text-ink-sub">
-        <li className="flex gap-1.5">
-          <span className="mt-[3px] h-3 w-3 shrink-0 rounded-full border-2 border-white shadow-sm" style={{ background: STATE_COLOR.disabled }} />
-          停用設備僅於本圖以灰色圖示呈現
-        </li>
-        <li>· 數據統計不計算停用設備</li>
-        <li>· 統計資訊依白名單歸屬統計、排除停用</li>
-        <li>· 他台連入不計入本台；連入他台仍計入本台</li>
-      </ul>
+    <div className="group absolute right-3 top-3 z-10">
+      <button
+        type="button"
+        className="inline-flex items-center gap-1 rounded-lg border border-border bg-surface/92 px-2.5 py-1.5 text-[11.5px] font-semibold text-ink-sub shadow-card backdrop-blur transition-colors hover:text-ink"
+        aria-label="查看統計口徑備註"
+      >
+        <Info size={13} />
+        備註
+      </button>
+      <div className="pointer-events-none absolute right-0 top-full z-30 mt-1.5 w-[236px] translate-y-1 opacity-0 transition-all duration-150 group-hover:translate-y-0 group-hover:opacity-100 group-focus-within:translate-y-0 group-focus-within:opacity-100">
+        <div className="rounded-lg border border-border bg-surface px-3 py-2.5 shadow-card">
+          <div className="mb-1.5 text-[11.5px] font-semibold text-ink">統計口徑備註</div>
+          <ul className="flex flex-col gap-1 text-[11px] leading-snug text-ink-sub">
+            <li className="flex gap-1.5">
+              <span className="mt-[3px] h-3 w-3 shrink-0 rounded-[3px] border-2 border-white shadow-sm" style={{ background: STATE_COLOR.disabled }} />
+              停用設備僅於本圖以灰色圖示呈現
+            </li>
+            <li>· 數據統計不計算停用設備</li>
+            <li>· 統計資訊依白名單歸屬統計、排除停用</li>
+            <li>· 他台連入不計入本台；連入他台仍計入本台</li>
+          </ul>
+        </div>
+      </div>
     </div>
   )
 }
 
-/* ---- 歸屬錯誤圖層開關（地圖左上）—— 取代原本的歸屬範圍圈三段切換 ---- */
-function MisLayerSwitch({ on, onChange, count, metersOn, pickMode }: {
-  on: boolean; onChange: (v: boolean) => void; count: number; metersOn: boolean; pickMode: boolean
+/** L3 左下的頻點統計／篩選列 —— 2026-10-01 業主意見先拿掉 */
+const SHOW_FREQ_PANEL = false
+
+/**
+ * 顯示圖層面板（地圖左上）—— 兩層各自獨立，**不是二擇一**。
+ *   · 正常電表     —— 手動開關。唯一的附加條件是縮放門檻（見 `applyMeters`），
+ *                     沒放大到街道級時面板下方會說明。
+ *   · 歸屬錯誤電表 —— 疊加層：畫出範圍內全部歸屬錯誤電表與兩條歸屬線；
+ *                     關閉時仍會畫「選取中 DCU」的歸屬錯誤，只是不整層攤開。
+ * 兩個開關在 L1／L2 的區域選取模式下都不適用（那個層級不畫任何裝置點，
+ * 歸屬錯誤改以群集呈現），所以一律停用並說明原因。
+ */
+function LayerPanel({
+  showMis, onShowMis, misCount, showMisLines, onShowMisLines, showMeters, onShowMeters, metersOn, pickMode,
+  freqCounts, hiddenFreqs, onToggleFreq, onSoloFreq, onShowAllFreqs,
+  watchIds, selectedDcuId, onPickWatch, onUnwatch, onClearWatch,
+}: {
+  showMis: boolean; onShowMis: (v: boolean) => void; misCount: number
+  showMisLines: boolean; onShowMisLines: (v: boolean) => void
+  showMeters: boolean; onShowMeters: (v: boolean) => void
+  metersOn: boolean; pickMode: boolean
+  freqCounts: number[]; hiddenFreqs: number[]
+  onToggleFreq: (f: number) => void; onSoloFreq: (f: number) => void; onShowAllFreqs: () => void
+  watchIds: string[]; selectedDcuId: string | null
+  onPickWatch: (id: string) => void; onUnwatch: (id: string) => void; onClearWatch: () => void
+}) {
+  /* 2026-09-29 業主意見：原本一張直式面板（觀察中＋圖層＋頻點）把左半張圖都遮掉了。
+     · L1／L2 這些開關全部不適用 → 整個面板移除
+     · L3：觀察中 DCU 與顯示圖層左右並排在上方；頻點統計移到下方、圖例上面，改成一列 */
+  if (pickMode) return null
+  return (
+    <>
+    <div className="pointer-events-none absolute left-3 right-[96px] top-3 z-20 flex items-start gap-2">
+      <div className="pointer-events-auto w-[200px] shrink-0 rounded-lg border border-border bg-surface/92 shadow-card backdrop-blur">
+        <WatchSection ids={watchIds} selectedId={selectedDcuId} onPick={onPickWatch} onRemove={onUnwatch} onClear={onClearWatch} />
+      </div>
+      <div className="pointer-events-auto flex min-w-0 items-center gap-1 rounded-lg border border-border bg-surface/92 p-1 shadow-card backdrop-blur">
+        <span className="shrink-0 px-1.5 text-[11.5px] font-semibold text-ink">顯示圖層</span>
+        <LayerToggle
+          on={showMeters}
+          onToggle={() => onShowMeters(!showMeters)}
+          title={`載入整區所有電表（效能較差；需放大到 z${METER_MIN_ZOOM} 以上才會載入）。平常請改用「觀察中 DCU」`}
+          swatch={<span className="h-2.5 w-2.5 rounded-full" style={{ background: FREQ_COLORS[0] }} />}
+          label={showMeters && !metersOn ? '全部電表（請放大）' : '全部電表'}
+          hint="效能較差"
+        />
+        <LayerToggle
+          on={showMis}
+          onToggle={() => onShowMis(!showMis)}
+          title="畫出範圍內全部歸屬錯誤電表與其兩端 DCU（實線＝實際收容、虛線＝白名單應屬）"
+          swatch={
+            <span className="grid h-3.5 w-3.5 place-items-center rounded-full text-[8px] font-bold leading-none text-white" style={{ background: MIS_COLOR }}>
+              ✕
+            </span>
+          }
+          label="歸屬錯誤電表"
+          count={misCount}
+        />
+        <LayerToggle
+          on={showMisLines && showMis}
+          disabled={!showMis}
+          onToggle={() => onShowMisLines(!showMisLines)}
+          title={!showMis ? '需先開啟「歸屬錯誤電表」' : '顯示／隱藏歸屬線（實線＝實際收容、虛線＝白名單應屬）'}
+          swatch={
+            <span className="flex h-3.5 w-3.5 items-center">
+              <span className="h-[2px] w-full rounded-full" style={{ background: MIS_COLOR }} />
+            </span>
+          }
+          label="歸屬線條"
+        />
+      </div>
+    </div>
+      {/* 頻點：色塊＝地圖上 DCU／電表的顏色，下方數字＝本行政區該頻點的電表數。
+          點一下隱藏／顯示；雙擊＝只看這個頻點（再雙擊恢復全部）。位置在左下圖例上方。
+          2026-10-01 業主意見：L3 頻點統計先拿掉 → SHOW_FREQ_PANEL 關閉；要恢復改回 true 即可 */}
+      {SHOW_FREQ_PANEL && (
+      <div className="absolute bottom-[52px] left-3 z-20 flex items-center gap-1 rounded-lg border border-border bg-surface/92 px-1.5 py-1 shadow-card backdrop-blur">
+          <div className="flex shrink-0 flex-col items-start px-1 text-[11px] font-semibold text-ink-sub">
+            <span>頻點</span>
+            {hiddenFreqs.length > 0 && (
+              <button type="button" onClick={onShowAllFreqs} className="text-[10.5px] font-medium text-brand hover:underline">
+                全部顯示
+              </button>
+            )}
+          </div>
+          <div className="flex gap-0.5">
+            {freqCounts.map((n, i) => {
+              const f = i + 1
+              const on = !hiddenFreqs.includes(f)
+              return (
+                <button
+                  key={f}
+                  type="button"
+                  aria-pressed={on}
+                  onClick={() => onToggleFreq(f)}
+                  onDoubleClick={() => onSoloFreq(f)}
+                  title={`第 ${f} 頻點・電表 ${n.toLocaleString()} 具（點選顯示／隱藏，雙擊只看此頻點）`}
+                  className={`flex w-[30px] flex-col items-center gap-0.5 rounded-md py-0.5 transition-colors hover:bg-inset ${on ? '' : 'opacity-35'}`}
+                >
+                  <span
+                    className="grid h-4 w-4 place-items-center rounded-full text-[9px] font-bold leading-none text-white"
+                    style={{ background: on ? freqColor(f) : STATE_COLOR.disabled }}
+                  >
+                    {f}
+                  </span>
+                  <span className={`text-[9.5px] tabular-nums text-ink-mut ${on ? '' : 'line-through'}`}>{n}</span>
+                </button>
+              )
+            })}
+          </div>
+      </div>
+      )}
+    </>
+  )
+}
+
+/**
+ * 觀察中 DCU（圖層面板最上方）—— 2026-09-23 依業主意見（效能）新增。
+ * 點地圖或右側列表的 DCU 就加入（最多 MAX_WATCH 台），地圖只畫這幾台的電表與相關歸屬錯誤。
+ * 每台一列：觀察組別色點（＝地圖上 DCU 外環色）、DCU 序號、白名單電表數、✕ 移除。
+ * 點列＝切換成「目前」那台（右側電表列表跟著換、鏡頭移過去）。
+ */
+function WatchSection({ ids, selectedId, onPick, onRemove, onClear }: {
+  ids: string[]; selectedId: string | null
+  onPick: (id: string) => void; onRemove: (id: string) => void; onClear: () => void
 }) {
   return (
-    <div className="absolute left-3 top-3 z-20 flex flex-col items-start gap-1">
-      <button
-        onClick={() => onChange(!on)}
-        title="只顯示歸屬錯誤的電表與其相關 DCU（實線＝實際收容、虛線＝白名單應屬）"
-        className={`inline-flex items-center gap-1.5 rounded-lg border shadow-card px-2.5 py-1.5 text-[11.5px] font-medium transition-colors ${
-          on ? 'bg-ink text-white border-ink' : 'bg-surface/92 backdrop-blur text-ink-sub border-border hover:bg-bg'
-        }`}
-      >
-        <span className="grid place-items-center h-3.5 w-3.5 rounded-full text-white text-[8px] font-bold leading-none" style={{ background: MIS_COLOR }}>✕</span>
-        只顯示歸屬錯誤
-        {count > 0 && (
-          <span className={`tabular-nums rounded-full px-1.5 text-[10px] font-bold ${on ? 'bg-white/20' : 'bg-inset text-ink-sub'}`}>{count}</span>
+    <div className="p-1.5">
+      <div className="flex items-center justify-between px-1 pb-1">
+        <span className="text-[11.5px] font-semibold text-ink">
+          觀察中 DCU <span className="tabular-nums text-ink-mut">{ids.length}/{MAX_WATCH}</span>
+        </span>
+        {ids.length > 0 && (
+          <button type="button" onClick={onClear} className="text-[11px] font-medium text-brand hover:underline">全部清除</button>
         )}
-      </button>
-      {!pickMode && !metersOn && !on && (
-        <span
-          className="rounded-md bg-surface/92 backdrop-blur border border-border shadow-card px-2 py-1 text-[11px] text-ink-mut"
-          title={`低於 z${METER_MIN_ZOOM} 不載入電表點，避免大範圍持有大量電表資料`}
-        >
-          放大以顯示電表
-        </span>
-      )}
-      {pickMode && (
-        <span className="rounded-md bg-surface/92 backdrop-blur border border-border shadow-card px-2 py-1 text-[11px] text-ink-mut">
-          點選區域以檢視電表歸屬
-        </span>
+      </div>
+      {ids.length === 0 ? (
+        <p className="px-1 pb-0.5 text-[11px] leading-snug text-ink-mut">
+          點選地圖或右側列表的 DCU 加入觀察，才會顯示它的電表與相關歸屬錯誤（最多 {MAX_WATCH} 台）
+        </p>
+      ) : (
+        <div className="flex flex-col gap-0.5">
+          {ids.map((id, i) => {
+            const d = dcuById.get(id)
+            const n = metersExpectedAll(id).filter((m) => !m.disabled).length
+            const current = id === selectedId
+            return (
+              <div
+                key={id}
+                onClick={() => onPick(id)}
+                title="設為目前 DCU（右側顯示它的電表列表）"
+                className={`group flex cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-1 text-[11.5px] ${current ? 'bg-brand-soft' : 'hover:bg-inset'}`}
+              >
+                <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: GROUP_COLORS[i % GROUP_COLORS.length] }} />
+                <span className={`min-w-0 flex-1 truncate font-mono ${current ? 'font-semibold text-brand' : 'text-ink'}`}>{id}</span>
+                {d && d.state !== 'active' && (
+                  <span className="shrink-0 text-[10px]" style={{ color: d.state === 'offline' ? STATE_COLOR.offline : STATE_COLOR.disabled }}>
+                    {STATE_LABEL[d.state]}
+                  </span>
+                )}
+                <span className="shrink-0 tabular-nums text-[10.5px] text-ink-mut">{n} 具</span>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); onRemove(id) }}
+                  title="移除觀察"
+                  className="grid h-4 w-4 shrink-0 place-items-center rounded text-ink-mut hover:bg-surface hover:text-brand"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            )
+          })}
+        </div>
       )}
     </div>
   )
 }
 
-function MRow({ k, v, wrap }: { k: string; v: string; wrap?: boolean }) {
+/** 觀察已滿等提示 —— 觀察清單右邊、顯示圖層列下方（兩者都不蓋住），3.5 秒後自動消失 */
+function WatchNotice() {
+  const n = useWarroom((s) => s.watchNotice)
+  const dismiss = useWarroom((s) => s.dismissWatchNotice)
+  useEffect(() => {
+    if (!n) return
+    const t = window.setTimeout(dismiss, 3500)
+    return () => window.clearTimeout(t)
+  }, [n, dismiss])
+  if (!n) return null
+  return (
+    <div className="pointer-events-none absolute left-[224px] right-[96px] top-[56px] z-30 flex justify-center">
+      <div key={n.at} className="pointer-events-auto flex max-w-[380px] items-center gap-2 rounded-lg border border-warning-bd bg-warning-bg px-3 py-2 text-[12.5px] text-ink shadow-card modal-pop">
+        <Info size={14} className="shrink-0 text-warning" />
+        {n.text}
+        <button type="button" onClick={dismiss} className="ml-1 text-ink-mut hover:text-ink" title="關閉"><X size={13} /></button>
+      </div>
+    </div>
+  )
+}
+
+/** 圖層面板的單列開關 —— 左側色塊、中間名稱、右側計數與勾選狀態 */
+function LayerToggle({ on, disabled, onToggle, title, swatch, label, count, hint }: {
+  on: boolean; disabled?: boolean; onToggle: () => void; title: string
+  swatch: React.ReactNode; label: string; count?: number; hint?: string
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      disabled={disabled}
+      onClick={onToggle}
+      title={title}
+      className={[
+        'flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-1.5 py-1 text-[11.5px] font-medium transition-colors',
+        disabled ? 'cursor-not-allowed text-ink-fai opacity-60' : on ? 'bg-brand-soft text-brand' : 'text-ink-sub hover:bg-inset',
+      ].join(' ')}
+    >
+      <span className={`grid h-3.5 w-3.5 shrink-0 place-items-center rounded-[3px] border text-[9px] font-bold leading-none ${
+        on ? 'border-brand bg-brand text-white' : 'border-border-strong bg-surface text-transparent'
+      }`}>
+        ✓
+      </span>
+      <span className="shrink-0">{swatch}</span>
+      <span className="text-left">{label}</span>
+      {hint && <span className="shrink-0 text-[10px] font-normal text-ink-mut">{hint}</span>}
+      {count != null && count > 0 && (
+        <span className={`shrink-0 rounded-full px-1.5 text-[10px] font-bold tabular-nums ${on ? 'bg-brand/15' : 'bg-inset text-ink-sub'}`}>
+          {count}
+        </span>
+      )}
+    </button>
+  )
+}
+
+function MRow({ k, v, wrap, color }: { k: string; v: string; wrap?: boolean; color?: string }) {
   return (
     <div className="flex items-start justify-between gap-2 text-[12px] py-0.5">
       <span className="text-ink-sub shrink-0">{k}</span>
-      <span className={`font-medium text-ink text-right ${wrap ? '' : 'font-mono whitespace-nowrap'}`}>{v}</span>
+      <span className={`font-medium text-ink text-right ${wrap ? '' : 'font-mono whitespace-nowrap'}`} style={color ? { color } : undefined}>{v}</span>
     </div>
   )
 }

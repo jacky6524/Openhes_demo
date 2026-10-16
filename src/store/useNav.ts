@@ -1,7 +1,10 @@
 import { create } from 'zustand'
 
 /** which top-level demo screen is showing (lightweight client-side routing) */
-export type View = 'overview' | 'dcu' | 'dcuDetail' | 'warroom'
+export type View =
+  | 'overview' | 'dcu' | 'dcuList' | 'meterList' | 'instantQuery' | 'registrationConflict' | 'deviceGroups' | 'deviceRecord' | 'deviceModule' | 'readPerformance' | 'statsReport' | 'dcuDetail' | 'warroom'
+  // 權限管理三頁
+  | 'permAccount' | 'permFunction' | 'permRole'
 
 interface NavState {
   view: View
@@ -15,7 +18,8 @@ interface NavState {
 export const useNav = create<NavState>((set, get) => ({
   view: 'overview',
   dcuModel: null,
-  dcuDetailFrom: 'dcu',
+  // 「裝置列表」已自側欄移除，詳細頁預設退回 DCU清單
+  dcuDetailFrom: 'dcuList',
   setView: (view) => set({ view }),
   openDcuDetail: (model, from) =>
     set({ view: 'dcuDetail', dcuModel: model, dcuDetailFrom: from ?? (get().view === 'dcuDetail' ? get().dcuDetailFrom : get().view) }),

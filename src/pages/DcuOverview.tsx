@@ -26,7 +26,7 @@ const UPDATE_TIME = '2025-01-01 15:00'
 /**
  * 裝置管理 · DCU 裝置列表 (Figma 2934:57458).
  *   ┌ 裝置列表 ─────────────── 更新時間 … ┐  街道地圖 + DCU 標記
- *   ┌ DCU 列表   圖例 · 上線/總數 · DCU/LTE/NB-IoT ┐  可篩選/搜尋/排序 + 分頁
+ *   ┌ DCU 列表（hover 說明統計口徑）        讀表率色階圖例 ┐  可篩選/搜尋/排序 + 分頁
  * Each row has 複製 + 詳細資料 actions; 詳細資料 opens the DCU detail screen.
  */
 export function DcuOverview() {
@@ -110,11 +110,9 @@ function DcuMapPanel() {
 
 type SortKey = 'read' | 'percent'
 type StatusFilter = 'all' | DcuStatus
-const PROTOCOLS = ['DCU', 'LTE', 'NB-IoT'] as const
 
 function DcuTable({ selected, onSelectDcu }: { selected: string | null; onSelectDcu: (m: string) => void }) {
   const openDcuDetail = useNav((s) => s.openDcuDetail)
-  const [protocol, setProtocol] = useState<(typeof PROTOCOLS)[number]>('DCU')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [modelQ, setModelQ] = useState('')
   const [serialQ, setSerialQ] = useState('')
@@ -160,34 +158,30 @@ function DcuTable({ selected, onSelectDcu }: { selected: string | null; onSelect
     <div className="rounded-card bg-surface border border-border shadow-card p-4">
       {/* header */}
       <div className="flex items-center justify-between flex-wrap gap-3 mb-3">
-        <h3 className="text-[15px] font-semibold text-ink">DCU 列表</h3>
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-3 text-[12px] text-ink-sub">
-            <span className="flex items-center gap-1.5">
-              <span className="h-2.5 w-2.5 rounded-sm" style={{ background: RED }} />＜50%
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="h-2.5 w-2.5 rounded-sm" style={{ background: statusTok.warning.fg }} />50-80%
-            </span>
+        {/* 標題 hover 說明統計口徑（2026-09-03 業主意見） */}
+        <div className="group relative">
+          <h3 className="text-[15px] font-semibold text-ink cursor-default border-b border-dashed border-border-strong">
+            DCU 列表
+          </h3>
+          <div className="pointer-events-none absolute left-0 top-full z-40 mt-2 w-[248px] translate-y-1 opacity-0 transition-all duration-150 group-hover:translate-y-0 group-hover:opacity-100">
+            <div className="overflow-hidden rounded-lg border border-border bg-surface shadow-card">
+              <div className="border-b border-divider bg-inset/50 px-3 py-1.5 text-[11px] font-semibold text-ink-sub">
+                統計口徑
+              </div>
+              <div className="px-3 py-2 text-[11.5px] leading-snug text-ink-sub">
+                本列表統計<b className="text-ink">以白名單為主</b>，且<b className="text-ink">不包含停用電表</b>。
+              </div>
+            </div>
           </div>
-          <div className="text-[12px] text-ink-sub tabular-nums">
-            上線數 <b className="text-ink">{fmtInt(DCU_SUMMARY.online)}</b> / 總數{' '}
-            <b className="text-ink">{fmtInt(DCU_SUMMARY.total)}</b>
-          </div>
-          <div className="flex items-center gap-0.5 rounded-lg bg-inset p-0.5">
-            {PROTOCOLS.map((p) => (
-              <button
-                key={p}
-                onClick={() => setProtocol(p)}
-                className={[
-                  'px-3 py-1 rounded-md text-[12px] font-medium transition-colors',
-                  protocol === p ? 'bg-surface text-ink shadow-card' : 'text-ink-sub hover:text-ink',
-                ].join(' ')}
-              >
-                {p}
-              </button>
-            ))}
-          </div>
+        </div>
+        {/* 讀表率色階圖例 —— 上線/總數與 DCU/LTE/NB-IoT 頁籤依業主意見移除 */}
+        <div className="flex items-center gap-3 text-[12px] text-ink-sub">
+          <span className="flex items-center gap-1.5">
+            <span className="h-2.5 w-2.5 rounded-sm" style={{ background: RED }} />＜50%
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="h-2.5 w-2.5 rounded-sm" style={{ background: statusTok.warning.fg }} />50-80%
+          </span>
         </div>
       </div>
 

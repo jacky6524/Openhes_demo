@@ -2,6 +2,8 @@
  * Tailwind theme = utility-class mirror of src/tokens.ts.
  * src/tokens.ts is the canonical source for runtime/JS usage (charts, map fills).
  * Keep these two in sync — same hex values, same names.
+ *
+ * ⚠ 兩份都已對齊前端正式包 openhes-front/shared/assets/color.css。
  */
 /** @type {import('tailwindcss').Config} */
 export default {
@@ -9,38 +11,49 @@ export default {
   theme: {
     extend: {
       colors: {
-        // neutral (warm rose)
-        bg: '#F5EDEE',
+        // neutral — 前端 --surface-* / --border-*
+        bg: '#F9FAFB',
+        // 設計稿的整頁底色與頂欄／側欄底色（取自業主提供的「背景顏色設定參考」）
+        page: '#F5EDEE',
+        chrome: '#FAF6F6',
         surface: '#FFFFFF',
-        inset: '#F0E7E8',
-        border: '#E7DBDD',
-        divider: '#EEE4E5',
-        // text
-        ink: '#2A2125',
-        'ink-sub': '#6B5E62',
-        'ink-mut': '#A89BA0',
-        // brand (rose) — brand / primary action / selected / link ONLY
+        inset: '#F3F4F6',
+        border: '#E5E7EB',
+        'border-strong': '#D1D5DB',
+        'card-border': '#E7DBDD',
+        'card-border-alert': '#C74365',
+        divider: '#F3F4F6',
+        // text — 前端 --text-*
+        ink: '#1E2939',
+        'ink-sub': '#4A5565',
+        'ink-mut': '#6A7282',
+        'ink-fai': '#99A1AF',
+        // brand (HES red) — 品牌 / 主要動作 / 選取 / 連結
         brand: {
-          DEFAULT: '#C23B52',
-          deep: '#A22C40',
-          soft: '#FAE6EB',
+          DEFAULT: '#C10007', // --brand-700 / --text-theme
+          solid: '#E7000B', // --brand-600 / --link-filled
+          deep: '#9F0712', // --brand-800
+          soft: '#FEF2F2', // --brand-50 / --surface-theme
+          'soft-hover': '#FFE2E2', // --brand-100
         },
-        // status — foreground tones (use *-bg / *-bd via tokens.ts for fills/borders)
-        normal: '#12936A',
-        'normal-bg': '#E0F4ED',
-        'normal-bd': '#AEDFCE',
-        warning: '#E08A0B',
-        'warning-bg': '#FCEFD6',
-        'warning-bd': '#F2D69A',
-        danger: '#DB3B36',
-        'danger-bg': '#FBE0DF',
-        'danger-bd': '#F2B5B2',
-        critical: '#A82A30',
-        'critical-bg': '#F6D6D6',
-        'critical-bd': '#E5AEAE',
-        info: '#2F6BED',
-        'info-bg': '#E7F0FE',
-        'info-bd': '#BBD4F6',
+        // status — 前端 --status-*-emphasis / --status-*-border
+        normal: '#00BC7D',
+        'normal-bg': '#ECFDF5',
+        'normal-bd': '#BBF7D0',
+        warning: '#FFB900',
+        'warning-bg': '#FFFBEB',
+        'warning-bd': '#FDE68A',
+        danger: '#FB2C36',
+        'danger-bg': '#FEF2F2',
+        'danger-bd': '#FECACA',
+        critical: '#C10007',
+        'critical-bg': '#FFE2E2',
+        'critical-bd': '#FFC9C9',
+        info: '#2B7FFF',
+        'info-bg': '#EFF6FF',
+        'info-bd': '#BAE6FD',
+        // 系統總覽 ALT 區塊 — tokens.ts overview.alt
+        alt: '#0E8FA8',
         // magnitude / trend — single-hue purple scale
         mag: {
           50: '#F1EFFC',
@@ -52,15 +65,25 @@ export default {
         },
       },
       boxShadow: {
-        // floating card: faint double-layer (NOT heavy borders)
-        card: '0 1px 2px rgba(42,33,37,.05), 0 6px 18px rgba(42,33,37,.08)',
-        drawer: '-8px 0 28px rgba(42,33,37,.12)',
+        // 前端 --boxshadow-cardS / cardM / cardL
+        card: '0px 2px 4px -1px #9F071212, 0px 0px 1px 0px #82181A06',
+        'card-hover': '0px 10px 12px -2px #9F071212, 0px 4px 6px -1px #00000002, 0px 0px 1px 0px #82181A06',
+        drawer: '-8px 20px 24px -2px #9F071212, 0px 4px 8px -1px #00000004, 0px 0px 1px 0px #82181A06',
       },
       borderRadius: {
-        card: '11px',
+        // 前端 --radius-*；card 對應 .metric-card / .panel 的 16px
+        card: '16px',
+        panel: '12px',
+        field: '8px',
       },
       fontFamily: {
-        sans: ['"Inter"', '"Noto Sans TC"', 'system-ui', 'sans-serif'],
+        // 前端 font.css：* { font-family: 'Rubik', 'Noto Sans TC', sans-serif }
+        sans: ['Rubik', '"Noto Sans TC"', 'system-ui', 'sans-serif'],
+      },
+      backgroundImage: {
+        // 前端 .new-dashboard 頁底
+        dashboard:
+          'radial-gradient(circle at 8% 8%, rgba(173, 49, 85, 0.08), transparent 28%), linear-gradient(180deg, #F8F0F2 0%, #F6EEEE 100%)',
       },
     },
   },

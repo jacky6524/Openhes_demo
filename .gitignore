@@ -23,3 +23,6 @@ Thumbs.db
 # 編輯器
 .vscode/
 .idea/
+
+# 正式前端（Nuxt）為獨立 git 倉庫，不納入本倉庫
+openhes-front/

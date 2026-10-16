@@ -13,9 +13,21 @@ import type maplibregl from 'maplibre-gl'
 export type MapKey = 'fault' | 'relation'
 
 const maps: Partial<Record<MapKey, maplibregl.Map>> = {}
+/**
+ * 每張圖目前鏡頭是替哪個範圍（層級｜縣市｜行政區）取的景。
+ * 隱藏中的那張不自行取景，若「切頁籤」與「換範圍」同時發生（例如從列表點歸屬錯誤電表），
+ * 它的鏡頭還停在舊範圍；沒有這個標記的話 pullCamera 會把舊視角照抄過來，
+ * L2 就變成停在全台的取景、縣市縮在畫面上方（2026-09-29 業主回報「L2 沒有置中」）。
+ */
+const scopes: Partial<Record<MapKey, string>> = {}
 
 export function registerMap(key: MapKey, map: maplibregl.Map) { maps[key] = map }
-export function unregisterMap(key: MapKey) { delete maps[key] }
+export function unregisterMap(key: MapKey) { delete maps[key]; delete scopes[key] }
+/** 範圍鍵：層級｜縣市｜行政區（全台層級不看縣市） */
+export const scopeKey = (s: { level: string; city: string; district: string }) =>
+  s.level === 'taiwan' ? 'taiwan' : `city|${s.city}|${s.district}`
+/** 顯示中的那張依範圍取景時呼叫，記下這個鏡頭屬於哪個範圍 */
+export function setCameraScope(key: MapKey, scope: string) { scopes[key] = scope }
 
 const cameraOf = (map: maplibregl.Map) => {
   const c = map.getCenter()
@@ -34,7 +46,9 @@ export function pushCamera(from: MapKey) {
   const cam = cameraOf(src)
   ;(Object.keys(maps) as MapKey[]).forEach((k) => {
     const m = maps[k]
-    if (!m || k === from || same(m, cam)) return
+    if (!m || k === from) return
+    scopes[k] = scopes[from]
+    if (same(m, cam)) return
     m.stop()
     m.jumpTo(cam)
   })
@@ -42,16 +56,18 @@ export function pushCamera(from: MapKey) {
 
 /**
  * 切換成顯示中的那張時呼叫：從另一張讀當下鏡頭並對齊。
- * @returns false 代表沒有其他地圖可參照（呼叫端應自行取景）
+ * @param scope 目前的範圍；另一張的鏡頭若不是替這個範圍取的景，就不照抄
+ * @returns false 代表沒有可參照的鏡頭（呼叫端應自行取景）
  */
-export function pullCamera(to: MapKey): boolean {
+export function pullCamera(to: MapKey, scope: string): boolean {
   const dst = maps[to]
   if (!dst) return false
   const other = (Object.keys(maps) as MapKey[]).find((k) => k !== to && maps[k])
-  if (!other) return false
+  if (!other || scopes[other] !== scope) return false
   const cam = cameraOf(maps[other]!)
   dst.stop()
   if (!same(dst, cam)) dst.jumpTo(cam)
+  scopes[to] = scope
   return true
 }
 

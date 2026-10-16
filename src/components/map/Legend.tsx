@@ -1,30 +1,29 @@
-import { Info } from 'lucide-react'
 import { health, noMeter } from '@/tokens'
 import { THRESHOLDS } from '@/config/thresholds'
 
 /**
- * Map health legend: 良好 / 注意 / 警告 + 無智慧電表 (§4.2 bottom-left).
- * The map is coloured by LP 讀表率, so the hover spells out the exact LP bands
- * that drive each colour (reads live from THRESHOLDS.lp so legend ↔ map never
- * drift). 「無智慧電表」是「沒有資料」而非健康狀態，以斜線紋區隔。
- * Popover opens ABOVE the chip since the legend sits at the map's foot.
+ * 地圖圖例 — 對齊前端 MapLibreDashboardMap.vue：
+ *   `.map-legend`      白底膠囊，12px #6f6267，色塊 20×12 / radius 4
+ *   `.swatch--stripe`  「無電表」用 3px 虛線條，不用實心色塊
+ *   `.map-legend-help` hover 說明浮框（246px，14px 標題）
+ *
+ * 地圖著色綁 LP 讀表率，門檻直接讀 THRESHOLDS.lp，圖例與地圖不會走鐘。
  */
 
-/** small hatched swatch mirroring the map's noMeterHatch pattern */
-function HatchSwatch({ size = 12 }: { size?: number }) {
-  return (
-    <span
-      className="rounded-[3px] border shrink-0"
-      style={{
-        width: size,
-        height: size,
-        borderColor: noMeter.stroke,
-        backgroundColor: noMeter.fill,
-        backgroundImage: `repeating-linear-gradient(45deg, ${noMeter.stroke} 0 1.5px, transparent 1.5px 5px)`,
-      }}
-    />
-  )
+/** 狀態色塊 — 前端 `.swatch`（20×12 / radius 4）；`stripe` 為「無電表」虛線條 */
+export function Swatch({ kind }: { kind: 'good' | 'warning' | 'alert' | 'muted' }) {
+  if (kind === 'muted') {
+    return (
+      <i
+        className="inline-block h-[3px] w-5 shrink-0 rounded-full"
+        style={{ background: 'repeating-linear-gradient(to right, #CFD3DA 0 5px, transparent 5px 8px)' }}
+      />
+    )
+  }
+  return <i className="inline-block h-3 w-5 shrink-0 rounded" style={{ background: health[kind].fill }} />
 }
+
+const ORDER = ['good', 'warning', 'alert'] as const
 
 export function Legend() {
   const { good, warn } = THRESHOLDS.lp
@@ -35,45 +34,63 @@ export function Legend() {
   }
 
   return (
-    <div className="relative group">
-      <div className="flex items-center gap-3 rounded-lg bg-surface/90 backdrop-blur border border-border px-3 py-1.5 shadow-card">
-        {(['good', 'warning', 'alert'] as const).map((k) => (
-          <div key={k} className="flex items-center gap-1.5">
-            <span
-              className="h-3 w-3 rounded-[3px] border"
-              style={{ background: health[k].fill, borderColor: health[k].stroke }}
-            />
-            <span className="text-[12px] text-ink-sub">{health[k].label}</span>
-          </div>
+    <div className="group relative">
+      {/* .map-legend */}
+      <div
+        className="inline-flex items-center gap-3 rounded-lg border px-2.5 py-2 text-[12px]"
+        style={{
+          borderColor: '#EADFE1',
+          background: 'rgba(255,255,255,.95)',
+          boxShadow: '0 8px 20px rgba(58,42,48,.12)',
+          color: '#6F6267',
+        }}
+        tabIndex={0}
+        aria-label="查看讀表率狀態說明"
+      >
+        {ORDER.map((k) => (
+          <span key={k} className="inline-flex items-center gap-1.5">
+            <Swatch kind={k} />
+            {health[k].label}
+          </span>
         ))}
-        <div className="flex items-center gap-1.5">
-          <HatchSwatch />
-          <span className="text-[12px] text-ink-sub">{noMeter.label}</span>
-        </div>
-        <Info size={13} className="text-ink-mut" />
+        <span className="inline-flex items-center gap-1.5">
+          <Swatch kind="muted" />
+          {noMeter.label}
+        </span>
       </div>
 
-      {/* hover popover — opens above the chip */}
-      <div className="pointer-events-none absolute left-0 bottom-full mb-2 z-30 w-[248px] opacity-0 translate-y-1 transition-all duration-150 group-hover:opacity-100 group-hover:translate-y-0">
-        <div className="rounded-lg bg-surface border border-border shadow-card px-3 py-2.5 text-[12px]">
-          <div className="font-semibold text-ink mb-1.5">讀表率狀態門檻</div>
-          {(['good', 'warning', 'alert'] as const).map((k) => (
-            <div key={k} className="flex items-center gap-2 py-0.5">
-              <span
-                className="h-2.5 w-2.5 rounded-[2px] border shrink-0"
-                style={{ background: health[k].fill, borderColor: health[k].stroke }}
-              />
-              <span className="text-ink-sub">
-                <b className="text-ink">{health[k].label}</b>：{rules[k]}
-              </span>
+      {/* .map-legend-help — 開在圖例上方 */}
+      <div className="pointer-events-none absolute bottom-full right-0 z-30 mb-2 w-[246px] translate-y-1 opacity-0 transition-all duration-150 group-hover:translate-y-0 group-hover:opacity-100 group-focus-within:translate-y-0 group-focus-within:opacity-100">
+        <div
+          className="rounded-[9px] border px-3.5 py-3 text-[12px]"
+          style={{
+            borderColor: '#EADFE1',
+            background: 'rgba(255,255,255,.98)',
+            boxShadow: '0 10px 24px rgba(58,42,48,.16)',
+            color: '#3D3438',
+          }}
+        >
+          <strong className="mb-2.5 block text-[14px]" style={{ color: '#2D2629' }}>
+            讀表率狀態
+          </strong>
+          <dl className="m-0 grid gap-[9px]">
+            {ORDER.map((k) => (
+              <div key={k} className="flex items-center justify-between gap-3">
+                <dt className="inline-flex items-center gap-1.5">
+                  <Swatch kind={k} />
+                  {health[k].label}
+                </dt>
+                <dd className="m-0 text-right">{rules[k]}</dd>
+              </div>
+            ))}
+            <div className="flex items-start justify-between gap-3">
+              <dt className="inline-flex shrink-0 items-center gap-1.5 pt-1">
+                <Swatch kind="muted" />
+                {noMeter.label}
+              </dt>
+              <dd className="m-0 text-right leading-snug">該區域尚無智慧電表，不列入讀表率著色</dd>
             </div>
-          ))}
-          <div className="flex items-center gap-2 py-0.5 mt-1 pt-1.5 border-t border-divider">
-            <HatchSwatch size={10} />
-            <span className="text-ink-sub">
-              <b className="text-ink">{noMeter.label}</b>：該區域尚無智慧電表，不列入讀表率著色
-            </span>
-          </div>
+          </dl>
         </div>
       </div>
     </div>

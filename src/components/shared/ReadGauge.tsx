@@ -1,52 +1,46 @@
-import { status } from '@/tokens'
+import { health as healthTok } from '@/tokens'
 import type { Health } from '@/types'
 
-/** donut gauge — center % + caption. 環色與連線率指標連動：
- *  良好(≥98%)=綠、注意(95~98%)=黃、告警(<95%)=紅。中央數字固定黑色。 */
+/**
+ * 環形指標 — 對齊前端 `.trend-ring`：
+ *   background: conic-gradient(<健康色> <rate*3.6>deg, #eee9e7 0deg)
+ *   內圈 80% 白色實心，上下兩行（數值 24px / 說明 12px #40373b）
+ *
+ * 環色與地圖健康色同一組（tokens.health）：
+ *   良好(≥98%)=中性灰 #E5E7EB、注意(95~98%)=#FFD230、告警(<95%)=#FB2C36。
+ * 中央數字固定黑色。
+ */
 export function ReadGauge({
   value,
   caption,
   health,
   decimals = 0,
+  size = 188,
 }: {
   value: number
   caption: string
   health: Health
   decimals?: number
+  /** 前端桌機為 min(188px,100%)，矮螢幕壓到 150px */
+  size?: number
 }) {
-  const size = 132
-  const stroke = 14
-  const r = (size - stroke) / 2
-  const c = 2 * Math.PI * r
   const pct = Math.max(0, Math.min(100, value))
-  const dash = (pct / 100) * c
-  // 著色邏輯與連線率指標一致：良好=綠、注意=黃、告警=紅
-  const ring =
-    health === 'alert' ? status.danger.fg : health === 'warning' ? status.warning.fg : status.normal.fg
+  const ring = healthTok[health].accent
 
   return (
-    <div className="relative shrink-0" style={{ width: size, height: size }}>
-      <svg width={size} height={size} className="block">
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#F0E7E8" strokeWidth={stroke} />
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={r}
-          fill="none"
-          stroke={ring}
-          strokeWidth={stroke}
-          strokeLinecap="round"
-          strokeDasharray={`${dash} ${c}`}
-          transform={`rotate(-90 ${size / 2} ${size / 2})`}
-        />
-      </svg>
-      <div className="absolute inset-0 grid place-items-center">
-        <div className="text-center leading-tight">
-          {/* 數字固定黑色 */}
-          <div className="text-[24px] font-bold tabular-nums text-ink">{pct.toFixed(decimals)}%</div>
-          <div className="text-[11px] text-ink-sub">{caption}</div>
-        </div>
-      </div>
+    <div
+      className="grid aspect-square max-h-full place-items-center self-center justify-self-center rounded-full"
+      style={{
+        width: `min(${size}px, 100%)`,
+        background: `conic-gradient(${ring} ${pct * 3.6}deg, #EEE9E7 0deg)`,
+      }}
+    >
+      <span className="grid h-4/5 w-4/5 content-center justify-items-center gap-1.5 rounded-full bg-surface text-center">
+        <strong className="text-[24px] font-extrabold leading-none tabular-nums text-ink">
+          {pct.toFixed(decimals)}%
+        </strong>
+        <small className="px-1 text-[12px] leading-[1.2] text-[#40373B]">{caption}</small>
+      </span>
     </div>
   )
 }

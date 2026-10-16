@@ -3,7 +3,7 @@
  * 色弱友善原則：資訊拆成多通道（形狀＝裝置類型、紅色中心＝斷線、外框色＝群組、
  * 虛線＝跨區/最後已知），不只靠單一顏色。
  */
-import { health, mag } from '@/tokens'
+import { health } from '@/tokens'
 
 /**
  * 行政區嚴重度色（故障地圖色塊）—— 直接沿用系統總覽的 health token，
@@ -100,15 +100,35 @@ export const MIS_COLOR = '#6B5E62'
 export const MIS_DIR_STROKE = { in: '#6B5E62', out: '#9AA0A6' } as const
 
 /**
- * 斷線群集的漸層 —— 改用紫色量級階（`tokens.mag`）。
- * 原本的紅色系落在「良好灰綠／注意黃／警告紅」的區塊底色上不夠跳，而群集數字本來
- * 就是**量級**而非告警值（色彩規則：紫＝量級／趨勢，紅只給告警），換成紫色兩者兼顧。
- * 數量越多越深；白字在四階上都讀得到。
+ * 斷線群集色 —— 2026-09-03 依業主意見改為**單一低飽和淺藍**：
+ * 量級只看球上的數字（2026-09-23 起球一律同尺寸），顏色只負責「這是斷線群集」這一件事。淺藍與底下的
+ * 健康帶色（灰／黃／紅）色相拉開，且不會像高飽和紅一樣整片刺眼。
+ * 淺底上白字不夠，數字改用深藍字（見 CLUSTER_TEXT）。
  */
-export const CLUSTER_RAMP = [mag[3], '#6F5FCC', mag[4], mag[5]] as const
-export const CLUSTER_TEXT = '#FFFFFF'
+export const CLUSTER_COLOR = '#7EB6E3'
+export const CLUSTER_TEXT = '#123E5E'
 
-/** 系統總覽的地圖底色（故障地圖改為純 GeoJSON 模式後沿用，兩頁視覺一致） */
-export const MAP_BG = '#F7F1F2'
+/**
+ * 地圖底色與外框 —— 一律以系統總覽的地圖為準（`components/map/HealthMap.tsx` 的 .map-shell）。
+ * 2026-09-17 業主意見：兩頁的地圖背景要同一個顏色；原本這裡還停在改版前的玫瑰底 #F7F1F2。
+ */
+export const MAP_BG = '#F7F4F4'
+export const MAP_BORDER = '#E2D8DB'
+/**
+ * 選取行政區「以外」的區域 —— 2026-09-03 依業主意見塗灰：
+ * L3 仍要看得到鄰區的電表與 DCU（跨區歸屬才看得出來），但視覺重心要留在選取那一區，
+ * 因此鄰區蓋一層半透明灰，裝置點仍畫在灰層之上。
+ */
+export const OUTSIDE_FILL = '#8E8589'
+export const OUTSIDE_OPACITY = 0.34
+
+/**
+ * 滑過區塊的提示（兩張地圖共用）—— 淡淡提亮＋灰色描邊，只暗示「這塊可以點」。
+ * 2026-09-29 業主意見：原本的品牌紅描邊太搶眼，改成灰色；斷線地圖也比照加上。
+ */
+export const AREA_HOVER_LINE = '#6A7282'
+export const AREA_HOVER_LINE_WIDTH = 1.8
+export const AREA_HOVER_FILL_OPACITY = 0.3
+
 /** 無資料 / 未部署區域（比照系統總覽的斜線紋底色） */
 export const MAP_NO_DATA = '#ECE7E9'

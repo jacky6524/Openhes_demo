@@ -8,30 +8,34 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from 'recharts'
-import { Info } from 'lucide-react'
 import { Card } from '@/components/ui/Card'
 import { ReadGauge } from './ReadGauge'
 import { useCurrentNode, useScopeLabel } from '@/store/useDashboard'
 import { classify, THRESHOLDS, isRateAlert } from '@/config/thresholds'
 import { fmtInt } from '@/lib/format'
-import { chartNeutral, neutral, status, text as textTok } from '@/tokens'
+import { status, text as textTok } from '@/tokens'
 
 /**
- * LP/MN/ALT 14 日讀表曲線 · 連線/讀表概況卡（依會議調整）：
+ * 讀表 × 連線概況 — 對齊前端 `.trend-panel`：
  *   ┌──────────┬─────────────────────────────┬──────────────────┐
- *   │ 圓餅       │ LP / MN / ALT 三線面積圖      │ 柱狀 LP/MN/ALT    │
- *   │ 連線率(即時)│ (近 14 天 · 每日結算)         │ (即時讀表率)       │
+ *   │ 環形      │ LP / MN / ALT 近 14 天折線     │ LP/MN/ALT 讀表率  │
+ *   │ 連線率     │ (每日結算)                    │ + 缺口紅色進度條   │
  *   └──────────┴─────────────────────────────┴──────────────────┘
+ *   .trend-content  grid `minmax(118px,.8fr) minmax(240px,2fr) minmax(140px,1fr)`
+ *   .trend-chart    高 168px（矮螢幕 clamp(116px,16vh,150px)）
+ *   .device-list    gap 14；head 14/800；progress 9px 軌道 #e7e2e4
+ *
  * 頁籤＝通訊類型 ALL / RF / NB / LTE（切換影響三區數值）。
- * 折線三線全顯（加深加粗以利辨識，非背景圖）。圓餅／柱狀／折線皆有「資料更新」hover。
  */
 
-// 折線用較深的線色（辨識度），漸層填色維持淺色
-const LINE = { lp: '#5E5CE6', midnight: '#1FA8CC', alt: '#EF5B57' }
-const SERIES: { key: 'lp' | 'midnight' | 'alt'; label: string; color: string }[] = [
-  { key: 'lp', label: 'LP 讀表率', color: LINE.lp },
-  { key: 'midnight', label: 'MN 午夜讀表率', color: LINE.midnight },
-  { key: 'alt', label: 'ALT 讀表率', color: LINE.alt },
+/**
+ * 折線色 — 與前端 trendChartSeries 的 color 完全相同。
+ * （prototype 舊版為了辨識度自行加深過，現統一回前端色票。）
+ */
+const SERIES: { key: 'lp' | 'midnight' | 'alt'; label: string; short: string; color: string }[] = [
+  { key: 'lp', label: 'LP 讀表率', short: 'LP', color: '#5E5CE6' },
+  { key: 'midnight', label: 'MN 午夜讀表率', short: 'MN', color: '#64D2FF' },
+  { key: 'alt', label: 'ALT 讀表率', short: 'ALT', color: '#FF858D' },
 ]
 
 const DAYS = 14
@@ -51,7 +55,7 @@ const EXCLUDE_NOTE = '備註：排除停用'
 // 時間軸（近 14 天曲線）為每日結算，不顯示更新時間，改註記結算時點
 const DAILY_NOTE = '備註：每日資料統計時間為隔日 01:00'
 
-/** 各讀表類型的產生頻率說明（柱狀圖 hover） */
+/** 各讀表類型的產生頻率說明（右欄 hover） */
 const FREQ_NOTE: Record<'lp' | 'midnight' | 'alt', string> = {
   lp: 'LP 每 15 分鐘產生一筆，每日 96 筆',
   alt: 'ALT 每小時一筆，每日 24 筆',
@@ -65,7 +69,7 @@ export function SharedMetricCard() {
   const off = COMM.find((c) => c.key === comm)!.off
   const m = node.metrics
 
-  // 圓餅：連線率(即時)；著色綁連線率健康 (良好=中性/注意=黃/警告=紅)
+  // 環形：連線率(即時)；著色綁連線率健康 (良好=中性灰/注意=黃/警告=紅)
   const gaugeValue = clamp(m.connectRate + off, 0, 100)
   const gaugeHealth = classify(gaugeValue, THRESHOLDS.connect)
 
@@ -85,43 +89,64 @@ export function SharedMetricCard() {
     })
   }, [node.id, m, off])
 
-  // 柱狀：LP / MN / ALT 即時讀表率
-  const bars = useMemo(() => {
+  // 右欄：LP / MN / ALT 即時讀表率
+  const rates = useMemo(() => {
     return SERIES.map((s) => {
       const rate = clamp((s.key === 'lp' ? m.lpRate : s.key === 'midnight' ? m.midnightRate : m.altRate) + off, 0, 100)
       const read = Math.round((rate / 100) * m.meterTotal)
-      return { key: s.key, label: s.label.split(' ')[0], color: s.color, rate, read, total: m.meterTotal, unread: m.meterTotal - read }
+      return { key: s.key, label: s.short, rate, read, total: m.meterTotal, unread: m.meterTotal - read }
     })
   }, [m, off])
 
   return (
-    <Card className="p-3">
-      {/* header */}
-      <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
-        <div className="flex items-center gap-2">
-          <h3 className="text-[16px] font-semibold text-ink">連線・讀表概況</h3>
-          <span className="text-[12px] text-ink-sub">{scope} · 近 {DAYS} 天</span>
+    <Card className="flex h-full min-h-0 flex-col gap-2 overflow-hidden p-3 [@media(max-height:943px)]:gap-1.5 [@media(max-height:943px)]:py-2.5">
+      {/* .panel-header */}
+      <header className="flex w-full shrink-0 items-center justify-between gap-3">
+        <div className="group/hc relative flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1.5">
+          <strong className="cursor-default overflow-hidden text-ellipsis text-[16px] font-semibold leading-6 tracking-[1px] text-ink">
+            讀表 × 連線概況
+          </strong>
+          <span className="text-[12px] font-normal leading-4 tracking-[0.2px] text-ink-mut">
+            {scope} · 近 {DAYS} 天
+          </span>
+          <HoverCard align="left">
+            <HoverTitle>近 {DAYS} 天讀表曲線</HoverTitle>
+            <HoverLine>{DAILY_NOTE}</HoverLine>
+          </HoverCard>
         </div>
-        {/* 通訊類型頁籤 */}
-        <div className="inline-flex rounded-lg bg-inset p-0.5 border border-border">
-          {COMM.map((c) => (
-            <button
-              key={c.key}
-              onClick={() => setComm(c.key)}
-              className={[
-                'px-3 py-1 text-[12px] font-medium rounded-md transition-colors',
-                comm === c.key ? 'bg-surface text-brand shadow-sm' : 'text-ink-sub hover:text-ink',
-              ].join(' ')}
-            >
-              {c.label}
-            </button>
-          ))}
-        </div>
-      </div>
 
-      <div className="flex items-stretch gap-4">
-        {/* left — gauge：連線率（環色連動連線率門檻；hover 說明計算方式） */}
-        <div className="relative group/hc flex flex-col items-center justify-center shrink-0 cursor-default">
+        {/* .segmented — 通訊類型頁籤 */}
+        <div
+          className="inline-flex shrink-0 rounded-full p-1"
+          style={{ background: '#F0EDEF', boxShadow: 'inset 0 1px 4px rgba(58,42,48,.08)' }}
+          aria-label="通訊類型"
+        >
+          {COMM.map((c) => {
+            const active = comm === c.key
+            return (
+              <button
+                key={c.key}
+                type="button"
+                aria-pressed={active}
+                onClick={() => setComm(c.key)}
+                className="min-w-[50px] rounded-full px-3 py-2 text-[14px] font-bold leading-[1.2] transition-colors"
+                style={
+                  active
+                    ? { background: '#FFF', boxShadow: '0 2px 8px rgba(58,42,48,.12)', color: status.danger.fg }
+                    : { color: '#62585C' }
+                }
+              >
+                {c.label}
+              </button>
+            )
+          })}
+        </div>
+      </header>
+
+      {/* .trend-content */}
+      <div className="grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(118px,0.8fr)_minmax(240px,2fr)_minmax(140px,1fr)] items-center gap-3 [@media(max-height:943px)]:gap-2.5">
+        {/* .trend-ring — 連線率（環色連動連線率門檻；hover 說明計算方式） */}
+        <div className="group/hc relative grid place-items-center self-center">
           <ReadGauge value={gaugeValue} caption="連線率" health={gaugeHealth} decimals={2} />
           <HoverCard align="left">
             <HoverTitle>連線率</HoverTitle>
@@ -131,64 +156,69 @@ export function SharedMetricCard() {
           </HoverCard>
         </div>
 
-        {/* center — 3-series area chart, 14 days, all lines visible */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center justify-center gap-4 mb-1">
+        {/* .trend-chart — 三線面積圖，14 天 */}
+        <div className="min-h-0 min-w-0">
+          {/* 圖例：對齊前端 echarts legend（top center、roundRect 10×7、9px #40373b） */}
+          <div className="mb-2 flex items-center justify-center gap-4">
             {SERIES.map((s) => (
               <div key={s.key} className="flex items-center gap-1.5">
-                <span className="h-2.5 w-2.5 rounded-full" style={{ background: s.color }} />
-                <span className="text-[12px] text-ink-sub">{s.label}</span>
+                <span className="h-[7px] w-2.5 rounded-[2px]" style={{ background: s.color }} />
+                <span className="text-[9px] font-medium text-[#40373B]">{s.label}</span>
               </div>
             ))}
-            <span className="relative group/hc text-ink-mut cursor-default inline-flex">
-              <Info size={12} />
-              <HoverCard>
-                <HoverTitle>近 {DAYS} 天讀表曲線</HoverTitle>
-                <HoverLine>{DAILY_NOTE}</HoverLine>
-              </HoverCard>
-            </span>
           </div>
-          <div className="h-[150px]">
+          <div className="h-[168px] [@media(max-height:943px)]:h-[clamp(116px,16vh,150px)]">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={series} margin={{ top: 6, right: 8, bottom: 0, left: -10 }}>
+              <AreaChart data={series} margin={{ top: 4, right: 8, bottom: 0, left: -14 }}>
                 <defs>
                   {SERIES.map((s) => (
                     <linearGradient key={s.key} id={`grad-${s.key}`} x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor={s.color} stopOpacity={0.22} />
+                      {/* 前端 areaStyle：0.16 → 0.02 */}
+                      <stop offset="0%" stopColor={s.color} stopOpacity={0.16} />
                       <stop offset="100%" stopColor={s.color} stopOpacity={0.02} />
                     </linearGradient>
                   ))}
                 </defs>
-                <CartesianGrid stroke={neutral.divider} vertical={false} />
+                <CartesianGrid stroke="#E8DDE1" vertical={false} />
                 <XAxis
                   dataKey="d"
-                  tick={{ fontSize: 10, fill: textTok.tertiary }}
+                  tick={{ fontSize: 10, fill: '#9A8C91' }}
                   interval={0}
                   tickLine={false}
-                  axisLine={{ stroke: neutral.border }}
+                  axisLine={{ stroke: '#DDD3D6' }}
                 />
                 <YAxis
                   domain={[0, 100]}
-                  ticks={[20, 40, 60, 80, 100]}
-                  tick={{ fontSize: 10, fill: textTok.tertiary }}
+                  ticks={[0, 20, 40, 60, 80, 100]}
+                  tick={{ fontSize: 10, fill: '#9A8C91' }}
                   tickLine={false}
                   axisLine={false}
                   width={34}
                 />
                 <Tooltip
-                  cursor={{ stroke: neutral.border }}
+                  cursor={{ stroke: '#CFC4C8', strokeWidth: 1 }}
                   content={({ active, payload, label }) => {
                     if (!active || !payload?.length) return null
                     return (
-                      <div className="rounded-lg bg-surface border border-border shadow-card px-2.5 py-1.5 text-[11px]">
-                        <div className="font-semibold text-ink mb-0.5">{label} 日</div>
+                      <div
+                        className="min-w-[220px] rounded-[10px] border px-[18px] py-4"
+                        style={{
+                          borderColor: '#E3D8DC',
+                          background: 'rgba(255,255,255,.97)',
+                          boxShadow: '0 10px 28px rgba(58,42,48,.16)',
+                        }}
+                      >
+                        <div className="mb-2 text-[15px] font-bold text-ink">{label} 日</div>
                         {payload.map((p: any) => (
-                          <div key={p.dataKey} className="flex items-center gap-1.5 text-ink-sub">
-                            <span className="h-2 w-2 rounded-full" style={{ background: p.color }} />
-                            {p.name}：<b className="text-ink tabular-nums">{p.value}%</b>
+                          <div key={p.dataKey} className="flex items-center gap-2 whitespace-nowrap text-[13px] leading-[1.9]">
+                            <span className="h-[9px] w-[9px] shrink-0 rounded-full" style={{ background: p.color }} />
+                            <span className="text-ink-sub">{p.name}</span>
+                            <strong className="ml-auto font-medium tabular-nums text-ink">{p.value}%</strong>
                           </div>
                         ))}
-                        <div className="mt-1 pt-1 border-t border-divider text-ink-mut">{DAILY_NOTE}</div>
+                        <div className="mt-2.5 whitespace-nowrap border-t border-border pt-[9px] text-[12px] text-ink-mut">
+                          {DAILY_NOTE}
+                        </div>
                       </div>
                     )
                   }}
@@ -200,10 +230,12 @@ export function SharedMetricCard() {
                     dataKey={s.key}
                     name={s.label}
                     stroke={s.color}
-                    strokeWidth={2.2}
-                    strokeOpacity={1}
+                    strokeWidth={1.8}
+                    strokeOpacity={0.95}
                     fill={`url(#grad-${s.key})`}
                     fillOpacity={1}
+                    dot={false}
+                    activeDot={{ r: 4, stroke: '#fff', strokeWidth: 2 }}
                     isAnimationActive={false}
                   />
                 ))}
@@ -212,26 +244,38 @@ export function SharedMetricCard() {
           </div>
         </div>
 
-        {/* right — LP / MN / ALT 即時讀表率柱狀（空容器只填未讀，紅色 <95%）；
-            讀表率兩位小數；讀表數/總數 與計算頻率移入各列 hover */}
-        <div className="shrink-0 w-[190px] flex flex-col justify-center gap-3.5">
-          {bars.map((b) => {
+        {/* .device-list — LP / MN / ALT 即時讀表率＋缺口紅條 */}
+        <div className="grid min-w-0 content-center gap-3.5 self-center py-1 [@media(max-height:943px)]:gap-2.5">
+          {rates.map((b) => {
             const alert = isRateAlert(b.rate)
-            const unreadPct = b.total > 0 ? (b.unread / b.total) * 100 : 0
+            const gapPct = Math.max(0, Math.min(100, 100 - b.rate))
             return (
-              <div key={b.key} className="relative group/hc cursor-default">
-                <div className="flex items-baseline justify-between text-[12px]">
-                  <span className="font-semibold" style={{ color: b.color }}>{b.label}</span>
-                  <b className="tabular-nums" style={{ color: alert ? status.danger.fg : textTok.primary }}>
+              <div key={b.key} className="group/hc relative grid min-w-0 cursor-default gap-2">
+                <div className="flex min-w-0 items-center gap-2">
+                  <strong className="min-w-0 flex-1 text-[14px] font-extrabold text-ink">{b.label}</strong>
+                  <b
+                    className="shrink-0 text-[14px] font-extrabold tabular-nums"
+                    style={{ color: alert ? status.danger.fg : textTok.primary }}
+                  >
                     {b.rate.toFixed(2)}%
                   </b>
                 </div>
-                <div className="mt-1 h-2 w-full rounded-[4px] overflow-hidden flex" style={{ background: chartNeutral.track }}>
-                  <div style={{ width: `${Math.max(unreadPct, b.unread > 0 ? 1.5 : 0)}%`, background: status.danger.fg }} />
+                {/* .device-progress — 軌道中性，只填「未讀」缺口 */}
+                <div className="mt-px h-[9px] overflow-hidden rounded-full" style={{ background: '#E7E2E4' }}>
+                  <div
+                    className="h-full"
+                    style={{
+                      width: `${gapPct}%`,
+                      minWidth: gapPct > 0 ? 4 : 0,
+                      background: status.danger.fg,
+                    }}
+                  />
                 </div>
                 <HoverCard align="right">
                   <HoverTitle>{b.label} 讀表率</HoverTitle>
-                  <HoverLine>讀表數 / 總數：{fmtInt(b.read)} / {fmtInt(b.total)}</HoverLine>
+                  <HoverLine>
+                    讀表數 / 總數：{fmtInt(b.read)} / {fmtInt(b.total)}
+                  </HoverLine>
                   <HoverLine>{FREQ_NOTE[b.key]}</HoverLine>
                   <HoverLine>{UPDATE_NOTE}</HoverLine>
                 </HoverCard>
@@ -249,19 +293,17 @@ function HoverCard({ children, align = 'center' }: { children: React.ReactNode; 
   const pos = align === 'left' ? 'left-0' : align === 'right' ? 'right-0' : 'left-1/2 -translate-x-1/2'
   return (
     <span
-      className={`pointer-events-none absolute bottom-full ${pos} mb-2 z-40 w-[228px] opacity-0 translate-y-1 transition-all duration-150 group-hover/hc:opacity-100 group-hover/hc:translate-y-0`}
+      className={`pointer-events-none absolute bottom-full ${pos} z-40 mb-2 w-[228px] translate-y-1 opacity-0 transition-all duration-150 group-hover/hc:translate-y-0 group-hover/hc:opacity-100`}
     >
-      <span className="block rounded-lg bg-surface border border-border shadow-card px-3 py-2 text-left">
-        {children}
-      </span>
+      <span className="block rounded-lg border border-border bg-surface px-3 py-2 text-left shadow-card">{children}</span>
     </span>
   )
 }
 function HoverTitle({ children }: { children: React.ReactNode }) {
-  return <span className="block text-[12px] font-semibold text-ink mb-1">{children}</span>
+  return <span className="mb-1 block text-[12px] font-semibold text-ink">{children}</span>
 }
 function HoverLine({ children }: { children: React.ReactNode }) {
-  return <span className="block py-0.5 text-[11px] text-ink-sub leading-snug">{children}</span>
+  return <span className="block py-0.5 text-[11px] leading-snug text-ink-sub">{children}</span>
 }
 
 /* helpers */

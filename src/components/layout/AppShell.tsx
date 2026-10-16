@@ -5,7 +5,7 @@ import { Sidebar } from './Sidebar'
 export function AppShell({ children }: { children: ReactNode }) {
   const [collapsed, setCollapsed] = useState(false)
   return (
-    <div className="h-full flex flex-col bg-bg">
+    <div className="h-full flex flex-col bg-page">
       <Topbar onToggleSidebar={() => setCollapsed((c) => !c)} />
       <div className="flex-1 flex min-h-0">
         <Sidebar collapsed={collapsed} />

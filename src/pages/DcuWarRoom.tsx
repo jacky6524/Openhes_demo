@@ -1,8 +1,8 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
-import { ChevronRight, Crosshair, ArrowLeft, MousePointerClick, ClipboardList, Info, Settings, X } from 'lucide-react'
+import { ChevronRight, Crosshair, ArrowLeft, MousePointerClick, ClipboardList, Info, Settings, X, Ban } from 'lucide-react'
 import {
   Th as BitTh, StatusPill, SortHead, FilterHead, SearchHead, MenuItem,
-  useInfiniteRows, InfiniteFooter, RED, type SortDir,
+  useInfiniteRows, InfiniteFooter, RED, StampLines, type SortDir,
 } from '@/components/table/tableBits'
 import { DcuInfoDrawer } from '@/components/dcu/DcuInfoDrawer'
 import { DcuSettingsModal } from '@/components/dcu/DcuSettingsModal'
@@ -14,13 +14,13 @@ import type { DcuRow } from '@/data/dcuList'
 import { DcuFaultMap } from '@/components/warroom/DcuFaultMap'
 import { DcuRelationMap } from '@/components/warroom/DcuRelationMap'
 import {
-  SEVERITY_COLOR, SEVERITY_STROKE, SEVERITY_ACCENT, SEVERITY_LABEL, GROUP_COLORS, STATE_COLOR,
-  FREQ_COLORS, MIS_COLOR, CLUSTER_RAMP,
+  SEVERITY_COLOR, SEVERITY_STROKE, SEVERITY_ACCENT, SEVERITY_LABEL, STATE_COLOR,
+  FREQ_COLORS, MIS_COLOR, CLUSTER_COLOR, CLUSTER_TEXT, SELECT_FILL, MAP_BG, MAP_BORDER,
 } from '@/components/warroom/warroomConfig'
 import { useWarroom, type DcuListFilter } from '@/store/useWarroom'
 import {
   misassignedInScope, officeOf, isSameDay,
-  metersOfDcu, cityStats, aggStat, dcusInScope, type Dcu, type Meter,
+  metersOfDcu, cityStats, aggStat, dcusInScope, ONLINE_RATE_THRESHOLDS, type Dcu, type Meter,
 } from '@/data/dcuFleet'
 import { dcuStat, misassignedOut, MIS_DIR_LABEL, type DcuStat, type MisDir } from '@/data/dcuMetrics'
 import { fmtInt } from '@/lib/format'
@@ -42,7 +42,9 @@ export function DcuWarRoom() {
   // 點「歸屬錯誤電表數」→ 右側整個換成歸屬錯誤電表清單（不是 DCU 篩選）
   const showMisOnly = listFilter === 'mis'
   return (
-    <div className="h-full flex flex-col p-4 gap-3 min-w-[1320px]">
+    // 頁底與系統總覽一致（`bg-dashboard` 玫瑰漸層）；原本沿用 AppShell 的灰底 bg-bg，
+    // 兩頁切換時背景會跳色。2026-09-03 依業主意見以系統總覽為準。
+    <div className="h-full flex flex-col p-4 gap-3 min-w-[1320px] bg-dashboard">
       <FilterBar />
       <div className="flex-1 min-h-0 grid grid-cols-[880fr_736fr] gap-3">
         {/* 外框與系統總覽的地圖模組一致：白卡片 + p-3 內距，標題列在上、圓角畫布在下 */}
@@ -52,7 +54,8 @@ export function DcuWarRoom() {
             <span className="flex-1" />
             <MapTabs />
           </div>
-          <div className="relative flex-1 min-h-0 rounded-xl bg-inset/40 overflow-hidden border border-border">
+          {/* 畫布底色與外框比照系統總覽的地圖（MAP_BG／MAP_BORDER），兩頁切換時不跳色 */}
+          <div className="relative flex-1 min-h-0 rounded-xl overflow-hidden border" style={{ background: MAP_BG, borderColor: MAP_BORDER }}>
             {/* B2：兩張地圖常駐、只切可見性 —— 切頁籤不再整個 WebGL 重建（原本每切一次 ~300-500ms 白畫面） */}
             <div className="absolute inset-0" style={{ visibility: tab === 'relation' ? 'hidden' : 'visible' }}><DcuFaultMap /></div>
             <div className="absolute inset-0" style={{ visibility: tab === 'relation' ? 'visible' : 'hidden' }}><DcuRelationMap /></div>
@@ -160,66 +163,217 @@ function MapTabs() {
   )
 }
 /* ------------------------------ 圖例 ------------------------------ */
+/**
+ * 地圖圖例（左下）—— 2026-08-27 依業主意見補齊：原本只列了一部分編碼，
+ * 圖上實際存在但沒寫進圖例的（區塊著色、歸屬錯誤群集、斷線電表、選取標記、
+ * 行政區界線）都補上了；DCU 也跟著改成方形。
+ *
+ * 條目一多就佔畫面，所以比照系統總覽的圖例：**收合成一列，hover 才展開完整說明**。
+ * 兩個頁籤各有一套 —— 圖上沒有的東西不列，列了就一定看得到。
+ */
 function MapLegend() {
   const tab = useWarroom((s) => s.tab)
+  const level = useWarroom((s) => s.level)
+  const district = useWarroom((s) => s.district)
+  // 全台／縣市（未選行政區）＝ 區域選取模式：畫區塊色塊與群集，不畫裝置點
+  const pickMode = level === 'taiwan' || !district
+  const pct = (v: number) => `${Math.round(v * 100)}%`
+  const RATE_BANDS = [
+    { key: 'normal' as const, range: `≥${pct(ONLINE_RATE_THRESHOLDS.normal)}` },
+    { key: 'warn' as const, range: `${pct(ONLINE_RATE_THRESHOLDS.warn)}–${pct(ONLINE_RATE_THRESHOLDS.normal)}` },
+    { key: 'alert' as const, range: `<${pct(ONLINE_RATE_THRESHOLDS.warn)}` },
+  ]
+
   return (
-    <div className="absolute bottom-3 left-3 z-10 rounded-lg bg-surface/92 backdrop-blur border border-border shadow-card px-3 py-2 text-[11px]">
-      {tab === 'fault' ? (
-        <div className="flex flex-col gap-1.5">
-          <div className="font-semibold text-ink-sub">DCU 連線率告警（區塊塗色）</div>
-          <div className="flex items-center gap-3">
-            {([['normal', '≥97%'], ['warn', '90-97%'], ['alert', '<90%']] as const).map(([k, range]) => (
-              <span key={k} className="inline-flex items-center gap-1.5 text-ink-sub">
-                <span className="h-3 w-3 rounded-[3px] border" style={{ background: SEVERITY_COLOR[k], borderColor: SEVERITY_STROKE[k] }} />
-                {SEVERITY_LABEL[k]}<span className="text-ink-mut tabular-nums">{range}</span>
-              </span>
+    <div className="group absolute bottom-3 left-3 z-10">
+      {/* 收合列 —— 只放該頁籤最關鍵的幾個編碼 */}
+      <div className="inline-flex items-center gap-3 rounded-lg border border-border bg-surface/92 px-3 py-1.5 text-[11px] text-ink-sub shadow-card backdrop-blur">
+        {tab === 'fault' ? (
+          <>
+            {RATE_BANDS.map(({ key }) => (
+              <LgItem key={key} label={SEVERITY_LABEL[key]}><SwPoly k={key} /></LgItem>
             ))}
-          </div>
-          {/* 依業主意見：本圖只標斷線 DCU，停用與頻點色點位不再呈現 */}
-          <div className="flex items-center gap-3 text-ink-sub">
-            <span className="inline-flex items-center gap-1.5">
-              <span className="flex items-center gap-0.5">
-                {CLUSTER_RAMP.map((c) => <span key={c} className="h-3.5 w-3.5 rounded-full" style={{ background: c }} />)}
-              </span>
-              群集內斷線 DCU 數（越深越多）
-            </span>
-            <span className="inline-flex items-center gap-1.5">
-              <span className="grid place-items-center h-4 w-4 rounded-[4px] border-2 border-white text-white text-[9px] font-bold leading-none" style={{ background: STATE_COLOR.offline }}>✕</span>
-              斷線 DCU
-            </span>
-          </div>
+            <LgItem label="斷線 DCU"><SwDcuOff /></LgItem>
+          </>
+        ) : (
+          <>
+            <LgItem label="DCU"><SwDcuFreq /></LgItem>
+            <LgItem label="電表"><SwMeters /></LgItem>
+            <LgItem label="歸屬錯誤"><SwMisMeter /></LgItem>
+          </>
+        )}
+        <Info size={12} className="text-ink-mut" />
+      </div>
+
+      {/* hover 展開完整圖例 */}
+      <div className="pointer-events-none absolute bottom-full left-0 z-30 mb-2 w-[360px] translate-y-1 opacity-0 transition-all duration-150 group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:opacity-100">
+        <div className="max-h-[52vh] overflow-auto rounded-lg border border-border bg-surface p-3 text-[11px] shadow-card">
+          {tab === 'fault' ? (
+            <>
+              <LgSection title="行政區色塊 — DCU 連線率">
+                {RATE_BANDS.map(({ key, range }) => (
+                  <LgRow key={key} sw={<SwPoly k={key} />} label={SEVERITY_LABEL[key]} note={range} />
+                ))}
+              </LgSection>
+              <LgSection title="斷線 DCU">
+                <LgRow sw={<SwClusterRamp />} label="斷線 DCU 匯總" note="全台一縣市一顆、縣市一行政區一顆；數字＝斷線台數，點一下下鑽" />
+                <LgRow sw={<SwDcuOff />} label="單台斷線 DCU" note="hover 看詳細資訊" />
+              </LgSection>
+              <LgSection title="其他">
+                <LgRow sw={<SwSelectedMeter />} label="選取中的電表" note="由右側清單點選" />
+              </LgSection>
+              <LgNote>下鑽：點縣市 → 行政區；選定行政區後圖上只留該區，換區請走上方麵包屑。</LgNote>
+            </>
+          ) : (
+            <>
+              {pickMode ? (
+                <>
+                  <LgSection title="行政區色塊 — DCU 連線率">
+                    {RATE_BANDS.map(({ key, range }) => (
+                      <LgRow key={key} sw={<SwPoly k={key} />} label={SEVERITY_LABEL[key]} note={range} />
+                    ))}
+                  </LgSection>
+                  <LgSection title="歸屬錯誤電表">
+                    <LgRow sw={<SwMisCluster />} label="歸屬錯誤電表數" note={level === 'taiwan' ? '一個縣市一顆，點一下下鑽' : '一個行政區一顆，點一下下鑽'} />
+                  </LgSection>
+                  <LgNote>此層級不畫裝置點。點選區域下鑽到行政區，才會出現 DCU 與電表。</LgNote>
+                </>
+              ) : (
+                <>
+                  <LgSection title="DCU（方形）">
+                    <LgRow sw={<SwDcuFreq />} label="正常" note="底色＝頻點色（共 10 個頻點）" />
+                    <LgRow sw={<SwDcuOff />} label="斷線" />
+                    <LgRow sw={<SwDcuDisabled />} label="停用" note="僅圖面呈現，不計入統計" />
+                    <LgRow sw={<SwMeterDisabled />} label="停用電表" note="灰色空心圓圈；僅圖面呈現，不計入統計" />
+                    <LgRow sw={<SwCross />} label="跨區 DCU" note="本身在範圍外、收容的電表落在範圍內" />
+                  </LgSection>
+                  <LgSection title="電表（圓形）">
+                    <LgRow sw={<SwMeters />} label="正常電表" note="依所屬 DCU 的頻點色；左下「頻點」可逐一顯示／隱藏" />
+                    <LgRow sw={<SwMisMeter />} label="歸屬錯誤電表" />
+                    <LgRow sw={<SwSelectedMeter />} label="選取中的電表" />
+                  </LgSection>
+                  <LgSection title="歸屬關係線">
+                    <LgRow sw={<SwLineSolid />} label="實際收容" note="電表現在連到哪一台" />
+                    <LgRow sw={<SwLineDashed />} label="白名單應屬" note="電表原本該連哪一台" />
+                    <LgRow
+                      sw={<span className="h-3 w-5 shrink-0" />}
+                      label="方向"
+                      note="他台連入＝別台的表跑進來／連入他台＝自己的表跑出去"
+                    />
+                  </LgSection>
+                  <LgNote>電表預設不載入：點選 DCU 加入「觀察中」（最多 3 台，外環色區分），才畫出它的電表與相關歸屬錯誤。要看整區分佈可打開上方「顯示圖層」的「全部電表」（效能較差，需放大到街道級）。</LgNote>
+                </>
+              )}
+            </>
+          )}
         </div>
-      ) : (
-        <div className="flex flex-col gap-1.5">
-          {/* B1/A4：DCU 一律圓形、底色＝頻點色；狀態只有 正常／斷線／停用，與 GPU 圓點同一套編碼 */}
-          <div className="flex items-center gap-3 text-ink-sub">
-            <span className="inline-flex items-center gap-1.5"><span className="h-4 w-4 rounded-full border-2 border-white shadow-sm" style={{ background: FREQ_COLORS[0] }} />DCU 正常（底色＝頻點色）</span>
-            <span className="inline-flex items-center gap-1.5"><span className="grid place-items-center h-4 w-4 rounded-[4px] border-2 border-white text-white text-[9px] font-bold leading-none" style={{ background: STATE_COLOR.offline }}>✕</span>斷線</span>
-            <span className="inline-flex items-center gap-1.5"><span className="h-4 w-4 rounded-full border-2 border-white" style={{ background: STATE_COLOR.disabled }} />停用</span>
-          </div>
-          <div className="flex items-center gap-3 text-ink-sub">
-            <span className="inline-flex items-center gap-1.5"><span className="flex gap-0.5">{FREQ_COLORS.slice(0, 5).map((c) => <span key={c} className="h-2.5 w-2.5 rounded-full" style={{ background: c }} />)}</span>電表（依所屬 DCU 頻點色）</span>
-          </div>
-          <div className="flex items-center gap-3 text-ink-sub">
-            <span className="inline-flex items-center gap-1.5">
-              <span className="grid place-items-center h-4 w-4 rounded-full border-2 border-white text-white text-[9px] font-bold leading-none" style={{ background: MIS_COLOR }}>✕</span>
-              歸屬錯誤電表
-            </span>
-            <span className="inline-flex items-center gap-1.5"><span className="w-5 border-t-2" style={{ borderColor: MIS_COLOR }} />實際收容</span>
-            <span className="inline-flex items-center gap-1.5"><span className="w-5 border-t-2 border-dashed" style={{ borderColor: '#9AA0A6' }} />白名單應屬</span>
-          </div>
-          <div className="flex items-center gap-3 text-ink-sub">
-            <span>方向：<b className="text-ink">他台連入</b>＝別台的表跑進來 ／ <b className="text-ink">連入他台</b>＝自己的表跑出去</span>
-          </div>
-          <div className="flex items-center gap-3 text-ink-sub">
-            <span className="inline-flex items-center gap-1.5"><span className="flex gap-0.5">{GROUP_COLORS.map((c) => <span key={c} className="h-3 w-3 rounded-[3px] border-2" style={{ borderColor: c }} />)}</span>釘選群組</span>
-            <span className="inline-flex items-center gap-1.5"><span className="h-3 w-3 rounded-[3px] border-2 border-dashed border-ink" />跨區</span>
-          </div>
-        </div>
-      )}
+      </div>
     </div>
   )
 }
+
+/* ---- 圖例的排版零件 ---- */
+function LgItem({ children, label }: { children: React.ReactNode; label: string }) {
+  return <span className="inline-flex items-center gap-1.5 whitespace-nowrap">{children}{label}</span>
+}
+function LgSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="mb-2 last:mb-0">
+      <div className="mb-1 text-[11px] font-semibold text-ink">{title}</div>
+      <div className="flex flex-col gap-1">{children}</div>
+    </div>
+  )
+}
+function LgRow({ sw, label, note }: { sw: React.ReactNode; label: string; note?: string }) {
+  return (
+    <div className="flex items-start gap-2">
+      <span className="mt-[1px] shrink-0">{sw}</span>
+      <span className="shrink-0 font-medium text-ink-sub">{label}</span>
+      {note && <span className="min-w-0 flex-1 text-right leading-snug text-ink-mut">{note}</span>}
+    </div>
+  )
+}
+function LgNote({ children }: { children: React.ReactNode }) {
+  return <div className="mt-2 border-t border-divider pt-2 text-[11px] leading-snug text-ink-mut">{children}</div>
+}
+
+/* ---- 圖例色塊（形狀與地圖上實際畫的一致） ---- */
+function SwPoly({ k }: { k: 'normal' | 'warn' | 'alert' }) {
+  return <span className="inline-block h-3 w-3 rounded-[3px] border" style={{ background: SEVERITY_COLOR[k], borderColor: SEVERITY_STROKE[k] }} />
+}
+/** DCU 斷線：紅方塊 + 白 ✕（markerIcons 的 square(…, true)） */
+function SwDcuOff() {
+  return (
+    <span className="grid h-4 w-4 place-items-center rounded-[4px] border-2 border-white text-[9px] font-bold leading-none text-white" style={{ background: STATE_COLOR.offline }}>
+      ✕
+    </span>
+  )
+}
+/** DCU 正常：方塊，底色＝頻點色（列三個代表整組色盤） */
+function SwDcuFreq() {
+  return (
+    <span className="inline-flex gap-0.5">
+      {FREQ_COLORS.slice(0, 3).map((c) => (
+        <span key={c} className="h-3.5 w-3.5 rounded-[3px] border-2 border-white shadow-sm" style={{ background: c }} />
+      ))}
+    </span>
+  )
+}
+function SwDcuDisabled() {
+  return <span className="inline-block h-3.5 w-3.5 rounded-[3px] border-2 border-white shadow-sm" style={{ background: STATE_COLOR.disabled }} />
+}
+function SwCross() {
+  return <span className="inline-block h-3.5 w-3.5 rounded-[3px] border-2 border-dashed border-ink" />
+}
+function SwMeters() {
+  return (
+    <span className="inline-flex gap-0.5">
+      {FREQ_COLORS.slice(0, 4).map((c) => <span key={c} className="h-2.5 w-2.5 rounded-full" style={{ background: c }} />)}
+    </span>
+  )
+}
+/** 停用電表：灰色空心圓圈（對應 markerIcons 的 circleHollow） */
+function SwMeterDisabled() {
+  return <span className="inline-block h-3 w-3 rounded-full border-2" style={{ borderColor: STATE_COLOR.disabled }} />
+}
+
+function SwMisMeter() {
+  return (
+    <span className="grid h-4 w-4 place-items-center rounded-full border-2 border-white text-[9px] font-bold leading-none text-white" style={{ background: MIS_COLOR }}>
+      ✕
+    </span>
+  )
+}
+function SwMisCluster() {
+  return (
+    <span className="grid h-4 w-4 place-items-center rounded-full text-[8px] font-bold leading-none text-white" style={{ background: MIS_COLOR, opacity: 0.88 }}>
+      12
+    </span>
+  )
+}
+function SwClusterRamp() {
+  return (
+    /* 2026-09-23 起匯總球統一尺寸，圖例改為單顆帶數字的球 */
+    <span className="grid h-4 w-4 place-items-center rounded-full text-[8px] font-bold leading-none" style={{ background: CLUSTER_COLOR, color: CLUSTER_TEXT }}>
+      5
+    </span>
+  )
+}
+/** 選取電表：白暈 + 藍環 + 藍心（selectedMeterLayer 的三層） */
+function SwSelectedMeter() {
+  return (
+    <span className="grid h-4 w-4 place-items-center rounded-full border-2" style={{ borderColor: SELECT_FILL }}>
+      <span className="h-1.5 w-1.5 rounded-full" style={{ background: SELECT_FILL }} />
+    </span>
+  )
+}
+function SwLineSolid() {
+  return <span className="mt-[6px] inline-block w-5 border-t-2" style={{ borderColor: MIS_COLOR }} />
+}
+function SwLineDashed() {
+  return <span className="mt-[6px] inline-block w-5 border-t-2 border-dashed" style={{ borderColor: '#9AA0A6' }} />
+}
+
 /* ------------------------------ 右① KPI（故障分布，依地圖層級一次看完；兩個頁籤共用） ------------------------------ */
 function KpiCard() {
   const level = useWarroom((s) => s.level)
@@ -289,14 +443,14 @@ function KpiRow({ kpis, cols = 3, active, onPick }: {
 /* ------------------------------ 全台：DCU 斷線分佈（依縣市，北到南） ------------------------------ */
 function CityList() {
   const setCity = useWarroom((s) => s.setCity)
-  // 依業主意見：固定北到南排序，不提供欄位排序（cityStats 已依緯度排好）
+  // 依業主意見：固定北到南、外島最後，不提供欄位排序（cityStats 已排好）
   const rows = useMemo(() => cityStats(), [])
 
   return (
     <div className="flex-1 min-h-0 rounded-card bg-surface border border-border shadow-card flex flex-col">
       <div className="shrink-0 px-4 py-2.5 border-b border-border flex items-center gap-2">
         <h3 className="text-[15px] font-semibold text-ink">DCU 斷線分佈</h3>
-        <span className="text-[12.5px] text-ink-mut">縣市 · 北到南</span>
+        <span className="text-[12.5px] text-ink-mut">縣市 · 北到南，外島在後</span>
       </div>
       <div className="flex-1 min-h-0 overflow-auto">
         <table className="w-full text-[13.5px]">
@@ -338,7 +492,7 @@ function CityList() {
 }
 
 /* ------------------------------ 歸屬錯誤電表清單（可排序；點列跳到 L3 點位） ------------------------------ */
-type MisSortKey = 'meterNo' | 'elecNo' | 'last' | 'lastLp' | 'actual' | 'expected'
+type MisSortKey = 'meterNo' | 'elecNo' | 'last' | 'lastLp' | 'expected'
 
 function MisMeterList() {
   const level = useWarroom((s) => s.level)
@@ -360,7 +514,6 @@ function MisMeterList() {
         case 'elecNo': return a.ext.elecNo.localeCompare(b.ext.elecNo)
         case 'last': return a.m.lastMins - b.m.lastMins
         case 'lastLp': return a.m.lastLpMins - b.m.lastLpMins
-        case 'actual': return a.m.dcuId.localeCompare(b.m.dcuId)
         case 'expected': return a.m.expectedDcuId.localeCompare(b.m.expectedDcuId)
         default: return a.m.id.localeCompare(b.m.id)
       }
@@ -398,24 +551,20 @@ function MisMeterList() {
               {head('elecNo', '電號')}
               {head('last', '最後連線時間')}
               {head('lastLp', '最後LP時間')}
-              {head('actual', '連線DCU')}
               {head('expected', '歸屬DCU')}
             </tr>
           </thead>
           <tbody>
             {pageRows.map(({ m, ext }) => (
               <tr key={m.id} onClick={() => focusMisMeter(m.id)} className="border-b border-divider cursor-pointer hover:bg-inset/40" title="跳到該電表的歸屬點位">
-                <td className="px-3 py-2 font-mono text-ink whitespace-nowrap">
-                  <span className="mr-1 font-bold" style={{ color: MIS_COLOR }}>✕</span>{m.id}
-                </td>
+                <td className="px-3 py-2 font-mono text-ink whitespace-nowrap">{m.id}</td>
                 <td className="px-3 py-2 font-mono text-ink-sub whitespace-nowrap">{ext.elecNo}</td>
-                <td className="px-3 py-2 tabular-nums text-ink-sub whitespace-nowrap">{m.last}</td>
-                <td className="px-3 py-2 tabular-nums text-ink-sub whitespace-nowrap">{m.lastLp}</td>
-                <td className="px-3 py-2 font-mono text-ink whitespace-nowrap">{m.dcuId}</td>
+                <td className="px-3 py-2 tabular-nums text-ink-sub whitespace-nowrap"><StampLines value={m.last} /></td>
+                <td className="px-3 py-2 tabular-nums text-ink-sub whitespace-nowrap"><StampLines value={m.lastLp} /></td>
                 <td className="px-3 py-2 font-mono whitespace-nowrap" style={{ color: MIS_COLOR }}>{m.expectedDcuId}</td>
               </tr>
             ))}
-            {pageRows.length === 0 && <tr><td colSpan={6} className="px-3 py-8 text-center text-ink-mut">此範圍無歸屬錯誤電表</td></tr>}
+            {pageRows.length === 0 && <tr><td colSpan={5} className="px-3 py-8 text-center text-ink-mut">此範圍無歸屬錯誤電表</td></tr>}
           </tbody>
         </table>
         <div ref={sentinelRef} />
@@ -429,6 +578,36 @@ function MisMeterList() {
 
 /* ------------------------------ 右② DCU 列表（DCU 裝置列表的列表功能就地復現） ------------------------------ */
 /** fleet DCU → 裝置列表的 DcuRow（供 DCU資料 抽屜共用同一組欄位） */
+/**
+ * 列表標題列右上的狀態判斷圖例 —— 只解釋「這張表上真的會變色的欄位」，
+ * 不重複列狀態 pill（那個本身已經帶文字）。兩份清單各自傳入自己的規則。
+ */
+function ListLegend({ items }: { items: { color: string; label: string }[] }) {
+  return (
+    <div className="ml-auto flex items-center gap-3 text-[12px] text-ink-sub">
+      {items.map((i) => (
+        <span key={i.label} className="inline-flex items-center gap-1.5 whitespace-nowrap">
+          <span className="h-2.5 w-2.5 rounded-sm" style={{ background: i.color }} />
+          {i.label}
+        </span>
+      ))}
+    </div>
+  )
+}
+
+/**
+ * DCU 列表在各個篩選下的**標題** —— 篩選是由上方 KPI 方塊帶入的（列表本身已無篩選鈕）。
+ * 2026-09-23 依業主意見：點了哪個方塊，列表標題就直接換成那個方塊的名稱，
+ * 不再用「DCU 列表 + 篩選標籤 + 備註說明」的寫法。
+ */
+const LIST_TITLE: Record<Exclude<DcuListFilter, 'mis'>, string> = {
+  all: 'DCU 列表',
+  online: 'DCU 連線列表',
+  active: 'DCU 正常列表',
+  offline: 'DCU 斷線列表',
+  disabled: 'DCU 停用列表',
+}
+
 function toDcuRow(d: Dcu, stat: DcuStat): DcuRow {
   return {
     status: d.online ? 'online' : 'offline',
@@ -494,7 +673,6 @@ function DcuListTable({ collapsed = false }: { collapsed?: boolean }) {
     })
   }, [scoped, stateFilter, idQ, sortKey, sortDir, pinSelected, selectedDcuId])
 
-  const sum = useMemo(() => scoped.reduce((s, { stat }) => ({ online: s.online + stat.online, total: s.total + stat.total }), { online: 0, total: 0 }), [scoped])
   // 無限捲動取代分頁器
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const { visible, sentinelRef, revealIndex, hasMore } = useInfiniteRows(rows.length, [stateFilter, idQ, sortKey, sortDir, level, city, district, selectedDcuId])
@@ -519,33 +697,25 @@ function DcuListTable({ collapsed = false }: { collapsed?: boolean }) {
   const head = (k: DcuSortKey, label: string) => (
     <BitTh><SortHead label={label} active={sortKey === k} dir={sortDir} onClick={() => toggleSort(k)} /></BitTh>
   )
+  const title = stateFilter === 'mis' ? LIST_TITLE.all : LIST_TITLE[stateFilter]
 
   return (
     <div className={`${collapsed ? 'w-full' : 'flex-1 min-h-0'} rounded-card bg-surface border border-border shadow-card flex flex-col`}>
-      <div className="shrink-0 flex items-center justify-between flex-wrap gap-x-4 gap-y-1.5 px-4 py-2.5 border-b border-border">
+      <div className="shrink-0 flex items-center flex-wrap gap-x-4 gap-y-1.5 px-4 py-2.5 border-b border-border">
         <div className="flex items-center gap-2 min-w-0">
-          {(level === 'taiwan' || collapsed) && (
-            <button
-              onClick={() => (collapsed ? clearSelection() : closeDcuList())}
-              className="text-ink-sub hover:text-brand"
-              title={collapsed ? '返回 DCU 列表' : '返回 DCU 斷線分佈'}
-            >
-              <ArrowLeft size={16} />
-            </button>
-          )}
+          {/* 返回鍵不再限於全台層級：任何層級都能退回 DCU 斷線分佈（會一併回全台視角） */}
+          <button
+            onClick={() => (collapsed ? clearSelection() : closeDcuList())}
+            className="text-ink-sub hover:text-brand"
+            title={collapsed ? '返回 DCU 列表' : '返回 DCU 斷線分佈（回全台視角）'}
+          >
+            <ArrowLeft size={16} />
+          </button>
           <h3 className="text-[15px] font-semibold text-ink whitespace-nowrap">
-            DCU 列表{level === 'taiwan' && <span className="ml-1 text-[13px] font-normal text-ink-sub">全台</span>}
+            {title}{level === 'taiwan' && <span className="ml-1 text-[13px] font-normal text-ink-sub">全台</span>}
           </h3>
         </div>
-        <div className="flex items-center gap-3 flex-wrap">
-          {stateFilter !== 'all' && stateFilter !== 'mis' && (
-            <button onClick={() => setStateFilter('all')} className="inline-flex items-center gap-1 rounded-md border border-brand text-brand px-2 py-0.5 text-[12.5px] font-medium hover:bg-brand-soft/50">
-              {stateFilter === 'online' ? '連線' : stateFilter === 'offline' ? '斷線' : stateFilter === 'disabled' ? '停用' : '正常'}
-              <X size={11} />
-            </button>
-          )}
-          <div className="text-[12.5px] text-ink-sub tabular-nums">上線數 <b className="text-ink">{fmtInt(sum.online)}</b> / 電表總數 <b className="text-ink">{fmtInt(sum.total)}</b></div>
-        </div>
+        <ListLegend items={[{ color: RED, label: `LP讀表率 ＜${LP_ALERT}%` }]} />
       </div>
       <div ref={scrollRef} className={collapsed ? 'shrink-0' : 'flex-1 min-h-0 overflow-auto'}>
         <table className="w-full text-[13.5px] border-collapse">
@@ -574,13 +744,17 @@ function DcuListTable({ collapsed = false }: { collapsed?: boolean }) {
                   <td className="px-3 py-2 tabular-nums text-ink-sub">{fmtInt(stat.online)} / {fmtInt(stat.total)}</td>
                   <td className="px-3 py-2 tabular-nums text-ink">{stat.connectRate.toFixed(1)}%</td>
                   <td className="px-3 py-2 tabular-nums font-medium" style={{ color: stat.lpRate < LP_ALERT ? RED : '#2A2125' }}>{stat.lpRate.toFixed(1)}%</td>
-                  <td className="px-3 py-2 tabular-nums text-ink-sub whitespace-nowrap">{d.lastSeen}</td>
+                  <td className="px-3 py-2 tabular-nums text-ink-sub whitespace-nowrap"><StampLines value={d.lastSeen} /></td>
                   <td className="px-3 py-2">
                     {/* 按鈕順序：DCU資料 → 詳細資料 → 裝置設定 */}
                     <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
                       <button onClick={() => setInfoDcu(row)} title="DCU資料" className="text-ink-mut hover:text-brand"><Info size={15} /></button>
                       <button onClick={() => setDetailDcu(d.id)} title="詳細資料" className="text-ink-mut hover:text-brand"><ClipboardList size={15} /></button>
-                      <button onClick={() => setSettingsDcu(row)} title="DCU裝置設定" className="text-ink-mut hover:text-brand"><Settings size={15} /></button>
+                      {/* 2026-10-01 業主意見：齒輪一律標「暫不啟用」（重啟DCU／Ping 也只是示意） */}
+                      <button onClick={() => setSettingsDcu(row)} title="DCU裝置設定（暫不啟用，僅供瀏覽）" className="relative inline-grid place-items-center text-ink-mut hover:text-brand">
+                        <Settings size={15} />
+                        <Ban size={10} strokeWidth={2.6} className="absolute -bottom-1 -right-1.5 rounded-full bg-surface text-ink-mut" />
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -606,7 +780,7 @@ function DcuListTable({ collapsed = false }: { collapsed?: boolean }) {
 
 /* ------------------------------ 右③ 電表列表（點選 DCU 才展開；欄位與 DCU 裝置列表的電表面板一致） ------------------------------ */
 type MeterStatusFilter = 'all' | 'online' | 'offline'
-type MeterSortKey = 'mis' | 'status' | 'elecNo' | 'meterNo' | 'dcu' | 'lp' | 'mn'
+type MeterSortKey = 'mis' | 'status' | 'elecNo' | 'meterNo' | 'lp' | 'mn'
 
 function MeterListTable() {
   const district = useWarroom((s) => s.district)
@@ -640,8 +814,6 @@ function MeterListTable() {
     }))
     return [...own, ...gone]
   }, [selectedDcuId])
-  // 上線數 / 電表總數 與 DCU 列表同一個口徑（白名單、排除停用），避免同一台出現兩組數字
-  const stat = selectedDcuId ? dcuStat(selectedDcuId) : { online: 0, total: 0 }
   const setSearch = (k: keyof typeof q, v: string) => setQ((s) => ({ ...s, [k]: v }))
   const toggleSort = (key: MeterSortKey) => {
     if (key === sortKey) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
@@ -657,7 +829,6 @@ function MeterListTable() {
         case 'status': return (a.m.online ? 1 : 0) - (b.m.online ? 1 : 0)
         case 'elecNo': return a.ext.elecNo.localeCompare(b.ext.elecNo)
         case 'meterNo': return a.m.id.localeCompare(b.m.id)
-        case 'dcu': return a.m.dcuId.localeCompare(b.m.dcuId)
         case 'lp': return b.m.lastLpMins - a.m.lastLpMins
         case 'mn': return b.m.lastMnMins - a.m.lastMnMins
         default: return (a.dir ? 1 : 0) - (b.dir ? 1 : 0) // 歸屬狀態：異常為大
@@ -699,9 +870,7 @@ function MeterListTable() {
             電表列表 <span className="font-mono text-ink-sub font-normal">{selectedDcuId ?? '未選取'}</span>
           </h3>
         </div>
-        {selectedDcuId && (
-          <span className="text-[12.5px] text-ink-sub tabular-nums">上線數 <b className="text-ink">{fmtInt(stat.online)}</b> / 電表總數 <b className="text-ink">{fmtInt(stat.total)}</b></span>
-        )}
+        {selectedDcuId && <ListLegend items={[{ color: RED, label: '最後LP／MN 非當日' }]} />}
       </div>
       {selectedDcuId ? (
         <>
@@ -727,9 +896,6 @@ function MeterListTable() {
                   </BitTh>
                   <BitTh>
                     <SearchHead label="表號" value={q.meterNo} open={menu === 'meterNo'} onToggle={() => setMenu(menu === 'meterNo' ? null : 'meterNo')} onChange={(v) => setSearch('meterNo', v)} />
-                  </BitTh>
-                  <BitTh>
-                    <SortHead label="連線DCU" active={sortKey === 'dcu'} dir={sortDir} onClick={() => toggleSort('dcu')} />
                   </BitTh>
                   <BitTh>
                     <SortHead label="最後LP時間" active={sortKey === 'lp'} dir={sortDir} onClick={() => toggleSort('lp')} />
@@ -760,21 +926,24 @@ function MeterListTable() {
                       <td className="px-2 py-2 font-mono text-ink whitespace-nowrap">
                         {m.id}{!!district && m.district !== district && <span className="ml-1 text-[10px] text-ink-mut">跨區</span>}
                       </td>
-                      <td className="px-2 py-2 font-mono text-ink-sub whitespace-nowrap">{m.dcuId}</td>
                       {/* LP／MN 非當日標紅 */}
-                      <td className="px-2 py-2 tabular-nums whitespace-nowrap" style={{ color: isSameDay(m.lastLpMins) ? undefined : RED }}>{m.lastLp}</td>
-                      <td className="px-2 py-2 tabular-nums whitespace-nowrap" style={{ color: isSameDay(m.lastMnMins) ? undefined : RED }}>{m.lastMn}</td>
+                      <td className="px-2 py-2 tabular-nums whitespace-nowrap" style={{ color: isSameDay(m.lastLpMins) ? undefined : RED }}><StampLines value={m.lastLp} /></td>
+                      <td className="px-2 py-2 tabular-nums whitespace-nowrap" style={{ color: isSameDay(m.lastMnMins) ? undefined : RED }}><StampLines value={m.lastMn} /></td>
                       <td className="px-2 py-2">
                         {/* 只留 詳細資料 與 裝置設定，順序同 DCU 列表 */}
                         <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
                           <button onClick={() => setDetailMeter(m.id)} title="詳細資料" className="text-ink-mut hover:text-brand"><ClipboardList size={15} /></button>
-                          <button onClick={() => setSettingsMeter(ext)} title="裝置設定" className="text-ink-mut hover:text-brand"><Settings size={15} /></button>
+                          {/* 2026-10-01 業主意見：電表齒輪功能暫不啟用 → 疊禁止符號，仍可點開瀏覽 */}
+                          <button onClick={() => setSettingsMeter(ext)} title="裝置設定（暫不啟用，僅供瀏覽）" className="relative inline-grid place-items-center text-ink-mut hover:text-brand">
+                            <Settings size={15} />
+                            <Ban size={10} strokeWidth={2.6} className="absolute -bottom-1 -right-1.5 rounded-full bg-surface text-ink-mut" />
+                          </button>
                         </div>
                       </td>
                     </tr>
                   )
                 })}
-                {pageRows.length === 0 && <tr><td colSpan={8} className="px-3 py-8 text-center text-ink-mut">查無符合條件的電表</td></tr>}
+                {pageRows.length === 0 && <tr><td colSpan={7} className="px-3 py-8 text-center text-ink-mut">查無符合條件的電表</td></tr>}
               </tbody>
             </table>
             <div ref={sentinelRef} />

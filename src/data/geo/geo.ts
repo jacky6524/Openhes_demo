@@ -124,17 +124,51 @@ function townsFC(countyName: string): GeoCollection {
   return { type: 'FeatureCollection', features: townsByCounty.get(countyName) ?? [] }
 }
 
-/** public: township (行政區) boundaries for a county — DCU 戰情室故障地圖用 */
-export function townsGeo(countyName: string): GeoCollection {
-  return townsFC(countyName)
+/* ---- 遠離本體的零星島塊 ----
+   內政部圖資把釣魚臺列嶼併在宜蘭縣頭城鎮（約 123.5°E，離本島 1.5° 以上），
+   L2 取景（fitBounds）把它算進外框，本島就被擠到畫面左邊（2026-10-01 業主回報）。
+   同一個行政區的 MultiPolygon 中，與最大一塊的外框相距超過 FAR_PART_DEG 的島塊直接拿掉；
+   龜山島、小琉球這類近岸島嶼距離都在 0.2° 內，不受影響。 */
+const FAR_PART_DEG = 0.5
+function partBox(poly: number[][][]) {
+  let w = 180, s = 90, e = -180, n = -90
+  for (const [x, y] of poly[0]) { w = Math.min(w, x); e = Math.max(e, x); s = Math.min(s, y); n = Math.max(n, y) }
+  return { w, s, e, n, area: Math.abs(ringArea(poly[0])) }
 }
+function dropFarParts(f: GeoFeature): GeoFeature {
+  const g = f.geometry
+  if (!g || g.type !== 'MultiPolygon' || g.coordinates.length < 2) return f
+  const boxes = (g.coordinates as number[][][][]).map(partBox)
+  const main = boxes.reduce((a, b) => (b.area > a.area ? b : a))
+  const keep = (g.coordinates as number[][][][]).filter((_, i) => {
+    const b = boxes[i]
+    const gap = Math.max(main.w - b.e, b.w - main.e, main.s - b.n, b.s - main.n, 0)
+    return gap <= FAR_PART_DEG
+  })
+  return keep.length === g.coordinates.length ? f : { ...f, geometry: { type: 'MultiPolygon', coordinates: keep } }
+}
+const townsGeoCache = new Map<string, GeoCollection>()
+
+/** public: township (行政區) boundaries for a county — DCU 戰情室故障地圖用（已去除遠離本體的零星島塊） */
+export function townsGeo(countyName: string): GeoCollection {
+  let fc = townsGeoCache.get(countyName)
+  if (!fc) {
+    fc = { type: 'FeatureCollection', features: townsFC(countyName).features.map(dropFarParts) }
+    townsGeoCache.set(countyName, fc)
+  }
+  return fc
+}
+
+/** 縣市界是 2010 年圖資，名稱停在升格前；戰情室以現行名稱對 fleet 資料 */
+const COUNTY_RENAME: Record<string, string> = { 桃園縣: '桃園市' }
 
 /** public: 全台縣市邊界（tag properties.name＝縣市名）— DCU 戰情室全台層級用 */
 export function countiesGeoAll(): GeoCollection {
   return {
     type: 'FeatureCollection',
     features: counties.features.map((f) => {
-      const name = (f.properties.name ?? f.properties.COUNTYNAME) as string
+      const raw = (f.properties.name ?? f.properties.COUNTYNAME) as string
+      const name = COUNTY_RENAME[raw] ?? raw
       return { ...f, properties: { ...f.properties, name } }
     }),
   }

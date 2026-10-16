@@ -6,9 +6,15 @@
  * TODO: 上線改接 API；以下皆 deterministic mock。
  */
 
+import { townRoster, townsGeo } from './geo/geo'
+
 export interface CityDef { name: string; districts: { name: string; center: [number, number] }[] }
 
-export const CITIES: CityDef[] = [
+/**
+ * 高密度示範區（30 台 DCU × 80 具電表）—— 最早的四縣市、手調中心點。
+ * 這幾區先生成，DCU／電表編號與過去一致（業主看過的畫面、交接文件引用的編號都不變）。
+ */
+const CORE_CITIES: CityDef[] = [
   {
     name: '台北市',
     districts: [
@@ -44,6 +50,76 @@ export const CITIES: CityDef[] = [
     ],
   },
 ]
+
+/**
+ * 全台 22 縣市 —— 2026-09-23 依業主意見：DCU總覽每個縣市都要有資料。
+ * 行政區清單取自鄉鎮界圖資（townRoster，已處理嘉義市東區＋西區合併），
+ * 中心點取該區最大一塊多邊形內的點，確保 DCU 落在區界內（離島鄉鎮也適用）。
+ */
+const ALL_COUNTIES = [
+  '基隆市', '台北市', '新北市', '桃園市', '新竹市', '新竹縣', '苗栗縣', '台中市', '彰化縣', '南投縣', '雲林縣',
+  '嘉義市', '嘉義縣', '台南市', '高雄市', '屏東縣', '宜蘭縣', '花蓮縣', '台東縣', '澎湖縣', '金門縣', '連江縣',
+]
+
+/* ---- 行政區錨點：最大多邊形的重心；重心落在區外（凹形）時改取區內的取樣點 ---- */
+type Ring = number[][]
+function largestRing(geoms: any[]): Ring | null {
+  let best: Ring | null = null, bestA = 0
+  for (const g of geoms) {
+    const polys: Ring[][] = !g ? [] : g.type === 'Polygon' ? [g.coordinates] : g.type === 'MultiPolygon' ? g.coordinates : []
+    for (const p of polys) {
+      const r = p[0]; if (!r) continue
+      let a = 0
+      for (let i = 0; i < r.length - 1; i++) a += r[i][0] * r[i + 1][1] - r[i + 1][0] * r[i][1]
+      if (Math.abs(a) > bestA) { bestA = Math.abs(a); best = r }
+    }
+  }
+  return best
+}
+function inRing(x: number, y: number, r: Ring): boolean {
+  let inside = false
+  for (let i = 0, j = r.length - 1; i < r.length; j = i++) {
+    const [xi, yi] = r[i], [xj, yj] = r[j]
+    if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside
+  }
+  return inside
+}
+function bboxOfRing(r: Ring) {
+  let w = 180, s = 90, e = -180, n = -90
+  r.forEach(([x, y]) => { w = Math.min(w, x); e = Math.max(e, x); s = Math.min(s, y); n = Math.max(n, y) })
+  return { w, s, e, n }
+}
+/** 區名 → 區界最大多邊形（DCU 取樣時用來擋在區內） */
+const districtRing = new Map<string, Ring>()
+function anchorOf(city: string, district: string): [number, number] | null {
+  const ring = largestRing(townsGeo(city).features.filter((f) => f.properties.rname === district).map((f) => f.geometry))
+  if (!ring) return null
+  districtRing.set(city + ':' + district, ring)
+  let cx = 0, cy = 0
+  ring.forEach(([x, y]) => { cx += x; cy += y })
+  cx /= ring.length; cy /= ring.length
+  if (inRing(cx, cy, ring)) return [cx, cy]
+  // 凹形：在 bbox 內決定性取樣，找第一個落在區內的點
+  const b = bboxOfRing(ring), r = mulberry32(hash(city + district + ':anchor'))
+  for (let i = 0; i < 200; i++) {
+    const x = b.w + r() * (b.e - b.w), y = b.s + r() * (b.n - b.s)
+    if (inRing(x, y, ring)) return [x, y]
+  }
+  return [ring[0][0], ring[0][1]]
+}
+
+export const CITIES: CityDef[] = ALL_COUNTIES.map((name) => {
+  const core = CORE_CITIES.find((c) => c.name === name)
+  const coreNames = new Set(core?.districts.map((d) => d.name) ?? [])
+  const rest = townRoster(name)
+    .filter((t) => !coreNames.has(t.name))
+    .map((t) => ({ name: t.name, center: anchorOf(name, t.name) }))
+    .filter((d): d is { name: string; center: [number, number] } => !!d.center)
+  return { name, districts: [...(core?.districts ?? []), ...rest] }
+})
+const isCoreDistrict = (city: string, district: string) =>
+  !!CORE_CITIES.find((c) => c.name === city)?.districts.some((d) => d.name === district)
+
 export const DEFAULT_CITY = '台北市'
 export const DEFAULT_DISTRICT = '信義區'
 export const cityDef = (name: string) => CITIES.find((c) => c.name === name)
@@ -61,7 +137,7 @@ export interface Dcu {
   online: boolean
   city: string
   district: string
-  lastSeen: string // 最後連線時間（顯示用 MM-DD HH:mm）
+  lastSeen: string // 最後連線時間（顯示用 YYYY-MM-DD HH:mm）
   lastSeenMins: number // 距今幾分鐘（排序用）
   freq: number // 頻點 1..FREQ_COUNT
   state: DcuState // 啟用 / 停用 / 斷線
@@ -99,11 +175,11 @@ const TZ_OFFSET = 8 * 3600_000
 export const MINUTES_SINCE_MIDNIGHT = 14 * 60
 /** 該時間戳是否落在當日（列表的「非當日標紅」用同一個判定） */
 export const isSameDay = (minsAgo: number) => minsAgo <= MINUTES_SINCE_MIDNIGHT
-/** 距今 n 分鐘 → 'MM-DD HH:mm' */
+/** 距今 n 分鐘 → 'YYYY-MM-DD HH:mm'（2026-10-01 業主意見：日期一律帶西元年） */
 export function stampOf(minsAgo: number): string {
   const d = new Date(DEMO_NOW + TZ_OFFSET - minsAgo * 60_000)
   const p = (n: number) => String(n).padStart(2, '0')
-  return `${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`
 }
 
 /**
@@ -135,15 +211,44 @@ const pad = (n: number, w = 3) => String(n).padStart(w, '0')
 /** 每個行政區的 DCU 數 / 每台 DCU 的電表數（高密度模擬） */
 const DCU_PER_DISTRICT_COUNT = 30
 const METERS_PER_DCU = 80
+/** 其餘行政區（2026-09-23 補齊全台）：每區 4–10 台 DCU、每台 30 具電表，全台約 9 萬具，載入仍順 */
+const LIGHT_DCU_MIN = 4
+const LIGHT_DCU_SPAN = 7
+const LIGHT_METERS_PER_DCU = 30
 
 /** 縣市 → 編號前綴 */
-const CITY_CODE: Record<string, string> = { 台北市: 'TPE', 新北市: 'NTP', 台中市: 'TCH', 高雄市: 'KHH' }
-/** 縣市 → 台電區處（代碼＝電號前兩碼）。TODO: 上線改由 API 的區處欄位提供 */
+const CITY_CODE: Record<string, string> = {
+  基隆市: 'KEE', 台北市: 'TPE', 新北市: 'NTP', 桃園市: 'TYN', 新竹市: 'HSZ', 新竹縣: 'HSQ', 苗栗縣: 'MIA',
+  台中市: 'TCH', 彰化縣: 'CHA', 南投縣: 'NAN', 雲林縣: 'YUN', 嘉義市: 'CYI', 嘉義縣: 'CYQ', 台南市: 'TNN',
+  高雄市: 'KHH', 屏東縣: 'PIF', 宜蘭縣: 'ILA', 花蓮縣: 'HUA', 台東縣: 'TTT', 澎湖縣: 'PEN', 金門縣: 'KMN', 連江縣: 'LNN',
+}
+/**
+ * 縣市 → 台電區處（代碼＝電號前兩碼）。原四縣市的代碼沿用，其餘為 demo 編排。
+ * TODO: 上線改由 API 的區處欄位提供
+ */
 const CITY_OFFICE: Record<string, { code: string; name: string }> = {
   台北市: { code: '01', name: '北市區處' },
   新北市: { code: '02', name: '北縣區處' },
+  基隆市: { code: '03', name: '基隆區處' },
+  宜蘭縣: { code: '04', name: '宜蘭區處' },
   台中市: { code: '05', name: '中市區處' },
+  桃園市: { code: '06', name: '桃園區處' },
+  新竹市: { code: '07', name: '新桃區處' },
+  新竹縣: { code: '07', name: '新桃區處' },
   高雄市: { code: '08', name: '高市區處' },
+  苗栗縣: { code: '09', name: '苗栗區處' },
+  彰化縣: { code: '10', name: '彰化區處' },
+  南投縣: { code: '11', name: '南投區處' },
+  雲林縣: { code: '12', name: '雲林區處' },
+  嘉義市: { code: '13', name: '嘉義區處' },
+  嘉義縣: { code: '13', name: '嘉義區處' },
+  台南市: { code: '14', name: '台南區處' },
+  屏東縣: { code: '15', name: '屏東區處' },
+  花蓮縣: { code: '16', name: '花蓮區處' },
+  台東縣: { code: '17', name: '台東區處' },
+  澎湖縣: { code: '18', name: '澎湖區處' },
+  金門縣: { code: '19', name: '金門區處' },
+  連江縣: { code: '20', name: '馬祖區處' },
 }
 export const officeOf = (city: string) => CITY_OFFICE[city] ?? { code: '00', name: '未指定區處' }
 /** DCU 設備型號（demo 用；抽屜標題以 () 呈現） */
@@ -160,16 +265,33 @@ function buildFleet() {
   const meters: Meter[] = []
   let dcuSeq = 0, meterSeq = 0
 
-  for (const city of CITIES) {
+  /**
+   * 生成一個行政區的 DCU 與電表。
+   *   core：原四縣市的示範區，沿用當初的密度／斷線率／取樣方式（編號因此不變）。
+   *   其他：密度較低（4–10 台 × 30 具），DCU 以區界多邊形擋在區內，
+   *         斷線率依縣市與行政區各帶一點偏差，讓三級告警色在全台都看得到。
+   */
+  const genDistrict = (city: CityDef, d: CityDef['districts'][number], core: boolean) => {
+    const r = mulberry32(hash(city.name + ':' + d.name))
     const cityOfflineBias = city.name === '台北市' ? 0 : 0.02
-    for (const d of city.districts) {
-      const n = DCU_PER_DISTRICT_COUNT
-      const r = mulberry32(hash(city.name + ':' + d.name))
-      for (let i = 0; i < n; i++) {
+    const n = core ? DCU_PER_DISTRICT_COUNT : LIGHT_DCU_MIN + (hash(city.name + d.name + ':n') % LIGHT_DCU_SPAN)
+    const baseOffP = core
+      ? (d.name === '信義區' ? 0.28 : d.name === '大安區' ? 0.18 : 0.12) + cityOfflineBias
+      : 0.03 + (hash(city.name + ':bias') % 5) * 0.012 + (hash(city.name + d.name + ':hot') % 6 === 0 ? 0.14 : 0)
+    const ring = core ? null : districtRing.get(city.name + ':' + d.name) ?? null
+    for (let i = 0; i < n; i++) {
+      {
         dcuSeq++
-        const lng = d.center[0] + (r() - 0.5) * 0.028
-        const lat = d.center[1] + (r() - 0.5) * 0.02
-        const offlineP = (d.name === '信義區' ? 0.28 : d.name === '大安區' ? 0.18 : 0.12) + cityOfflineBias
+        let lng = d.center[0] + (r() - 0.5) * 0.028
+        let lat = d.center[1] + (r() - 0.5) * 0.02
+        if (ring && !inRing(lng, lat, ring)) {
+          // 小區（離島、市區小區）取樣框會超出區界 → 往錨點收，最後退回錨點本身
+          let k = 0.5
+          while (k > 0.05 && !inRing(d.center[0] + (lng - d.center[0]) * k, d.center[1] + (lat - d.center[1]) * k, ring)) k /= 2
+          lng = d.center[0] + (lng - d.center[0]) * k
+          lat = d.center[1] + (lat - d.center[1]) * k
+        }
+        const offlineP = baseOffP
         const online = r() > offlineP
         const id = `DCU-${pad(dcuSeq)}`
         // 頻點 1..10（穩定分佈）；狀態：斷線 > 停用(~8% 在線者) > 啟用正常
@@ -190,7 +312,7 @@ function buildFleet() {
           model: DCU_MODELS[hash(id + ':model') % DCU_MODELS.length],
         }
         dcus.push(dcu)
-        const mCount = METERS_PER_DCU
+        const mCount = core ? METERS_PER_DCU : LIGHT_METERS_PER_DCU
         for (let j = 0; j < mCount; j++) {
           meterSeq++
           const mr = mulberry32(hash(dcu.id + ':' + j))
@@ -217,6 +339,11 @@ function buildFleet() {
         }
       }
     }
+  }
+
+  // ---- 第一輪：原四縣市示範區（含跨區電表），順序與過去相同 → 編號不變 ----
+  for (const city of CORE_CITIES) {
+    for (const d of city.districts) genDistrict(city, d, true)
 
     // ---- 跨區：沿相鄰行政區邊界，電表跨界但仍靠近其 DCU ----
     const ds = city.districts
@@ -248,6 +375,11 @@ function buildFleet() {
     }
   }
 
+  // ---- 第二輪：全台其餘縣市／行政區（低密度） ----
+  for (const city of CITIES) {
+    for (const d of city.districts) if (!isCoreDistrict(city.name, d.name)) genDistrict(city, d, false)
+  }
+
   // ---- 白名單 mock：約 1.2% 電表被「最近的另一台 DCU」收走（實際收容 ≠ 白名單應屬）----
   // 電表位置仍在白名單 DCU 附近 —— 模擬 RF 歸屬跑到鄰近頻點的真實情境。
   // TODO: 上線後 expectedDcuId 由白名單 API 提供，此段移除。
@@ -274,6 +406,17 @@ export const DCUS = FLEET.dcus
 export const METERS = FLEET.meters
 export const dcuById = new Map(DCUS.map((d) => [d.id, d]))
 export const meterById = new Map(METERS.map((m) => [m.id, m]))
+
+/** 縣市／行政區索引 —— 全台補齊後裝置量變大，範圍查詢與統計不再每次掃整個陣列 */
+function groupBy<T>(arr: T[], key: (x: T) => string) {
+  const m = new Map<string, T[]>()
+  for (const x of arr) { const k = key(x); let a = m.get(k); if (!a) m.set(k, (a = [])); a.push(x) }
+  return m
+}
+const dcusByCity = groupBy(DCUS, (d) => d.city)
+const dcusByDistrict = groupBy(DCUS, (d) => d.city + ':' + d.district)
+const metersByCity = groupBy(METERS, (m) => m.city)
+const metersByDistrict = groupBy(METERS, (m) => m.city + ':' + m.district)
 
 const metersByDcu = new Map<string, Meter[]>()
 for (const m of METERS) { if (!metersByDcu.has(m.dcuId)) metersByDcu.set(m.dcuId, []); metersByDcu.get(m.dcuId)!.push(m) }
@@ -334,25 +477,37 @@ export function aggStat(dcus: Dcu[]): AggStat {
 /** 依地圖層級取範圍內 DCU（縣市層 district='' 代表整個縣市所有行政區） */
 export function dcusInScope(level: 'taiwan' | 'city', city: string, district: string): Dcu[] {
   if (level === 'taiwan') return DCUS
-  if (!district) return DCUS.filter((d) => d.city === city)
-  return DCUS.filter((d) => d.city === city && d.district === district)
+  if (!district) return dcusByCity.get(city) ?? []
+  return dcusByDistrict.get(city + ':' + district) ?? []
 }
 
 /** 依地圖層級取範圍內電表（全台層級回傳全部，關係地圖以 GPU 圖層渲染） */
 export function metersInScope(level: 'taiwan' | 'city', city: string, district: string): Meter[] {
   if (level === 'taiwan') return METERS
-  if (!district) return METERS.filter((m) => m.city === city)
-  return METERS.filter((m) => m.city === city && m.district === district)
+  if (!district) return metersByCity.get(city) ?? []
+  return metersByDistrict.get(city + ':' + district) ?? []
+}
+
+/** 某縣市（可再限行政區）的電表數，依電表所在地、排除停用（與歸屬錯誤數同一口徑）；hover 用，有快取 */
+const meterCountCache = new Map<string, number>()
+export function areaMeterCount(city: string, district = ''): number {
+  const key = city + ':' + district
+  let n = meterCountCache.get(key)
+  if (n == null) {
+    n = metersInScope('city', city, district).filter((m) => !m.disabled).length
+    meterCountCache.set(key, n)
+  }
+  return n
 }
 
 /* ---------- 統計（只依城市/行政區） ---------- */
 export interface DistrictStat { name: string; dcuTotal: number; dcuOnline: number; dcuOffline: number; onlineRate: number; offlineRate: number; severity: Severity; meterOffline: number; lpRate: number }
 export function districtStats(city: string): DistrictStat[] {
   return districtsOf(city).map((d) => {
-    const inDcus = DCUS.filter((x) => x.city === city && x.district === d.name)
+    const inDcus = dcusByDistrict.get(city + ':' + d.name) ?? []
     const dcuOffline = inDcus.filter((x) => !x.online).length
     const onlineRate = inDcus.length ? (inDcus.length - dcuOffline) / inDcus.length : 1
-    const meterOffline = METERS.filter((m) => m.city === city && m.district === d.name && !m.online && !m.disabled).length
+    const meterOffline = (metersByDistrict.get(city + ':' + d.name) ?? []).filter((m) => !m.online && !m.disabled).length
     return { name: d.name, dcuTotal: inDcus.length, dcuOnline: inDcus.length - dcuOffline, dcuOffline, onlineRate, offlineRate: 1 - onlineRate, severity: classifySeverity(onlineRate), meterOffline, lpRate: lpRateOf(inDcus) }
   })
 }
@@ -365,15 +520,25 @@ export const offlineDcusAll = (): Dcu[] => DCUS.filter((d) => !d.online)
 
 /** 全台層級：各縣市統計（斷線 DCU 佔比 → 嚴重度）；無 fleet 資料的縣市＝正常 */
 export interface CityStat { name: string; dcuTotal: number; dcuOnline: number; dcuOffline: number; onlineRate: number; offlineRate: number; severity: Severity; lpRate: number; lat: number }
-/** 依緯度由北到南排序（業主指定的預設順序） */
+/**
+ * 外島縣市 —— 排序時固定墊底。連江（北緯 26°）、金門（24.4°）照緯度會排在最前面，
+ * 2026-09-29 業主意見：外島一律排最後，其餘縣市照緯度由北到南。
+ */
+const OUTER_ISLANDS = ['澎湖縣', '金門縣', '連江縣']
+const islandRank = (name: string) => OUTER_ISLANDS.indexOf(name)
+/** 本島縣市依緯度由北到南，外島固定排最後（順序：澎湖、金門、連江） */
 export function cityStats(): CityStat[] {
   return CITIES.map((c) => {
-    const inDcus = DCUS.filter((d) => d.city === c.name)
+    const inDcus = dcusByCity.get(c.name) ?? []
     const dcuOffline = inDcus.filter((d) => !d.online).length
     const onlineRate = inDcus.length ? (inDcus.length - dcuOffline) / inDcus.length : 1
     const lat = c.districts.reduce((s, d) => s + d.center[1], 0) / (c.districts.length || 1)
     return { name: c.name, dcuTotal: inDcus.length, dcuOnline: inDcus.length - dcuOffline, dcuOffline, onlineRate, offlineRate: 1 - onlineRate, severity: classifySeverity(onlineRate), lpRate: lpRateOf(inDcus), lat }
-  }).sort((a, b) => b.lat - a.lat)
+  }).sort((a, b) => {
+    const ia = islandRank(a.name), ib = islandRank(b.name)
+    if (ia >= 0 || ib >= 0) return (ia < 0 ? -1 : ia) - (ib < 0 ? -1 : ib)
+    return b.lat - a.lat
+  })
 }
 export const statByCity = (name: string) => cityStats().find((s) => s.name === name)
 

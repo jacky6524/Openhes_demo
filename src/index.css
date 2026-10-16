@@ -9,9 +9,40 @@
     height: 100%;
   }
   body {
-    @apply bg-bg text-ink antialiased;
+    @apply bg-page text-ink antialiased;
     font-feature-settings: 'tnum' 1; /* tabular numerals for KPI figures */
   }
+
+  /* 與前端 shared/assets/font.css 相同：字體規則直接下在 * 上，
+     避免第三方元件（recharts / maplibre）自帶的 font-family 蓋掉。 */
+  * {
+    font-family: 'Rubik', 'Noto Sans TC', sans-serif;
+  }
+}
+
+/* 捲軸 — 對齊前端 shared/assets/font.css */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-button {
+  display: none;
+}
+::-webkit-scrollbar-track {
+  background: none;
+}
+::-webkit-scrollbar-thumb {
+  width: 8px;
+  background: rgba(125, 125, 125, 0.3);
+  border-radius: 2px;
+  transition: all 0.3s ease-in-out;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(125, 125, 125, 0.4);
+}
+body {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(125, 125, 125, 0.3) transparent;
 }
 
 /* smooth map drill transitions */

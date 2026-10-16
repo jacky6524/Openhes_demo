@@ -6,69 +6,82 @@ import { SharedMetricCard } from '@/components/shared/SharedMetricCard'
 import { MeterDrawer } from '@/components/drawer/MeterDrawer'
 
 /**
- * Layout per Figma 3031-12251 (1920 canvas, content 1680 = left 880 + right 736,
- * gap 16). Two horizontal BANDS so the second-row modules line up across columns:
+ * 系統總覽 — 版面與前端正式包 `openhes-front` 的
+ * `features/DashBoard/components/new/NewDashboard.vue` 逐格對齊。
  *
- *   Band 1 (top KPI cards, ONE equal-height row across both columns):
- *     Left  (880): [ 電表連線率 500 | MN午夜讀表率 364 ]
- *     Right (736): [ ALT讀表率 | LP讀表率 ]
- *     → grid-rows-1 + h-full make all four cards the same height, so Band 2
- *       starts at the SAME y in both columns.
+ * 前端 CSS ⟷ 這裡的對應：
+ *   .new-dashboard      → 外層 padding 16 + 玫瑰漸層底 (bg-dashboard)
+ *   .dashboard-canvas   → grid rows `minmax(96px,96fr) minmax(736px,856fr)`
+ *                          gap 16、min-width 1240
+ *   .kpi-row            → cols 880fr / 736fr
+ *   .kpi-row-left       → cols 552fr / 312fr（電表連線率 : MN午夜讀表率）
+ *   .kpi-row-right      → cols 1fr / 1fr（ALT : LP）
+ *   .dashboard-grid     → cols 880fr / 736fr，單列吃滿剩餘高度
+ *   .right-column       → rows `96fr / 480fr / 248fr`
+ *   .right-top          → cols 500fr / 220fr（DCU連線率 : 事件·停電）
  *
- *   Band 2:
- *     Left  (880): [ 台灣地圖 ]（fills column height）
- *     Right (736): [ DCU連線率 500 | 事件·停電 220 ] → 比對圖 → LP讀表率 shared
- *     → 地圖上緣 ⟷ DCU連線率 / 事件數量 上緣 對齊。
+ * 高度較矮的螢幕（前端 @media max-height:943px）壓縮 gap 與 padding，
+ * 這裡以 Tailwind arbitrary variant `[@media(max-height:943px)]` 對應。
  *
- * The MeterDrawer slides over the right column's scatter when a 行政區 is clicked.
+ * MeterDrawer 在點選行政區時覆蓋右欄的比對圖。
  */
 export function SystemOverview() {
   return (
-    // 100% 縮放即撐滿版面：以 fr 欄位隨容器寬度縮放，min-width 降到 1080 讓一般
-    // 螢幕(含側欄展開)不需水平捲動/拖拽。h-full 撐滿視窗高度，Band2 吸收剩餘高度。
-    <div className="h-full p-4 min-w-[1080px] flex flex-col">
-      <div className="flex-1 min-h-0 flex flex-col gap-4">
-        {/* Band 1 — all top KPI cards share one equal-height row (固定高) */}
-        <div className="shrink-0 grid grid-cols-[880fr_736fr] gap-4 items-stretch">
-          <div className="grid grid-cols-[500fr_364fr] grid-rows-1 gap-4 h-full">
+    <div className="h-full min-w-[1272px] overflow-auto bg-dashboard p-4 [@media(max-height:943px)]:p-3">
+      <div
+        className={[
+          'grid h-full min-h-[848px] w-full min-w-[1240px] gap-4',
+          'grid-rows-[minmax(96px,96fr)_minmax(736px,856fr)]',
+          '[@media(max-height:943px)]:min-h-0 [@media(max-height:943px)]:gap-3',
+          '[@media(max-height:943px)]:grid-rows-[84px_minmax(0,1fr)]',
+        ].join(' ')}
+      >
+        {/* .kpi-row — 上排 KPI，四張卡等高共用同一列 */}
+        <section className="grid min-h-0 grid-cols-[880fr_736fr] gap-4 [@media(max-height:943px)]:gap-3">
+          <div className="grid min-w-0 grid-cols-[552fr_312fr] gap-4 [@media(max-height:943px)]:gap-3">
             <RatioCard variant="meter" />
-            <RateKpiCard metric="midnight" label="MN午夜讀表率(%)" />
+            <RateKpiCard metric="midnight" label="MN午夜讀表率 (%)" />
           </div>
-          <div className="grid grid-cols-2 grid-rows-1 gap-4 h-full">
-            <RateKpiCard metric="alt" label="ALT 讀表率(%)" />
-            <RateKpiCard metric="lp" label="LP讀表率(%)" />
+          <div className="grid min-w-0 grid-cols-2 gap-4 [@media(max-height:943px)]:gap-3">
+            <RateKpiCard metric="alt" label="ALT 讀表率 (%)" />
+            <RateKpiCard metric="lp" label="LP 讀表率 (%)" />
           </div>
-        </div>
+        </section>
 
-        {/* Band 2 — 吸收剩餘視窗高度；地圖與右欄同高，比對圖拉長、概況卡下移不拉長 */}
-        <div className="flex-1 min-h-0 grid grid-cols-[880fr_736fr] gap-4 items-stretch">
-          {/* Left — Taiwan map, fills the column height */}
-          <section className="min-h-[620px] min-w-0">
-            <div className="h-full rounded-card bg-surface border border-border shadow-card p-3">
-              <HealthMap />
-            </div>
-          </section>
+        {/* .dashboard-grid — 地圖 ｜ 右欄 */}
+        <section className="grid min-h-0 grid-cols-[880fr_736fr] grid-rows-[minmax(0,1fr)] items-stretch gap-4 [@media(max-height:943px)]:gap-3">
+          {/* .map-panel — 卡片本身不留白，地圖自帶麵包屑與內距 */}
+          <article className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-card border-[0.5px] border-card-border bg-surface shadow-card">
+            <HealthMap />
+          </article>
 
-          {/* Right — DCU/event cards, cross-compare, shared card */}
-          <div className="flex flex-col gap-4 min-w-0 min-h-0">
-            {/* DCU連線率 縮小 1/8 (500→437.5)，多出空間給 事件/停電數量 (220→282.5) */}
-            <div className="shrink-0 grid grid-cols-[437.5fr_282.5fr] grid-rows-1 gap-4 items-stretch">
+          {/* .right-column */}
+          <div
+            className={[
+              'grid min-h-0 min-w-0 gap-4',
+              'grid-rows-[minmax(96px,96fr)_minmax(360px,480fr)_minmax(248px,248fr)]',
+              '[@media(max-height:943px)]:gap-3',
+              '[@media(max-height:943px)]:grid-rows-[minmax(80px,84fr)_minmax(280px,360fr)_minmax(176px,220fr)]',
+            ].join(' ')}
+          >
+            {/* .right-top */}
+            <section className="grid min-h-0 grid-cols-[500fr_220fr] items-stretch gap-4 [@media(max-height:943px)]:gap-3">
               <RatioCard variant="dcu" />
               <EventCountCard />
-            </div>
+            </section>
 
-            {/* cross-compare 拉長吸收剩餘高度；drawer slides over this region when a 行政區 is clicked */}
-            <section className="flex-1 min-h-[360px] min-w-0 relative">
+            {/* .scatter-panel — 點選行政區時 MeterDrawer 覆蓋於上 */}
+            <section className="relative min-h-0 min-w-0">
               <CrossScatter />
               <MeterDrawer />
             </section>
 
-            {/* shared master-detail card — 保持原高、不拉長，隨比對圖增高而下移對齊 */}
-            <div className="shrink-0">
+            {/* .trend-panel */}
+            <section className="min-h-0 min-w-0">
               <SharedMetricCard />
-            </div>
+            </section>
           </div>
-        </div>
+        </section>
       </div>
     </div>
   )

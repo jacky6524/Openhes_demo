@@ -21,6 +21,21 @@ export function Th({ children, className = '' }: { children?: ReactNode; classNa
   return <th className={`text-left font-medium px-3 py-2.5 whitespace-nowrap ${className}`}>{children}</th>
 }
 
+/**
+ * 時間戳上下兩行（日期／時間）—— 2026-10-01 業主意見日期要帶西元年，
+ * 右側窄列表放一行太寬，拆成兩行。輸入 'YYYY-MM-DD HH:mm'；沒有空白就原樣顯示。
+ */
+export function StampLines({ value }: { value: string }) {
+  const i = value.indexOf(' ')
+  if (i < 0) return <>{value}</>
+  return (
+    <span className="inline-flex flex-col leading-tight">
+      <span>{value.slice(0, i)}</span>
+      <span className="text-[0.92em] opacity-80">{value.slice(i + 1)}</span>
+    </span>
+  )
+}
+
 export function StatusPill({ status }: { status: DcuStatus }) {
   const online = status === 'online'
   return (

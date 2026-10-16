@@ -30,24 +30,48 @@ const NAV: NavItem[] = [
   {
     label: '裝置管理',
     icon: <Cpu size={18} />,
+    // 2026-09-07 依業主指定的項目與順序；與正式前端 openhes-front 的 pages 對應：
+    // dcu-list / meter-list / instant-query / registration-conflict / device-groups / device-record
+    // 2026-09-17 依業主意見移除「裝置列表」（地圖＋DCU 列表那頁）——
+    // 頁面檔 pages/DcuOverview.tsx 與 App 的 'dcu' 路由都還在，要復原只要把這一列加回來。
     children: [
-      { label: 'DCU裝置列表', view: 'dcu' },
-      { label: '模組裝置列表' },
-      { label: '頻道規劃' },
+      { label: 'DCU清單', view: 'dcuList' },
+      { label: '電表清單', view: 'meterList' },
+      { label: '即裝即查', view: 'instantQuery' },
+      { label: '註冊衝突', view: 'registrationConflict' },
+      { label: '裝置群集', view: 'deviceGroups' },
+      { label: '裝置紀錄', view: 'deviceRecord' },
     ],
   },
   { label: '讀表管理', icon: <BookOpenCheck size={18} /> },
-  { label: '統計分析', icon: <BarChart3 size={18} /> },
+  {
+    label: '統計分析',
+    icon: <BarChart3 size={18} />,
+    // Figma 4255:33532「統計分析」：長條（熱力）圖畫面＝讀表效能，報表任務清單＝統計報表
+    children: [
+      { label: '讀表效能', view: 'readPerformance' },
+      { label: '統計報表', view: 'statsReport' },
+    ],
+  },
   { label: '事件管理', icon: <Bell size={18} /> },
-  { label: '裝置模組', icon: <PackageOpen size={18} /> },
-  { label: '權限管理', icon: <ShieldCheck size={18} /> },
+  { label: '裝置模組', icon: <PackageOpen size={18} />, view: 'deviceModule' },
+  {
+    label: '權限管理',
+    icon: <ShieldCheck size={18} />,
+    // Figma 3892:24129「權限管理」整段
+    children: [
+      { label: '帳號管理', view: 'permAccount' },
+      { label: '功能項目管理', view: 'permFunction' },
+      { label: '角色權限管理', view: 'permRole' },
+    ],
+  },
 ]
 
 export function Sidebar({ collapsed = false }: { collapsed?: boolean }) {
   const view = useNav((s) => s.view)
   const setView = useNav((s) => s.setView)
   const detailFrom = useNav((s) => s.dcuDetailFrom)
-  // 裝置管理 starts open so its active child (DCU裝置列表) is visible
+  // 裝置管理 starts open so its active child (裝置列表) is visible
   const [open, setOpen] = useState<Record<string, boolean>>({ 裝置管理: true })
 
   // 詳細頁沒有自己的側欄項目 —— 掛在「開啟它的那一頁」底下（裝置列表 or DCU總覽）
@@ -58,7 +82,7 @@ export function Sidebar({ collapsed = false }: { collapsed?: boolean }) {
   return (
     <aside
       className={[
-        'shrink-0 bg-surface border-r border-border py-3 px-2.5 overflow-y-auto',
+        'shrink-0 bg-chrome py-3 px-2.5 overflow-y-auto',
         'transition-[width] duration-200 ease-in-out',
         collapsed ? 'w-[60px]' : 'w-[188px]',
       ].join(' ')}
@@ -79,7 +103,7 @@ export function Sidebar({ collapsed = false }: { collapsed?: boolean }) {
                   'flex items-center gap-2.5 py-2.5 rounded-xl text-sm font-medium transition-colors',
                   collapsed ? 'justify-center px-0' : 'px-3',
                   active
-                    ? 'bg-brand-soft text-brand border border-brand/25'
+                    ? 'bg-brand-soft-hover text-brand'
                     : 'text-ink-sub hover:bg-inset hover:text-ink',
                 ].join(' ')}
               >
@@ -105,7 +129,7 @@ export function Sidebar({ collapsed = false }: { collapsed?: boolean }) {
                         className={[
                           'text-left text-[13px] py-1.5 px-2 rounded-lg transition-colors',
                           childActive
-                            ? 'text-brand font-semibold'
+                            ? 'bg-brand-soft-hover text-brand font-semibold'
                             : 'text-ink-sub hover:text-ink hover:bg-inset',
                         ].join(' ')}
                       >

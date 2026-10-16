@@ -4,7 +4,7 @@ import { useCaseFilter, caseLabel, CASES } from '@/store/useCaseFilter'
 
 export function Topbar({ onToggleSidebar }: { onToggleSidebar: () => void }) {
   return (
-    <header className="h-14 shrink-0 bg-surface border-b border-border flex items-center px-4 gap-3">
+    <header className="h-14 shrink-0 bg-chrome shadow-[0_1px_4px_rgba(120,60,70,0.12)] relative z-10 flex items-center px-4 gap-3">
       {/* sidebar collapse toggle */}
       <button
         onClick={onToggleSidebar}
