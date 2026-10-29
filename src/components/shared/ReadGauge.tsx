@@ -7,7 +7,7 @@ import type { Health } from '@/types'
  *   內圈 80% 白色實心，上下兩行（數值 24px / 說明 12px #40373b）
  *
  * 環色與地圖健康色同一組（tokens.health）：
- *   良好(≥98%)=中性灰 #E5E7EB、注意(95~98%)=#FFD230、告警(<95%)=#FB2C36。
+ *   良好(≥98%)=#9DD39F、注意(95~98%)=#FFB800、告警(<95%)=#ED6063（2026-10-22 新色票）。
  * 中央數字固定黑色。
  */
 export function ReadGauge({

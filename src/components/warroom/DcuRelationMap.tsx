@@ -554,7 +554,7 @@ export function DcuRelationMap() {
         paint: { 'circle-color': '#000', 'circle-opacity': 0, 'circle-radius': METER_HIT_RADIUS },
       })
 
-      // 歸屬錯誤：指向線 + 灰色圓圈✕圖示。不受電表縮放門檻限制，
+      // 歸屬錯誤：指向線 + 灰色圓圈 ? 圖示。不受電表縮放門檻限制，
       // 任何縮放都看得見「應屬哪台、實際跑去哪」
       map.addSource('rel-mis', { type: 'geojson', data: EMPTY_FC_DATA })
       map.addLayer({
@@ -1345,8 +1345,8 @@ function LayerPanel({
           onToggle={() => onShowMis(!showMis)}
           title="畫出範圍內全部歸屬錯誤電表與其兩端 DCU（實線＝實際收容、虛線＝白名單應屬）"
           swatch={
-            <span className="grid h-3.5 w-3.5 place-items-center rounded-full text-[8px] font-bold leading-none text-white" style={{ background: MIS_COLOR }}>
-              ✕
+            <span className="grid h-3.5 w-3.5 place-items-center rounded-full text-[9px] font-extrabold leading-none text-white" style={{ background: MIS_COLOR }}>
+              ?
             </span>
           }
           label="歸屬錯誤電表"

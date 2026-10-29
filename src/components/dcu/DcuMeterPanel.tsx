@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { ArrowLeft, Copy, Check, ClipboardList, Info, Network } from 'lucide-react'
 import { metersForDcu, type DcuMeterRow } from '@/data/dcuMeters'
 import { MeterDetailModal } from '@/components/dcu/MeterDetailModal'
@@ -11,11 +11,11 @@ import {
   FilterHead,
   SearchHead,
   MenuItem,
-  Pagination,
+  InfiniteFooter,
+  useInfiniteRows,
   type SortDir,
 } from '@/components/table/tableBits'
 
-const PAGE_SIZE = 10
 type SortKey = 'lqi' | 'time'
 type StatusFilter = 'all' | DcuStatus
 
@@ -32,7 +32,7 @@ export function DcuMeterPanel({ model, onClose }: { model: string; onClose: () =
   const [menu, setMenu] = useState<null | 'status' | 'meterNo' | 'elecNo'>(null)
   const [sortKey, setSortKey] = useState<SortKey | null>(null)
   const [sortDir, setSortDir] = useState<SortDir>('desc')
-  const [page, setPage] = useState(1)
+  const scrollRef = useRef<HTMLDivElement>(null)
   const [copied, setCopied] = useState<string | null>(null)
   const [detailMeter, setDetailMeter] = useState<string | null>(null)
   const [infoMeter, setInfoMeter] = useState<DcuMeterRow | null>(null)
@@ -53,9 +53,9 @@ export function DcuMeterPanel({ model, onClose }: { model: string; onClose: () =
     return rows
   }, [all, statusFilter, q, sortKey, sortDir])
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
-  const safePage = Math.min(page, totalPages)
-  const pageRows = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE)
+  // 無限捲動（業主不要頁碼）：換 DCU、篩選或排序變動回到第一批
+  const { visible, sentinelRef, hasMore } = useInfiniteRows(filtered.length, [model, statusFilter, q, sortKey, sortDir], 10)
+  const pageRows = filtered.slice(0, visible)
 
   const toggleSort = (key: SortKey) => {
     if (key === sortKey) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
@@ -70,10 +70,8 @@ export function DcuMeterPanel({ model, onClose }: { model: string; onClose: () =
       window.setTimeout(() => setCopied((c) => (c === t ? null : c)), 1200)
     }, () => {})
   }
-  const resetPage = () => setPage(1)
   const setSearch = (k: keyof typeof q, v: string) => {
     setQ((s) => ({ ...s, [k]: v }))
-    resetPage()
   }
 
   return (
@@ -106,11 +104,12 @@ export function DcuMeterPanel({ model, onClose }: { model: string; onClose: () =
         </div>
       </div>
 
-      {/* table */}
+      {/* table：自己捲、表頭釘住 */}
+      <div ref={scrollRef} className="max-h-[calc(100vh-300px)] min-h-[200px] overflow-auto rounded-lg border border-border">
       <table className="w-full text-[13px] border-collapse">
         <thead>
           <tr className="text-ink-sub border-b border-border">
-            <Th>
+            <Th className="sticky top-0 z-10 bg-inset">
               <FilterHead label="狀態" open={menu === 'status'} onToggle={() => setMenu(menu === 'status' ? null : 'status')}>
                 {(['all', 'online', 'offline'] as StatusFilter[]).map((s) => (
                   <MenuItem
@@ -119,7 +118,6 @@ export function DcuMeterPanel({ model, onClose }: { model: string; onClose: () =
                     onClick={() => {
                       setStatusFilter(s)
                       setMenu(null)
-                      resetPage()
                     }}
                   >
                     {s === 'all' ? '全部' : s === 'online' ? '連線' : '斷線'}
@@ -127,7 +125,7 @@ export function DcuMeterPanel({ model, onClose }: { model: string; onClose: () =
                 ))}
               </FilterHead>
             </Th>
-            <Th>
+            <Th className="sticky top-0 z-10 bg-inset">
               <SearchHead
                 label="表號"
                 value={q.meterNo}
@@ -136,7 +134,7 @@ export function DcuMeterPanel({ model, onClose }: { model: string; onClose: () =
                 onChange={(v) => setSearch('meterNo', v)}
               />
             </Th>
-            <Th>
+            <Th className="sticky top-0 z-10 bg-inset">
               <SearchHead
                 label="電號"
                 value={q.elecNo}
@@ -145,14 +143,14 @@ export function DcuMeterPanel({ model, onClose }: { model: string; onClose: () =
                 onChange={(v) => setSearch('elecNo', v)}
               />
             </Th>
-            <Th>FAN ID</Th>
-            <Th>
+            <Th className="sticky top-0 z-10 bg-inset">FAN ID</Th>
+            <Th className="sticky top-0 z-10 bg-inset">
               <SortHead label="LQI" active={sortKey === 'lqi'} dir={sortDir} onClick={() => toggleSort('lqi')} />
             </Th>
-            <Th>
+            <Th className="sticky top-0 z-10 bg-inset">
               <SortHead label="更新時間" active={sortKey === 'time'} dir={sortDir} onClick={() => toggleSort('time')} />
             </Th>
-            <Th className="w-[96px]" />
+            <Th className="sticky top-0 z-10 w-[96px] bg-inset" />
           </tr>
         </thead>
         <tbody>
@@ -190,8 +188,9 @@ export function DcuMeterPanel({ model, onClose }: { model: string; onClose: () =
           )}
         </tbody>
       </table>
-
-      <Pagination page={safePage} totalPages={totalPages} onPage={setPage} totalCount={filtered.length} />
+      <div ref={sentinelRef} />
+      </div>
+      <InfiniteFooter loaded={pageRows.length} total={filtered.length} hasMore={hasMore} onTop={() => scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })} />
 
       {menu && <div className="fixed inset-0 z-10" onClick={() => setMenu(null)} />}
 

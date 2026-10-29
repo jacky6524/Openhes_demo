@@ -8,7 +8,7 @@ import { STATE_COLOR, MIS_COLOR, FREQ_COLORS } from './warroomConfig'
  *   方塊（底色＝頻點色）  ＝ DCU（正常）
  *   方塊（灰）           ＝ DCU（停用）
  *   方塊 + ✕（紅）       ＝ DCU（斷線）—— 與正常 DCU 同尺寸（2026-09-03 業主意見）
- *   圓圈 + ✕（灰）       ＝ 歸屬錯誤電表
+ *   圓圈 + ?（灰）       ＝ 歸屬錯誤電表（2026-10-22 業主新圖示，原為圓圈 + ✕）
  *   小圓點               ＝ 一般電表（GPU circle 圖層，不在這裡）
  *
  * 2026-08-27 依業主意見：**DCU 一律方形**（原本正常／停用是圓形），
@@ -72,8 +72,8 @@ function square(sizeCss: number, fill: string, withCross = false) {
   return toImage(c)
 }
 
-/** 歸屬錯誤電表：灰色圓圈 + 白色 ✕ + 白外框 */
-function circleCross(sizeCss: number, fill: string) {
+/** 歸屬錯誤電表：灰色圓圈 + 白色 ? + 白外框（業主新圖示「電表歸屬地圖新ICON 示意.png」） */
+function circleQuestion(sizeCss: number, fill: string) {
   const { c, g } = canvas(sizeCss)
   const r = sizeCss * 0.36
   const cx = sizeCss / 2
@@ -81,7 +81,12 @@ function circleCross(sizeCss: number, fill: string) {
   g.beginPath(); g.arc(cx, cx, r + 2.5, 0, Math.PI * 2); g.fill()
   g.fillStyle = fill
   g.beginPath(); g.arc(cx, cx, r, 0, Math.PI * 2); g.fill()
-  cross(g, sizeCss, sizeCss * 0.115, '#FFFFFF')
+  g.fillStyle = '#FFFFFF'
+  g.font = `800 ${Math.round(sizeCss * 0.5)}px system-ui, -apple-system, "Segoe UI", sans-serif`
+  g.textAlign = 'center'
+  g.textBaseline = 'middle'
+  // 問號的視覺重心偏上，往下補一點才看起來置中
+  g.fillText('?', cx, cx + sizeCss * 0.03)
   return toImage(c)
 }
 
@@ -115,7 +120,7 @@ function hexagon(sizeCss: number, fill: string) {
   return toImage(c)
 }
 
-/** 停用電表：灰色**空心**圓圈 —— 與實心小圓點（一般）、畫叉圓圈（歸屬錯誤）三者可辨 */
+/** 停用電表：灰色**空心**圓圈 —— 與實心小圓點（一般）、問號圓圈（歸屬錯誤）三者可辨 */
 function circleHollow(sizeCss: number, stroke: string) {
   const { c, g } = canvas(sizeCss)
   const r = sizeCss * 0.32
@@ -159,7 +164,7 @@ export function registerMarkerIcons(map: maplibregl.Map) {
     if (!map.hasImage(name)) map.addImage(name, square(30, color) as any, { pixelRatio: PX })
   })
   if (!map.hasImage(ICON_MIS_METER)) {
-    map.addImage(ICON_MIS_METER, circleCross(18, MIS_COLOR) as any, { pixelRatio: PX })
+    map.addImage(ICON_MIS_METER, circleQuestion(22, MIS_COLOR) as any, { pixelRatio: PX })
   }
   if (!map.hasImage(ICON_METER_DISABLED)) {
     map.addImage(ICON_METER_DISABLED, circleHollow(18, STATE_COLOR.disabled) as any, { pixelRatio: PX })

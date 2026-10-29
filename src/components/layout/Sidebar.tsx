@@ -41,9 +41,18 @@ const NAV: NavItem[] = [
       { label: '註冊衝突', view: 'registrationConflict' },
       { label: '裝置群組', view: 'deviceGroups' },
       { label: '裝置紀錄', view: 'deviceRecord' },
+      { label: '停用清單', view: 'disabledList' },
     ],
   },
-  { label: '讀表管理', icon: <BookOpenCheck size={18} /> },
+  {
+    label: '讀表管理',
+    icon: <BookOpenCheck size={18} />,
+    // 設計稿「即時讀表」「MDMS上拋」
+    children: [
+      { label: '即時讀表', view: 'instantRead' },
+      { label: 'MDMS上拋', view: 'mdmsUpload' },
+    ],
+  },
   {
     label: '統計分析',
     icon: <BarChart3 size={18} />,
@@ -54,7 +63,16 @@ const NAV: NavItem[] = [
     ],
   },
   { label: '事件管理', icon: <Bell size={18} /> },
-  { label: '裝置模組', icon: <PackageOpen size={18} />, view: 'deviceModule' },
+  {
+    label: '裝置模組',
+    icon: <PackageOpen size={18} />,
+    // 設計稿「裝置模組-1／-2／-3」
+    children: [
+      { label: 'DCU裝置列表', view: 'deviceModule' },
+      { label: '模組裝置列表', view: 'moduleList' },
+      { label: '頻道規劃', view: 'channelPlan' },
+    ],
+  },
   {
     label: '權限管理',
     icon: <ShieldCheck size={18} />,

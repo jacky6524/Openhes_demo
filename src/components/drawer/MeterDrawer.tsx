@@ -217,8 +217,8 @@ function SortHead({
 /** .status-pill — 前端 DCU 明細用的狀態標籤（底色 + 前置圓點，文字一律深灰） */
 function StatusPill({ status }: { status: Health }) {
   const map: Record<Health, { bg: string; dot: string; label: string }> = {
-    good: { bg: '#E6FAF4', dot: '#22D3A1', label: '正常' },
-    warning: { bg: '#FFF7DF', dot: '#FFD230', label: '注意' },
+    good: { bg: '#EEF8EE', dot: healthTok.good.accent, label: '正常' },
+    warning: { bg: '#FFF7DF', dot: healthTok.warning.accent, label: '注意' },
     alert: { bg: '#FFEBED', dot: healthTok.alert.accent, label: '警告' },
   }
   const s = map[status]

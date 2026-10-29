@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Search, CalendarDays } from 'lucide-react'
-import { Pagination } from '@/components/table/tableBits'
+import { InfiniteFooter, useInfiniteRows } from '@/components/table/tableBits'
 
 /**
  * 統計分析 · 讀表效能（Figma 4255:33533，內層 Content 4255:33539）。
@@ -66,19 +66,18 @@ export function ReadPerformance() {
   const [text, setText] = useState('')
   const [date, setDate] = useState('2025-01-01')
   const [applied, setApplied] = useState({ mode: 'FAN MAC' as string, text: '', date: '2025-01-01' })
-  const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(10)
+  const scrollRef = useRef<HTMLDivElement>(null)
 
-  const apply = () => { setApplied({ mode, text, date }); setPage(1) }
-  const clear = () => { setMode('FAN MAC'); setText(''); setDate('2025-01-01'); setApplied({ mode: 'FAN MAC', text: '', date: '2025-01-01' }); setPage(1) }
+  const apply = () => { setApplied({ mode, text, date }) }
+  const clear = () => { setMode('FAN MAC'); setText(''); setDate('2025-01-01'); setApplied({ mode: 'FAN MAC', text: '', date: '2025-01-01' }) }
 
   const devices = useMemo(() => {
     const t = applied.text.trim().toLowerCase()
     return DEVICES.filter((d) => !t || (applied.mode === 'FAN MAC' ? d.fan : d.id).toLowerCase().includes(t))
   }, [applied])
-  const totalPages = Math.max(1, Math.ceil(devices.length / pageSize))
-  const safe = Math.min(page, totalPages)
-  const pageDevices = devices.slice((safe - 1) * pageSize, safe * pageSize)
+  // 無限捲動（業主不要頁碼）：搜尋條件變動回到第一批
+  const { visible, sentinelRef, hasMore } = useInfiniteRows(devices.length, [applied], 10)
+  const pageDevices = devices.slice(0, visible)
   const grid = useMemo(() => pageDevices.map((d) => ({ d, lv: levelsOf(d.id, applied.date) })), [pageDevices, applied.date])
 
   return (
@@ -118,7 +117,7 @@ export function ReadPerformance() {
         {grid.length === 0 ? (
           <div className="py-16 text-center text-[13px] text-ink-mut">查無符合條件的裝置</div>
         ) : (
-          <div className="overflow-x-auto">
+          <div ref={scrollRef} className="max-h-[calc(100vh-330px)] min-h-[240px] overflow-auto">
             <div className="min-w-[1100px]">
               {grid.map(({ d, lv }) => (
                 <div key={d.id} className="flex items-center">
@@ -134,8 +133,9 @@ export function ReadPerformance() {
                   </div>
                 </div>
               ))}
-              {/* X 軸：每 2 小時一個刻度 */}
-              <div className="mt-2 flex">
+              <div ref={sentinelRef} />
+              {/* X 軸：每 2 小時一個刻度；釘在捲動區底部，捲到哪都看得到 */}
+              <div className="sticky bottom-0 mt-2 flex bg-surface pb-1 pt-1">
                 <div className="w-[56px] shrink-0" />
                 <div className="relative h-4 flex-1">
                   {Array.from({ length: 13 }, (_, i) => (
@@ -153,7 +153,9 @@ export function ReadPerformance() {
           </div>
         )}
 
-        <Pagination page={safe} totalPages={totalPages} onPage={setPage} pageSize={pageSize} onPageSize={(s) => { setPageSize(s); setPage(1) }} />
+        <div className="-mx-4 -mb-4 mt-3">
+          <InfiniteFooter loaded={pageDevices.length} total={devices.length} hasMore={hasMore} onTop={() => scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })} />
+        </div>
       </div>
     </div>
   )

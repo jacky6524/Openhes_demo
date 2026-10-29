@@ -96,16 +96,17 @@ export const mag = [
 
 /**
  * Map health tri-colour (legend: 良好 / 注意 / 警告) — DEFINITIVE palette。
- * ← 前端 features/DashBoard/constants/new/newDashboardRegions.ts
- *   colorForDashboardHealth(): good #E5E7EB / warning #FFD230 / alert #FB2C36。
- * 良好＝中性灰，讀作「沒事」；注意／警告才跳出來。
+ * 2026-10-22 業主新色票「新告警色票.png」（系統總覽與 DCU 總覽地圖）：
+ *   告警 #ED6063 / 良好 #9DD39F / 注意 #FFB800。
+ *   （原本是前端 newDashboardRegions.ts 的 良好 #E5E7EB 中性灰／注意 #FFD230／告警 #FB2C36。）
+ * stroke 是色票各自加深的一階，只用在區塊外框；fill 與 accent 都是色票原色。
  * `accent` 供填色太淡讀不出來的地方使用（legend dot、status pill、gauge arc）。
  */
 export type HealthKey = 'good' | 'warning' | 'alert'
 export const health: Record<HealthKey, { fill: string; stroke: string; accent: string; label: string }> = {
-  good: { fill: '#E5E7EB', stroke: '#D1D5DB', accent: '#9CA3AF', label: '良好' },
-  warning: { fill: '#FFD230', stroke: '#E0A800', accent: '#FFD230', label: '注意' },
-  alert: { fill: '#FB2C36', stroke: '#C10007', accent: '#FB2C36', label: '警告' },
+  good: { fill: '#9DD39F', stroke: '#79B87C', accent: '#9DD39F', label: '良好' },
+  warning: { fill: '#FFB800', stroke: '#D99C00', accent: '#FFB800', label: '注意' },
+  alert: { fill: '#ED6063', stroke: '#C94A4D', accent: '#ED6063', label: '警告' },
 }
 
 /**

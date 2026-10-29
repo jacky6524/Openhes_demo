@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { FileText, Copy, Check, ClipboardList, Info, Settings } from 'lucide-react'
 import { DCU_ROWS, DCU_SUMMARY, type DcuRow, type DcuStatus } from '@/data/dcuList'
 import { DcuStreetMap } from '@/components/map/DcuStreetMap'
@@ -11,7 +11,8 @@ import {
   FilterHead,
   SearchHead,
   MenuItem,
-  Pagination,
+  InfiniteFooter,
+  useInfiniteRows,
   PercentBadge,
   GREEN,
   RED,
@@ -119,8 +120,7 @@ function DcuTable({ selected, onSelectDcu }: { selected: string | null; onSelect
   const [menu, setMenu] = useState<null | 'status' | 'model' | 'serial'>(null)
   const [sortKey, setSortKey] = useState<SortKey | null>(null)
   const [sortDir, setSortDir] = useState<SortDir>('desc')
-  const [pageSize, setPageSize] = useState(10)
-  const [page, setPage] = useState(1)
+  const scrollRef = useRef<HTMLDivElement>(null)
   const [copied, setCopied] = useState<string | null>(null)
   const [infoDcu, setInfoDcu] = useState<DcuRow | null>(null)
 
@@ -135,9 +135,9 @@ function DcuTable({ selected, onSelectDcu }: { selected: string | null; onSelect
     return rows
   }, [statusFilter, modelQ, serialQ, sortKey, sortDir])
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize))
-  const safePage = Math.min(page, totalPages)
-  const pageRows = filtered.slice((safePage - 1) * pageSize, safePage * pageSize)
+  // 無限捲動（業主不要頁碼）：篩選或排序變動回到第一批
+  const { visible, sentinelRef, hasMore } = useInfiniteRows(filtered.length, [statusFilter, modelQ, serialQ, sortKey, sortDir], 10)
+  const pageRows = filtered.slice(0, visible)
 
   const toggleSort = (key: SortKey) => {
     if (key === sortKey) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
@@ -152,7 +152,6 @@ function DcuTable({ selected, onSelectDcu }: { selected: string | null; onSelect
       window.setTimeout(() => setCopied((c) => (c === serial ? null : c)), 1200)
     }, () => {})
   }
-  const resetPage = () => setPage(1)
 
   return (
     <div className="rounded-card bg-surface border border-border shadow-card p-4">
@@ -186,10 +185,11 @@ function DcuTable({ selected, onSelectDcu }: { selected: string | null; onSelect
       </div>
 
       {/* table */}
+      <div ref={scrollRef} className="max-h-[calc(100vh-300px)] min-h-[200px] overflow-auto rounded-lg border border-border">
       <table className="w-full text-[13px] border-collapse">
         <thead>
           <tr className="text-ink-sub border-b border-border">
-            <Th>
+            <Th className="sticky top-0 z-10 bg-inset">
               <FilterHead label="狀態" open={menu === 'status'} onToggle={() => setMenu(menu === 'status' ? null : 'status')}>
                 {(['all', 'online', 'offline'] as StatusFilter[]).map((s) => (
                   <MenuItem
@@ -198,7 +198,6 @@ function DcuTable({ selected, onSelectDcu }: { selected: string | null; onSelect
                     onClick={() => {
                       setStatusFilter(s)
                       setMenu(null)
-                      resetPage()
                     }}
                   >
                     {s === 'all' ? '全部' : s === 'online' ? '連線' : '斷線'}
@@ -206,7 +205,7 @@ function DcuTable({ selected, onSelectDcu }: { selected: string | null; onSelect
                 ))}
               </FilterHead>
             </Th>
-            <Th>
+            <Th className="sticky top-0 z-10 bg-inset">
               <SearchHead
                 label="DCU"
                 value={modelQ}
@@ -214,11 +213,10 @@ function DcuTable({ selected, onSelectDcu }: { selected: string | null; onSelect
                 onToggle={() => setMenu(menu === 'model' ? null : 'model')}
                 onChange={(v) => {
                   setModelQ(v)
-                  resetPage()
                 }}
               />
             </Th>
-            <Th>
+            <Th className="sticky top-0 z-10 bg-inset">
               <SearchHead
                 label="DCU編號"
                 value={serialQ}
@@ -226,18 +224,17 @@ function DcuTable({ selected, onSelectDcu }: { selected: string | null; onSelect
                 onToggle={() => setMenu(menu === 'serial' ? null : 'serial')}
                 onChange={(v) => {
                   setSerialQ(v)
-                  resetPage()
                 }}
               />
             </Th>
-            <Th>上線數 / 總數</Th>
-            <Th>
+            <Th className="sticky top-0 z-10 bg-inset">上線數 / 總數</Th>
+            <Th className="sticky top-0 z-10 bg-inset">
               <SortHead label="讀表" active={sortKey === 'read'} dir={sortDir} onClick={() => toggleSort('read')} />
             </Th>
-            <Th>
+            <Th className="sticky top-0 z-10 bg-inset">
               <SortHead label="百分比" active={sortKey === 'percent'} dir={sortDir} onClick={() => toggleSort('percent')} />
             </Th>
-            <Th className="w-[150px]" />
+            <Th className="sticky top-0 z-10 w-[150px] bg-inset" />
           </tr>
         </thead>
         <tbody>
@@ -298,17 +295,9 @@ function DcuTable({ selected, onSelectDcu }: { selected: string | null; onSelect
           )}
         </tbody>
       </table>
-
-      <Pagination
-        page={safePage}
-        totalPages={totalPages}
-        pageSize={pageSize}
-        onPage={setPage}
-        onPageSize={(s) => {
-          setPageSize(s)
-          resetPage()
-        }}
-      />
+      <div ref={sentinelRef} />
+      </div>
+      <InfiniteFooter loaded={pageRows.length} total={filtered.length} hasMore={hasMore} onTop={() => scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })} />
 
       {menu && <div className="fixed inset-0 z-10" onClick={() => setMenu(null)} />}
 

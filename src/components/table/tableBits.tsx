@@ -32,7 +32,8 @@ export function StampLines({ value }: { value: string }) {
     <span className="inline-flex flex-col leading-tight">
       {/* 日期不在「-」處斷開（業主 2026-10-16：年與月日要同一行） */}
       <span className="whitespace-nowrap">{value.slice(0, i)}</span>
-      <span className="whitespace-nowrap text-[0.92em] opacity-80">{value.slice(i + 1)}</span>
+      {/* 時間與日期同字級、同色（業主 2026-10-22：整個系統相似的時間呈現都要比照） */}
+      <span className="whitespace-nowrap">{value.slice(i + 1)}</span>
     </span>
   )
 }

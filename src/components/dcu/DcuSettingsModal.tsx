@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { X, Pencil, Cog, Trash2, Monitor, Loader2, Ban, SlidersHorizontal } from 'lucide-react'
+import { X, Pencil, Cog, Trash2, Monitor, Loader2, Ban } from 'lucide-react'
 import { dcuInfo } from '@/data/dcuInfo'
 import { dcuById } from '@/data/dcuFleet'
 import type { DcuRow } from '@/data/dcuList'
 import { status as statusTok } from '@/tokens'
 import { EnableToggle } from './EnableToggle'
 import { FeatureNotice } from '@/components/shared/FeatureNotice'
-import { ModePanel } from './ModePanel'
+import { DCU_MODES, DCU_MODE_DESC } from '@/data/dcuListPage'
 
 /**
  * DCU裝置設定 modal — opened from 裝置設定 in the DCU資料 drawer。
@@ -17,8 +17,10 @@ import { ModePanel } from './ModePanel'
  *   · 線上操作：由空狀態改為三列實際動作（設定功率／重啟 FAN／Ping IP）
  * 2026-10-01 業主意見：
  *   · 線上操作只留 重啟DCU／Ping IP（設定功率、重啟 FAN 移除），開窗預設就在這一頁
- * 2026-10-16 業主意見：清單的「修改模式」搬進齒輪 → 新增第四個頁籤（只刻畫面）；
- *   全部頁籤都不開放，所以右上「確定」一律停用（游標顯示禁止符號）。
+ * 2026-10-16 業主意見：清單的「修改模式」搬進齒輪 → 當時新增第四個頁籤（只刻畫面）；
+ *   全部頁籤都不開放，所以右上「送出」一律停用（游標顯示禁止符號）。
+ * 2026-10-22 業主意見（設計稿「Untitled (4).png」）：「修改模式」併入「遠端設定」，第四個頁籤拿掉，
+ *   頁籤回到三個；遠端設定＝頻道組別／RF清單模式／時間校正設定／修改模式（四選一單選）。
  *   · **頁籤全部暫不啟用**：頁籤帶禁止符號、仍可點開瀏覽，內容用 FeatureNotice 停用；
  *     重啟DCU／Ping 只是示意，按鈕不能執行（OnlinePanel 的模擬執行邏輯保留，要恢復把 online 的 inactive 拿掉）
  */
@@ -26,14 +28,12 @@ const TABS = [
   { key: 'modify', label: '修改裝置', icon: Pencil, inactive: true },
   { key: 'remote', label: '遠端設定', icon: Cog, inactive: true },
   { key: 'online', label: '線上操作', icon: Monitor, inactive: true },
-  { key: 'mode', label: '修改模式', icon: SlidersHorizontal, inactive: true },
 ] as const
 type TabKey = (typeof TABS)[number]['key']
 const INACTIVE_NOTICE: Record<TabKey, string> = {
   modify: 'DCU 裝置資料修改暫無功能，畫面僅供瀏覽，無法修改或刪除。',
-  remote: 'DCU 遠端設定暫無功能，畫面僅供瀏覽，無法修改。',
+  remote: 'DCU 遠端設定（含修改模式）暫無功能，畫面僅供瀏覽，無法修改。',
   online: '重啟DCU、Ping 僅為功能示意，畫面僅供瀏覽，無法執行。',
-  mode: 'DCU 模式修改暫無功能，畫面僅供瀏覽，無法修改。',
 }
 
 export function DcuSettingsModal({ dcu, onClose, mode = '正常模式' }: { dcu: DcuRow; onClose: () => void; mode?: string }) {
@@ -63,13 +63,13 @@ export function DcuSettingsModal({ dcu, onClose, mode = '正常模式' }: { dcu:
             <button onClick={onClose} className="rounded-lg border border-border px-4 py-1.5 text-[13px] text-ink-sub hover:bg-inset">
               取消
             </button>
-            {/* 所有頁籤都暫不啟用，沒有可儲存的內容 → 確定停用，游標顯示禁止符號 */}
+            {/* 所有頁籤都暫不啟用，沒有可儲存的內容 → 送出停用，游標顯示禁止符號 */}
             <button
               disabled
               title="暫不啟用，無法儲存"
               className="rounded-lg bg-brand px-4 py-1.5 text-[13px] font-medium text-white opacity-40 cursor-not-allowed"
             >
-              確定
+              送出
             </button>
           </div>
         </div>
@@ -101,7 +101,7 @@ export function DcuSettingsModal({ dcu, onClose, mode = '正常模式' }: { dcu:
           {TABS.find((t) => t.key === tab)?.inactive ? (
             <div className="flex flex-col gap-4">
               <FeatureNotice text={INACTIVE_NOTICE[tab]}>
-                {tab === 'modify' ? <ModifyPanel dcu={dcu} onDeleted={onClose} /> : tab === 'remote' ? <RemotePanel dcu={dcu} /> : tab === 'mode' ? <ModePanel device={dcu.model} current={mode} /> : <OnlinePanel dcu={dcu} />}
+                {tab === 'modify' ? <ModifyPanel dcu={dcu} onDeleted={onClose} /> : tab === 'remote' ? <RemotePanel dcu={dcu} mode={mode} /> : <OnlinePanel dcu={dcu} />}
               </FeatureNotice>
             </div>
           ) : tab === 'online' ? (
@@ -205,15 +205,20 @@ function DeleteBlock({ onDeleted }: { onDeleted: () => void }) {
 
 /* ------------------------------------------------------------ 遠端設定 */
 
-function RemotePanel({ dcu }: { dcu: DcuRow }) {
+/** 修改模式的排列順序（設計稿：正常模式在最前）；選項與說明取自 DCU_MODES */
+const MODE_ORDER = ['正常模式', ...DCU_MODES.filter((m) => m !== '正常模式')] as const
+const CHANNEL_GROUPS = ['0', 'A', 'B', 'C', 'P']
+
+function RemotePanel({ dcu, mode }: { dcu: DcuRow; mode: string }) {
   const [rfList, setRfList] = useState(true)
+  const [picked, setPicked] = useState(mode)
 
   return (
     <div className="flex flex-col gap-4">
       <DeviceHeading model={dcu.model} />
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3">
-        <Field label="頻道組別" kind="select" />
+        <Field label="頻道組別" kind="select" options={CHANNEL_GROUPS} />
         <label className="flex flex-col gap-1">
           <span className="text-[12px] text-ink-sub">RF清單模式</span>
           <button
@@ -230,8 +235,18 @@ function RemotePanel({ dcu }: { dcu: DcuRow }) {
             />
           </button>
         </label>
-        <Field label="時間校正設定" />
-        <Field label="模式" kind="select" />
+        <Field label="時間校正設定" placeholder="Input" />
+        <div className="flex flex-col gap-1">
+          <span className="text-[12px] text-ink-sub">修改模式</span>
+          <div className="flex h-[38px] flex-wrap items-center gap-x-4">
+            {MODE_ORDER.map((m) => (
+              <label key={m} title={DCU_MODE_DESC[m]} className="flex cursor-pointer items-center gap-1.5 whitespace-nowrap text-[13px] text-ink">
+                <input type="radio" name="dcu-remote-mode" checked={picked === m} onChange={() => setPicked(m)} className="size-4 cursor-pointer accent-danger" />
+                {m}
+              </label>
+            ))}
+          </div>
+        </div>
       </div>
     </div>
   )
@@ -243,9 +258,7 @@ function DeviceHeading({ model }: { model: string }) {
   return (
     <div className="flex flex-col gap-0.5">
       <span className="text-[12px] text-ink-mut">裝置</span>
-      <span className="text-[20px] font-bold font-mono" style={{ color: statusTok.danger.fg }}>
-        {model}
-      </span>
+      <span className="text-[20px] font-bold font-mono text-ink">{model}</span>
     </div>
   )
 }
@@ -255,17 +268,21 @@ function Field({
   label,
   kind = 'input',
   placeholder,
+  options,
 }: {
   label: string
   kind?: 'input' | 'select' | 'date'
   placeholder?: string
+  /** select 的選項；有給時預設選第一個，沒給時只有佔位字 */
+  options?: string[]
 }) {
   const box = 'rounded-lg border border-border bg-inset/50 px-3 py-2 text-[13px] text-ink focus:outline-none focus:border-brand'
   let control: ReactNode
   if (kind === 'select') {
     control = (
-      <select className={box} defaultValue="">
-        <option value="">{placeholder ?? 'selection'}</option>
+      <select className={box} defaultValue={options ? options[0] : ''}>
+        {!options && <option value="">{placeholder ?? 'selection'}</option>}
+        {options?.map((o) => <option key={o} value={o}>{o}</option>)}
       </select>
     )
   } else if (kind === 'date') {

@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Search } from 'lucide-react'
-import { Th, Pagination } from '@/components/table/tableBits'
+import { Th, InfiniteFooter, useInfiniteRows } from '@/components/table/tableBits'
 import { PillTabs } from '@/components/shared/PillTabs'
 import { PageTitle } from '@/components/shared/PageTitle'
 
@@ -112,16 +112,15 @@ export function DeviceRecord() {
   const [kind, setKind] = useState<Kind>('dcu')
   const [draft, setDraft] = useState<Q>(EMPTY)
   const [applied, setApplied] = useState<Q>(EMPTY)
-  const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(10)
+  const scrollRef = useRef<HTMLDivElement>(null)
   const set = <K extends keyof Q>(k: K, v: Q[K]) => setDraft((x) => ({ ...x, [k]: v }))
 
   const data = useMemo(() => ({ dcu: mkDcu(), meter: mkMeter() }), [])
   const cols = kind === 'dcu' ? DCU_COLS : METER_COLS
 
-  const apply = () => { setApplied(draft); setPage(1) }
-  const clear = () => { setDraft(EMPTY); setApplied(EMPTY); setPage(1) }
-  const switchKind = (k: Kind) => { setKind(k); setDraft(EMPTY); setApplied(EMPTY); setPage(1) }
+  const apply = () => { setApplied(draft) }
+  const clear = () => { setDraft(EMPTY); setApplied(EMPTY) }
+  const switchKind = (k: Kind) => { setKind(k); setDraft(EMPTY); setApplied(EMPTY) }
 
   const rows = useMemo(() => {
     const t = applied.text.trim().toLowerCase()
@@ -151,9 +150,9 @@ export function DeviceRecord() {
     })
   }, [data, kind, applied])
 
-  const totalPages = Math.max(1, Math.ceil(rows.length / pageSize))
-  const safe = Math.min(page, totalPages)
-  const pageRows = rows.slice((safe - 1) * pageSize, safe * pageSize)
+  // 無限捲動（業主不要頁碼）：換頁籤或條件變動回到第一批
+  const { visible, sentinelRef, hasMore } = useInfiniteRows(rows.length, [kind, applied], 10)
+  const pageRows = rows.slice(0, visible)
 
   return (
     <div className="flex flex-col gap-3 p-4 min-w-[1280px]">
@@ -212,8 +211,8 @@ export function DeviceRecord() {
       </div>
 
       {/* 表格：自己捲、表頭釘住 */}
-      <div className="rounded-card bg-surface border border-border shadow-card pb-3">
-        <div className="max-h-[calc(100vh-350px)] min-h-[240px] overflow-auto">
+      <div className="rounded-card bg-surface border border-border shadow-card overflow-hidden">
+        <div ref={scrollRef} className="max-h-[calc(100vh-350px)] min-h-[240px] overflow-auto">
           <table className="w-full min-w-[1400px] text-[13px] border-collapse">
             <thead>
               <tr className="text-ink-sub">
@@ -236,10 +235,9 @@ export function DeviceRecord() {
               )}
             </tbody>
           </table>
+          <div ref={sentinelRef} />
         </div>
-        <div className="px-4">
-          <Pagination page={safe} totalPages={totalPages} onPage={setPage} pageSize={pageSize} onPageSize={(s) => { setPageSize(s); setPage(1) }} />
-        </div>
+        <InfiniteFooter loaded={pageRows.length} total={rows.length} hasMore={hasMore} onTop={() => scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })} />
       </div>
     </div>
   )

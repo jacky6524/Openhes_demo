@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Download, Trash2, Info, ArrowRight } from 'lucide-react'
-import { Th, Pagination } from '@/components/table/tableBits'
+import { Th, InfiniteFooter, useInfiniteRows } from '@/components/table/tableBits'
 import { status as statusTok } from '@/tokens'
 
 /**
@@ -134,17 +134,16 @@ export function StatsReport() {
   const [draft, setDraft] = useState<Query>(emptyQuery)
   const [applied, setApplied] = useState<Query>(emptyQuery)
   const [stateFilter, setStateFilter] = useState<string>(ALL_STATES)
-  const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(10)
+  const scrollRef = useRef<HTMLDivElement>(null)
   const setVal = (k: string, v: string) => setDraft((d) => ({ ...d, values: { ...d.values, [k]: v } }))
   const toggleDataType = (dt: string) =>
     setDraft((d) => ({ ...d, dataTypes: d.dataTypes.includes(dt) ? d.dataTypes.filter((x) => x !== dt) : [...d.dataTypes, dt] }))
   // 換報表類型＝換一組欄位：類型專屬條件清空，備註保留
   const switchType = (type: ReportType) => setDraft((d) => ({ ...emptyQuery(type), note: d.note }))
 
-  const apply = () => { setApplied(draft); setPage(1) }
+  const apply = () => { setApplied(draft) }
   // 清除條件保留目前選的報表類型
-  const clear = () => { const q = emptyQuery(draft.type); setDraft(q); setApplied(q); setStateFilter(ALL_STATES); setPage(1) }
+  const clear = () => { const q = emptyQuery(draft.type); setDraft(q); setApplied(q); setStateFilter(ALL_STATES) }
   const onEnter = (e: React.KeyboardEvent) => { if (e.key === 'Enter') apply() }
 
   const rows = useMemo(
@@ -152,10 +151,9 @@ export function StatsReport() {
     [jobs, applied, stateFilter],
   )
 
-  const totalPages = Math.max(1, Math.ceil(rows.length / pageSize))
-  const safePage = Math.min(page, totalPages)
-  const start = (safePage - 1) * pageSize
-  const pageRows = rows.slice(start, start + pageSize)
+  // 無限捲動（業主不要頁碼）：條件變動回到第一批
+  const { visible, sentinelRef, hasMore } = useInfiniteRows(rows.length, [applied, stateFilter, jobs.length], 10)
+  const pageRows = rows.slice(0, visible)
 
   return (
     <div className="flex flex-col gap-3 p-4 min-w-[1280px]">
@@ -228,8 +226,8 @@ export function StatsReport() {
       </div>
 
       {/* 表格 */}
-      <div className="rounded-card bg-surface border border-border shadow-card pb-3">
-        <div className={SCROLL_BOX}>
+      <div className="rounded-card bg-surface border border-border shadow-card overflow-hidden">
+        <div ref={scrollRef} className={SCROLL_BOX}>
           <table className="w-full min-w-[1280px] text-[13px] border-collapse">
             <thead>
               <tr className="text-ink-sub">
@@ -245,7 +243,7 @@ export function StatsReport() {
                     狀態
                     <select
                       value={stateFilter}
-                      onChange={(e) => { setStateFilter(e.target.value); setPage(1) }}
+                      onChange={(e) => setStateFilter(e.target.value)}
                       className="rounded border border-border bg-surface px-1 py-0.5 text-[12px] font-normal text-ink-sub"
                     >
                       <option value={ALL_STATES}>全部</option>
@@ -262,7 +260,7 @@ export function StatsReport() {
                 const m = STATE_META[j.state]
                 return (
                   <tr key={j.id} className="border-b border-divider hover:bg-inset/40">
-                    <td className="px-3 py-3 text-ink-mut tabular-nums">{start + i + 1}</td>
+                    <td className="px-3 py-3 text-ink-mut tabular-nums">{i + 1}</td>
                     <td className="px-3 py-3 font-mono text-ink">{j.id}</td>
                     <td className="px-3 py-3 text-ink">{j.type}</td>
                     <td className="px-3 py-3 text-ink-sub">{j.note}</td>
@@ -298,16 +296,9 @@ export function StatsReport() {
               )}
             </tbody>
           </table>
+          <div ref={sentinelRef} />
         </div>
-        <div className="px-4">
-          <Pagination
-            page={safePage}
-            totalPages={totalPages}
-            onPage={setPage}
-            pageSize={pageSize}
-            onPageSize={(s) => { setPageSize(s); setPage(1) }}
-          />
-        </div>
+        <InfiniteFooter loaded={pageRows.length} total={rows.length} hasMore={hasMore} onTop={() => scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })} />
       </div>
     </div>
   )

@@ -7,7 +7,10 @@ import { InstantQuery } from '@/pages/InstantQuery'
 import { RegistrationConflict } from '@/pages/RegistrationConflict'
 import { DeviceGroups } from '@/pages/DeviceGroups'
 import { DeviceRecord } from '@/pages/DeviceRecord'
-import { DeviceModule } from '@/pages/DeviceModule'
+import { DisabledList } from '@/pages/DisabledList'
+import { DeviceModule, ModuleDeviceList, ChannelPlan } from '@/pages/DeviceModule'
+import { InstantRead } from '@/pages/InstantRead'
+import { MdmsUpload } from '@/pages/MdmsUpload'
 import { StatsReport } from '@/pages/StatsReport'
 import { ReadPerformance } from '@/pages/ReadPerformance'
 import { DcuDetail } from '@/pages/DcuDetail'
@@ -35,8 +38,18 @@ export default function App() {
         <DeviceGroups />
       ) : view === 'deviceRecord' ? (
         <DeviceRecord />
+      ) : view === 'disabledList' ? (
+        <DisabledList />
       ) : view === 'deviceModule' ? (
         <DeviceModule />
+      ) : view === 'moduleList' ? (
+        <ModuleDeviceList />
+      ) : view === 'channelPlan' ? (
+        <ChannelPlan />
+      ) : view === 'instantRead' ? (
+        <InstantRead />
+      ) : view === 'mdmsUpload' ? (
+        <MdmsUpload />
       ) : view === 'readPerformance' ? (
         <ReadPerformance />
       ) : view === 'statsReport' ? (

@@ -69,7 +69,7 @@ export function SharedMetricCard() {
   const off = COMM.find((c) => c.key === comm)!.off
   const m = node.metrics
 
-  // 環形：連線率(即時)；著色綁連線率健康 (良好=中性灰/注意=黃/警告=紅)
+  // 環形：連線率(即時)；著色綁連線率健康 (良好=綠/注意=黃/警告=紅，色值見 tokens.health)
   const gaugeValue = clamp(m.connectRate + off, 0, 100)
   const gaugeHealth = classify(gaugeValue, THRESHOLDS.connect)
 

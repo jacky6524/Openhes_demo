@@ -2,7 +2,9 @@ import { create } from 'zustand'
 
 /** which top-level demo screen is showing (lightweight client-side routing) */
 export type View =
-  | 'overview' | 'dcu' | 'dcuList' | 'meterList' | 'instantQuery' | 'registrationConflict' | 'deviceGroups' | 'deviceRecord' | 'deviceModule' | 'readPerformance' | 'statsReport' | 'dcuDetail' | 'warroom'
+  | 'overview' | 'dcu' | 'dcuList' | 'meterList' | 'instantQuery' | 'registrationConflict' | 'deviceGroups' | 'deviceRecord' | 'disabledList' | 'deviceModule' | 'moduleList' | 'channelPlan' |'readPerformance' | 'statsReport' | 'dcuDetail' | 'warroom'
+  // 讀表管理兩頁
+  | 'instantRead' | 'mdmsUpload'
   // 權限管理三頁
   | 'permAccount' | 'permFunction' | 'permRole'
 

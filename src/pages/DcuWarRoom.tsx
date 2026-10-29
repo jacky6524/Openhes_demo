@@ -339,8 +339,8 @@ function SwMeterDisabled() {
 
 function SwMisMeter() {
   return (
-    <span className="grid h-4 w-4 place-items-center rounded-full border-2 border-white text-[9px] font-bold leading-none text-white" style={{ background: MIS_COLOR }}>
-      ✕
+    <span className="grid h-4 w-4 place-items-center rounded-full border-2 border-white text-[10px] font-extrabold leading-none text-white" style={{ background: MIS_COLOR }}>
+      ?
     </span>
   )
 }
@@ -914,7 +914,7 @@ function MeterListTable() {
                       <td className="px-2 py-2">
                         {dir ? (
                           <span className="inline-flex items-center gap-1.5 text-[12px] font-semibold whitespace-nowrap" style={{ color: MIS_COLOR }} title={`${MIS_DIR_LABEL[dir]}：${dir === 'in' ? `應屬 ${m.expectedDcuId}` : `現由 ${m.dcuId} 收容`}`}>
-                            <span className="grid place-items-center h-4 w-4 rounded-full text-white text-[9px] font-bold leading-none" style={{ background: MIS_COLOR }}>✕</span>
+                            <span className="grid place-items-center h-4 w-4 rounded-full text-white text-[10px] font-extrabold leading-none" style={{ background: MIS_COLOR }}>?</span>
                             異常
                           </span>
                         ) : (

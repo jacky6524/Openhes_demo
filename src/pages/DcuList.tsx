@@ -5,13 +5,12 @@ import {
   DCU_LIST_ROWS, CHANNELS, COMM_TYPES, DCU_MODELS, DCU_GROUPS,
   type DcuListRow,
 } from '@/data/dcuListPage'
-import { Th, StatusPill, SortHead, type SortDir } from '@/components/table/tableBits'
+import { Th, StatusPill, StatePill, SortHead, type SortDir } from '@/components/table/tableBits'
 import { STICKY_TH, useInfiniteRows } from '@/components/shared/Tabs'
 import { TopologyModal } from '@/components/dcu/TopologyModal'
 import { DcuDetailModal } from '@/components/dcu/DcuDetailModal'
 import { DcuSettingsModal } from '@/components/dcu/DcuSettingsModal'
 import type { DcuRow } from '@/data/dcuList'
-import { status as statusTok } from '@/tokens'
 
 /**
  * 裝置管理 · DCU清單 (Figma 3677:24866)。
@@ -220,8 +219,9 @@ export function DcuList() {
               {rows.map((d) => (
                 <tr key={d.serial} className="border-b border-divider align-middle hover:bg-inset/40">
                   <td className="px-3 py-3 text-ink-sub">{d.office}</td>
-                  <td className="px-3 py-3" style={{ color: d.enabled ? undefined : statusTok.danger.fg }}>
-                    <span className={d.enabled ? 'text-ink-sub' : ''}>{d.enabled ? '啟用' : '停用'}</span>
+                  {/* 停用＝灰底標籤（業主 2026-10-22，原為紅字）；啟用維持純文字 */}
+                  <td className="px-3 py-3">
+                    {d.enabled ? <span className="text-ink-sub">啟用</span> : <StatePill state="disabled" />}
                   </td>
                   <td className="px-3 py-3"><StatusPill status={d.online ? 'online' : 'offline'} /></td>
                   <td className="px-3 py-3 font-mono text-[14px] font-semibold text-ink break-all">{d.serial}</td>
