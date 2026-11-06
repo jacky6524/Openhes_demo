@@ -28,7 +28,7 @@ const pad = (n: number, w: number) => String(n).padStart(w, '0')
 function rowTime(i: number) {
   const hh = 10 - Math.floor(i / 6)
   const mm = 30 - ((i * 5) % 60)
-  return `2025-01-01 ${pad((hh + 24) % 24, 2)}:${pad((mm + 60) % 60, 2)}:00`
+  return `2025/01/01 ${pad((hh + 24) % 24, 2)}:${pad((mm + 60) % 60, 2)}:00`
 }
 
 const ROWS = 48

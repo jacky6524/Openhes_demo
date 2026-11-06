@@ -30,10 +30,11 @@ const MAP_UPDATE_NOTE = '更新時間：每小時（整點）'
 
 /** 狀態 pill 配色 — 前端 `.region-status--*` */
 const STATUS_PILL: Record<'good' | 'warning' | 'alert' | 'muted', { dot: string; bg: string; fg: string }> = {
-  // 2026-10-22 新色票：dot 取 tokens.health 的原色，文字用同色相的深一階才讀得出來
-  good: { dot: '#9DD39F', bg: '#EEF8EE', fg: '#3F7A42' },
-  warning: { dot: '#FFB800', bg: '#FFF8E8', fg: '#7A5B00' },
-  alert: { dot: '#ED6063', bg: '#FFF0F0', fg: '#C94A4D' },
+  // dot 取 tokens.health 的原色；bg／fg 與三色同色相（2026-11-04 三色協調）：bg 一律極淡（OKLCH L≈0.975），
+  // fg 一律深到白底可讀（L≈0.46–0.50）
+  good: { dot: healthTokens.good.accent, bg: '#EEF8EE', fg: '#3F7A42' },
+  warning: { dot: healthTokens.warning.accent, bg: '#FEF6E4', fg: '#7B5600' },
+  alert: { dot: healthTokens.alert.accent, bg: '#FFF0EE', fg: '#AF2B25' },
   muted: { dot: '#C9CDD4', bg: '#F4F1F2', fg: '#958A8E' },
 }
 

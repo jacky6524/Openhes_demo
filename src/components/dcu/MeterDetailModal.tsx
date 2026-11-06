@@ -53,26 +53,30 @@ const FILL_TABLE = '!max-h-none flex-1'
  * 資料時間 —— 2026-09-03 依業主意見只顯示日期（不含時分），
  * 並限制單次查詢區間，避免圖表時間跨度過大而讀不出東西。
  */
-const RANGE_TO = '2025-01-07'
+const RANGE_TO = '2025/01/07'
 /**
  * 各分頁的查詢區間 —— 午夜資料一天只有一筆，7 天只畫得出 7 根柱子，
  * 因此這個分頁的區間與上限都放到 30 天（2026-09-07 業主意見）。
  */
 const RANGE: Record<'default' | 'midnight', { from: string; days: number }> = {
-  default: { from: '2025-01-01', days: 7 },
-  midnight: { from: '2024-12-09', days: 30 },
+  default: { from: '2025/01/01', days: 7 },
+  midnight: { from: '2024/12/09', days: 30 },
 }
 const rangeFor = (tab: TabKey) => (tab === 'midnight' ? RANGE.midnight : RANGE.default)
 
 
-/** 資料類型 —— Figma 3569:26927 的七項，原本是下拉選單，改為頁籤 */
+/**
+ * 資料類型 —— Figma 3569:26927 的七項，原本是下拉選單，改為頁籤。
+ * 2026-11-04 依業主要求與正式版核對（openhes-front 的 METER_DATA_TYPES，features/meter-system/types/details.types.ts）：
+ * 順序改成 ALT 在午夜之前、「需量復歸資料」改名「需量復歸報表」，七項名稱與順序現在與正式版一致。
+ */
 const TABS = [
   { key: 'load', label: '負載資料(Load profile)' },
-  { key: 'midnight', label: '午夜資料(Midnight register)' },
   { key: 'alt', label: '定時供電品質資料(ALT)' },
+  { key: 'midnight', label: '午夜資料(Midnight register)' },
   { key: 'event', label: '事件資料(Meter event)' },
   { key: 'online', label: '歷史連線資訊(Online history)' },
-  { key: 'drr', label: '需量復歸資料(DRR)' },
+  { key: 'drr', label: '需量復歸報表(DRR)' },
   { key: 'info', label: '詳細資料(Meter info)' },
 ] as const
 type TabKey = (typeof TABS)[number]['key']
@@ -230,7 +234,7 @@ function LoadProfileTab({ meterNo }: { meterNo: string }) {
                   const cum = payload.find((p) => p.dataKey === 'cumulative')?.value
                   return (
                     <div className="rounded-lg bg-surface border border-border shadow-card px-3 py-2 text-[12px]">
-                      <div className="text-ink mb-1">2025-01-01 {label}</div>
+                      <div className="text-ink mb-1">2025/01/01 {label}</div>
                       {point?.status === 'missing' ? (
                         <div className="text-ink-mut">此時段未收到讀值</div>
                       ) : (
@@ -333,7 +337,7 @@ function AltTabPanel({ meterNo }: { meterNo: string }) {
 }
 
 /** 午夜資料的日期標籤（MM/DD）→ 完整日期；區間跨年（12 月屬前一年） */
-const midnightFullDate = (mmdd: string) => `${mmdd.startsWith('12') ? 2024 : 2025}-${mmdd.replace('/', '-')}`
+const midnightFullDate = (mmdd: string) => `${mmdd.startsWith('12') ? 2024 : 2025}/${mmdd}`
 
 /**
  * 午夜資料圖表 —— 2026-09-23 依業主意見改成與**負載資料同一個外觀**：

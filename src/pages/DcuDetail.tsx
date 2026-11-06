@@ -375,35 +375,16 @@ function ConnPanel({ model }: { model: string }) {
 
 /* ------------------------------------------------------------ 事件資料 */
 
-type EventSortKey = 'rindex' | 'dataTime' | 'hesTime'
-
-/** 事件資料 (Figma 3639:24343) —— rindex / 資料時間 / HES接收時間 / 事件碼 / 說明 */
+/**
+ * 事件資料 (Figma 3639:24343) —— rindex / 資料時間 / HES接收時間 / 事件碼 / 說明。
+ * 2026-11-04 業主意見：事件是一筆一筆接收的，**不提供排序**，固定依接收順序列出（最新在上、rindex 遞減）。
+ */
 function EventPanel({ model }: { model: string }) {
-  const [sortKey, setSortKey] = useState<EventSortKey>('dataTime')
-  const [sortDir, setSortDir] = useState<SortDir>('desc')
-
-  const all = useMemo(() => dcuEventRows(model), [model])
-  const rows = useMemo(() => {
-    const cmp = (a: (typeof all)[number], b: (typeof all)[number]) => {
-      if (sortKey === 'rindex') return a.rindex - b.rindex
-      return a[sortKey].localeCompare(b[sortKey])
-    }
-    return [...all].sort((a, b) => (sortDir === 'asc' ? 1 : -1) * cmp(a, b))
-  }, [all, sortKey, sortDir])
-
+  const rows = useMemo(() => dcuEventRows(model), [model])
   const { visible, onScroll, reset } = useInfiniteRows(rows.length)
-  useEffect(reset, [sortKey, sortDir, reset])
+  useEffect(reset, [model, reset])
   const page = rows.slice(0, visible)
-
-  const toggle = (k: EventSortKey) => {
-    if (k === sortKey) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
-    else { setSortKey(k); setSortDir('desc') }
-  }
-  const head = (k: EventSortKey, label: string, cls = '') => (
-    <Th className={`${STICKY_TH} ${cls}`}>
-      <SortHead label={label} active={sortKey === k} dir={sortDir} onClick={() => toggle(k)} />
-    </Th>
-  )
+  const head = (label: string, cls = '') => <Th className={`${STICKY_TH} ${cls}`}>{label}</Th>
 
   return (
     <>
@@ -414,9 +395,9 @@ function EventPanel({ model }: { model: string }) {
           <table className="w-full min-w-[980px] text-[13px] border-collapse">
             <thead>
               <tr className="text-ink-sub">
-                {head('rindex', 'rindex', 'w-[10%]')}
-                {head('dataTime', '資料時間', 'w-[22%]')}
-                {head('hesTime', 'HES接收時間', 'w-[22%]')}
+                {head('rindex', 'w-[10%]')}
+                {head('資料時間', 'w-[22%]')}
+                {head('HES接收時間', 'w-[22%]')}
                 <Th className={`${STICKY_TH} w-[14%]`}>事件碼</Th>
                 <Th className={STICKY_TH}>說明</Th>
               </tr>

@@ -34,9 +34,12 @@ const NAV: NavItem[] = [
     // dcu-list / meter-list / instant-query / registration-conflict / device-groups / device-record
     // 2026-09-17 依業主意見移除「裝置列表」（地圖＋DCU 列表那頁）——
     // 頁面檔 pages/DcuOverview.tsx 與 App 的 'dcu' 路由都還在，要復原只要把這一列加回來。
+    // 2026-11-04 依《OpenHES_裝置列表_UIUX欄位規格.md》補齊後放回（DCU／LTE／NB-IoT＋地圖同步），
+    // 同日業主又要求先隱藏 —— 頁面與 'dcu' 路由保留，要恢復就把 { label: '裝置列表', view: 'dcu' } 加回來。
+    // 同日業主意見：電表清單移到第一個。
     children: [
-      { label: 'DCU清單', view: 'dcuList' },
       { label: '電表清單', view: 'meterList' },
+      { label: 'DCU清單', view: 'dcuList' },
       { label: '即裝即查', view: 'instantQuery' },
       { label: '註冊衝突', view: 'registrationConflict' },
       { label: '裝置群組', view: 'deviceGroups' },
@@ -66,10 +69,10 @@ const NAV: NavItem[] = [
   {
     label: '裝置模組',
     icon: <PackageOpen size={18} />,
-    // 設計稿「裝置模組-1／-2／-3」
+    // 設計稿「裝置模組-1／-2／-3」；2026-11-04 業主意見：FAN／DCU 併成一頁用頁籤切換。
+    // 這頁叫「模組型號」，不叫「裝置列表」—— 裝置管理底下已有「裝置列表」（裝置狀態＋地圖），避免撞名。
     children: [
-      { label: 'DCU裝置列表', view: 'deviceModule' },
-      { label: '模組裝置列表', view: 'moduleList' },
+      { label: '模組型號', view: 'deviceModule' },
       { label: '頻道規劃', view: 'channelPlan' },
     ],
   },
@@ -81,6 +84,8 @@ const NAV: NavItem[] = [
       { label: '帳號管理', view: 'permAccount' },
       { label: '功能項目管理', view: 'permFunction' },
       { label: '角色權限管理', view: 'permRole' },
+      // 2026-11-04 新增：調整燈號門檻（對應後端 AppConfig 的 status 分類）
+      { label: '參數調整', view: 'permParams' },
     ],
   },
 ]

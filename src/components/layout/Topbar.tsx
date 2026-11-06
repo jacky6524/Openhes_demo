@@ -1,8 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
-import { ChevronDown, UserCircle2, Settings, LogOut, PanelLeft, Check } from 'lucide-react'
+import { ChevronDown, UserCircle2, LogOut, PanelLeft, Check } from 'lucide-react'
 import { useCaseFilter, caseLabel, CASES } from '@/store/useCaseFilter'
+import { ProfileModal } from '@/components/layout/ProfileModal'
+
+/*
+ * 2026-11-06 業主設計稿：拿掉「設定」、logo 前的 FET 方塊與案別徽章；案別下拉移到 logo 右側
+ * （直接顯示已選案別全名）；「帳號」點開個人資料維護。
+ */
 
 export function Topbar({ onToggleSidebar }: { onToggleSidebar: () => void }) {
+  const [profile, setProfile] = useState(false)
   return (
     <header className="h-14 shrink-0 bg-chrome shadow-[0_1px_4px_rgba(120,60,70,0.12)] relative z-10 flex items-center px-4 gap-3">
       {/* sidebar collapse toggle */}
@@ -15,51 +22,25 @@ export function Topbar({ onToggleSidebar }: { onToggleSidebar: () => void }) {
         <PanelLeft size={18} />
       </button>
 
-      {/* FET OpenHES logo */}
-      <div className="flex items-center gap-2">
-        <div className="grid place-items-center h-7 w-9 rounded-md bg-ink text-white text-[11px] font-black tracking-tight">
-          FET
-        </div>
-        <span className="text-[17px] font-bold text-ink">OpenHES</span>
-      </div>
+      <span className="text-[17px] font-bold text-ink">OpenHES</span>
 
-      {/* 目前案別徽章 — logo 右側醒目位置；無篩選顯示 ALL */}
-      <CaseBadge />
+      {/* 案別下拉 — logo 右側，直接顯示已選案別 */}
+      <CaseDropdown />
 
       <div className="flex-1" />
 
-      <CaseDropdown />
-
-      <div className="h-5 w-px bg-divider" />
-
       <nav className="flex items-center gap-1 text-ink-sub">
-        <TopAction icon={<UserCircle2 size={16} />} label="帳號" />
-        <TopAction icon={<Settings size={16} />} label="設定" />
+        <TopAction icon={<UserCircle2 size={16} />} label="帳號" onClick={() => setProfile(true)} />
         <TopAction icon={<LogOut size={16} />} label="登出" />
       </nav>
+      {profile && <ProfileModal onClose={() => setProfile(false)} />}
     </header>
   )
 }
 
 /**
- * 目前案別徽章 — 顯示於 logo 右側醒目位置；未做任何案別篩選時顯示 ALL。
- * 與右上角案別下拉共用 useCaseFilter 狀態。
- */
-function CaseBadge() {
-  const selected = useCaseFilter((s) => s.selected)
-  const label = caseLabel(selected)
-  const isAll = selected.size === 0
-  return (
-    <div className="ml-1 inline-flex items-center gap-1.5 rounded-md border border-brand/30 bg-brand-soft px-2.5 py-1">
-      <span className="text-[11px] font-medium text-ink-mut">案別</span>
-      <span className={`text-[13px] font-bold tracking-wide ${isAll ? 'text-ink-sub' : 'text-brand'}`}>{label}</span>
-    </div>
-  )
-}
-
-/**
  * 案別 dropdown — 支援複數勾選（評估複數篩選可行性），預留「一案」「二案」。
- * 案別狀態存於 useCaseFilter，與 logo 右側徽章同步。
+ * 案別狀態存於 useCaseFilter。
  * TODO: 案別清單與多選後的資料篩選需接 API；目前為前端 demo。
  */
 function CaseDropdown() {
@@ -85,17 +66,17 @@ function CaseDropdown() {
     <div ref={ref} className="relative">
       <button
         onClick={() => setOpen((o) => !o)}
-        className={`flex items-center gap-1.5 text-sm px-2.5 py-1.5 rounded-lg hover:bg-inset ${
-          open ? 'bg-inset text-ink' : 'text-ink-sub hover:text-ink'
+        className={`ml-2 flex items-center gap-1.5 text-sm px-2.5 py-1.5 rounded-lg border border-border bg-surface hover:border-brand ${
+          open ? 'text-ink' : 'text-ink-sub hover:text-ink'
         }`}
       >
         <span className="text-ink-mut">案別</span>
-        <span className="text-ink font-medium max-w-[200px] truncate">{label}</span>
+        <span className="text-ink font-semibold max-w-[420px] truncate">{label}</span>
         <ChevronDown size={15} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-1.5 z-40 w-[236px] rounded-lg bg-surface border border-border shadow-card py-1">
+        <div className="absolute left-0 top-full mt-1.5 z-40 w-[236px] rounded-lg bg-surface border border-border shadow-card py-1">
           <div className="flex items-center justify-between px-3 py-1.5">
             <span className="text-[11px] text-ink-mut">案別（可複選）</span>
             {selected.size > 0 && (
@@ -130,9 +111,9 @@ function CaseDropdown() {
   )
 }
 
-function TopAction({ icon, label }: { icon: React.ReactNode; label: string }) {
+function TopAction({ icon, label, onClick }: { icon: React.ReactNode; label: string; onClick?: () => void }) {
   return (
-    <button className="flex items-center gap-1.5 text-sm px-2.5 py-1.5 rounded-lg hover:bg-inset hover:text-ink">
+    <button onClick={onClick} className="flex items-center gap-1.5 text-sm px-2.5 py-1.5 rounded-lg hover:bg-inset hover:text-ink">
       {icon}
       <span>{label}</span>
     </button>

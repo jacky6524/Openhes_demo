@@ -5,7 +5,7 @@ import {
   METER_LIST_ROWS, METER_CATEGORIES, MODULE_MODELS, METER_GROUPS,
   type MeterListRow,
 } from '@/data/dcuListPage'
-import { Th, StatusPill, SortHead, StampLines, type SortDir } from '@/components/table/tableBits'
+import { Th, StatusPill, EnabledState, SortHead, StampLines, type SortDir } from '@/components/table/tableBits'
 import { STICKY_TH, useInfiniteRows } from '@/components/shared/Tabs'
 import { MeterDetailModal } from '@/components/dcu/MeterDetailModal'
 import { MeterSettingsModal } from '@/components/dcu/MeterSettingsModal'
@@ -24,6 +24,12 @@ import { status as statusTok } from '@/tokens'
  *   · 欄位順序：區處及營業區、狀態、連線狀態、電號、表號、地址、模組型號／序號、DCU序號、IP、最後LP／MN 時間
  *   · 重要資料（電號、表號、地址）放大；模組、時間拆兩行；整張表不出現左右捲軸
  *   · 版面撐滿視窗、下方不留白，改**無限捲動**（不分頁）
+ *
+ * 2026-11-04 業主意見：
+ *   · 日期改 YYYY/MM/DD HH:mm（同正式版 formatUpdateTime）
+ *   · 標題旁只寫「共 N 筆」，不再寫「已載入 M」
+ *   · 模組型號與模組序號同字級（原本序號小一號）
+ *   · 不用「修改模式」：齒輪（裝置設定）不再開修改模式頁籤
  */
 type SortKey = 'elecNo' | 'meterNo' | 'moduleModel' | 'dcuSerial' | 'address' | 'ip' | 'lastLp' | 'lastMn'
 
@@ -106,9 +112,9 @@ export function MeterList() {
   const head = (k: SortKey, label: string) => (
     <Th className={STICKY_TH}><SortHead label={label} active={sortKey === k} dir={sortDir} onClick={() => toggleSort(k)} /></Th>
   )
-  /** 最後LP／MN 時間：非當日標紅（與其他電表清單同一條規則）；只到時分（'YYYY-MM-DD HH:mm'） */
+  /** 最後LP／MN 時間：非當日標紅（與其他電表清單同一條規則）；只到時分，日期用斜線（'YYYY/MM/DD HH:mm'，同正式版） */
   const stale = (sameDay: boolean) => (sameDay ? undefined : statusTok.danger.fg)
-  const hm = (t: string) => t.slice(0, 16)
+  const hm = (t: string) => t.slice(0, 16).replace(/^(\d{4})-(\d{2})-(\d{2})/, '$1/$2/$3')
 
   return (
     <div className="flex h-full flex-col p-4">
@@ -120,7 +126,7 @@ export function MeterList() {
             <h2 className="text-[15px] font-semibold text-ink">電表清單</h2>
             {applied && (
               <span className="ml-2 text-[12px] text-ink-mut tabular-nums">
-                共 {filtered.length} 筆{visible < filtered.length && `（已載入 ${visible}）`}
+                共 {filtered.length} 筆
               </span>
             )}
           </div>
@@ -229,17 +235,17 @@ export function MeterList() {
               {rows.map((m) => (
                 <tr key={m.meterNo} className="border-b border-divider align-middle hover:bg-inset/40">
                   <td className="px-3 py-3 text-ink-sub">{m.office}</td>
-                  <td className="px-3 py-3" style={{ color: m.enabled ? undefined : statusTok.danger.fg }}>
-                    <span className={m.enabled ? 'text-ink-sub' : ''}>{m.enabled ? '啟用' : '停用'}</span>
-                  </td>
+                  {/* 狀態欄比照 DCU清單（2026-11-04 業主意見）：停用＝灰底標籤（原為紅字），啟用＝灰字 */}
+                  <td className="px-3 py-3"><EnabledState enabled={m.enabled} /></td>
                   <td className="px-3 py-3"><StatusPill status={m.online ? 'online' : 'offline'} /></td>
                   <td className="px-3 py-3 font-mono text-[14px] font-semibold text-ink break-all">{m.elecNo}</td>
                   <td className="px-3 py-3 font-mono text-[14px] font-semibold text-ink break-all">{m.meterNo}</td>
                   <td className="px-3 py-3 text-[14px] leading-snug text-ink">{m.address}</td>
                   <td className="px-3 py-3">
                     <div className="flex flex-col leading-snug">
-                      <span className="text-ink">{m.moduleModel}</span>
-                      <span className="font-mono text-[12px] text-ink-mut break-all">{m.moduleSerial}</span>
+                      <span className="text-[13px] text-ink">{m.moduleModel}</span>
+                      {/* 序號不用等寬字：等寬字字身較矮，同為 13px 看起來仍小一號（業主 2026-11-04） */}
+                      <span className="text-[13px] tabular-nums text-ink-sub break-all">{m.moduleSerial}</span>
                     </div>
                   </td>
                   {/* 沒有掛 DCU 的電表明寫「無」，不留空白（避免被當成資料缺漏） */}
@@ -253,7 +259,7 @@ export function MeterList() {
                         <ClipboardList size={15} />
                       </button>
                       {/* 2026-10-01 業主意見：齒輪功能暫不啟用 → 疊禁止符號，仍可點開瀏覽（彈窗上方說明、操作停用） */}
-                      <button onClick={() => setSettingsRow(m)} title="裝置設定（含修改模式；暫不啟用，僅供瀏覽）" className="relative inline-grid place-items-center text-ink-mut hover:text-brand">
+                      <button onClick={() => setSettingsRow(m)} title="裝置設定（暫不啟用，僅供瀏覽）" className="relative inline-grid place-items-center text-ink-mut hover:text-brand">
                         <Settings size={15} />
                         <Ban size={10} strokeWidth={2.6} className="absolute -bottom-1 -right-1.5 rounded-full bg-surface text-ink-mut" />
                       </button>
@@ -279,7 +285,7 @@ export function MeterList() {
       </div>
 
       {detailMeter && <MeterDetailModal meterNo={detailMeter} onClose={() => setDetailMeter(null)} />}
-      {settingsRow && <MeterSettingsModal meter={toMeterRow(settingsRow)} showMode onClose={() => setSettingsRow(null)} />}
+      {settingsRow && <MeterSettingsModal meter={toMeterRow(settingsRow)} onClose={() => setSettingsRow(null)} />}
     </div>
   )
 }

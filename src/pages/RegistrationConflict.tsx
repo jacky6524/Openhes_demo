@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState, type ReactNode } from 'react'
-import { CircleCheck } from 'lucide-react'
+import { CircleCheck, CircleX } from 'lucide-react'
 import {
   Th, SortHead, FilterHead, MenuItem, InfiniteFooter, useInfiniteRows, GREEN, RED, type SortDir,
 } from '@/components/table/tableBits'
@@ -14,6 +14,12 @@ import { PageTitle } from '@/components/shared/PageTitle'
  *   資料與回報不一致  三個欄位逐一比對：一致 → 值＋綠色勾；不一致 → 灰字「資料值 (資料)」＋紅字「回報值 (回報)」
  * 上方五張統計卡（未匯入／不一致／電號／MAC·IMEI／模組型號不一致）由資料算出；
  * 衝突原因可篩選、四個欄位可排序、無限捲動（不分頁）。資料全為 mock。
+ *
+ * 2026-11-04 依 Figma 4608:43364（業主截圖「註冊衝突.png」）：電號／MAC·IMEI／模組型號三種不一致
+ * 各有一個顏色的 ⊗（FIELD_MARK），統計卡數字左邊、表格裡對不上的欄位右邊都用同一個圖示，
+ * 一眼就能把表格裡的紅字對回上面哪一張卡。
+ * 設計稿有兩處沒照做：AB-TR-008 的 MAC 欄是橘色「!」、模組型號欄對不上時是灰色「!」——
+ * 和統計卡的圖示對不起來，判斷是設計稿未統一，這裡一律用該欄位的 ⊗。
  */
 type Reason = '未匯入資料' | '資料與回報不一致'
 interface Triple { elecNo: string; mac: string; model: string }
@@ -53,7 +59,7 @@ const ROWS: Conflict[] = Array.from({ length: 45 }, (_, i) => {
     data,
     dcu: i % 3 === 0 ? '--' : `04997BC0900-${1 + (i % 3)}`,
     address: '新北市新店區寶元路一段84巷3號',
-    at: `2025-01-${String(1 + (i % 28)).padStart(2, '0')} 10:30:00`,
+    at: `2025/01/${String(1 + (i % 28)).padStart(2, '0')} 10:30:00`,
   }
 })
 
@@ -64,6 +70,13 @@ const COUNT = {
   elecNo: ROWS.filter((r) => mismatch(r, 'elecNo')).length,
   mac: ROWS.filter((r) => mismatch(r, 'mac')).length,
   model: ROWS.filter((r) => mismatch(r, 'model')).length,
+}
+
+/** 各欄位「不一致」的識別色（設計稿：電號 天藍、MAC/IMEI 靛藍、模組型號 橘） */
+const FIELD_MARK: Record<(typeof FIELDS)[number], string> = {
+  elecNo: '#38B6E8',
+  mac: '#5551D8',
+  model: '#F59E0B',
 }
 
 const REASON_TOK: Record<Reason, { fg: string; bg: string }> = {
@@ -109,9 +122,9 @@ export function RegistrationConflict() {
       <div className="grid grid-cols-5 gap-4">
         <Stat label="未匯入資料" value={COUNT.unimported} accent={statusTok.danger.fg} active={reason === '未匯入資料' && !field} onClick={() => pickReason('未匯入資料')} />
         <Stat label="資料與回報不一致" value={COUNT.mismatch} accent={statusTok.warning.fg} active={reason === '資料與回報不一致' && !field} onClick={() => pickReason('資料與回報不一致')} />
-        <Stat label="電號 不一致" value={COUNT.elecNo} active={field === 'elecNo'} onClick={() => pickField('elecNo')} />
-        <Stat label="MAC/IMEI 不一致" value={COUNT.mac} active={field === 'mac'} onClick={() => pickField('mac')} />
-        <Stat label="模組型號 不一致" value={COUNT.model} active={field === 'model'} onClick={() => pickField('model')} />
+        <Stat label="電號 不一致" value={COUNT.elecNo} mark={FIELD_MARK.elecNo} active={field === 'elecNo'} onClick={() => pickField('elecNo')} />
+        <Stat label="MAC/IMEI 不一致" value={COUNT.mac} mark={FIELD_MARK.mac} active={field === 'mac'} onClick={() => pickField('mac')} />
+        <Stat label="模組型號 不一致" value={COUNT.model} mark={FIELD_MARK.model} active={field === 'model'} onClick={() => pickField('model')} />
       </div>
 
       <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-[13px] text-ink-sub">
@@ -180,9 +193,12 @@ function Compare({ r, k }: { r: Conflict; k: (typeof FIELDS)[number] }) {
     )
   }
   return (
-    <span className="flex flex-col leading-[1.35] tabular-nums">
-      <span className="text-ink-mut">{r.data[k]} (資料)</span>
-      <span style={{ color: RED }}>{r.reported[k]} (回報)</span>
+    <span className="flex items-center justify-between gap-2">
+      <span className="flex flex-col leading-[1.35] tabular-nums">
+        <span className="text-ink-mut">{r.data[k]} (資料)</span>
+        <span style={{ color: RED }}>{r.reported[k]} (回報)</span>
+      </span>
+      <CircleX size={18} className="shrink-0" style={{ color: FIELD_MARK[k] }} />
     </span>
   )
 }
@@ -197,7 +213,7 @@ function ReasonPill({ reason }: { reason: Reason }) {
 }
 
 /** 統計卡兼篩選鈕：選中時品牌色外框，再點一次取消 */
-function Stat({ label, value, accent, active, onClick }: { label: string; value: number; accent?: string; active: boolean; onClick: () => void }) {
+function Stat({ label, value, accent, mark, active, onClick }: { label: string; value: number; accent?: string; mark?: string; active: boolean; onClick: () => void }) {
   return (
     <button
       type="button"
@@ -210,8 +226,14 @@ function Stat({ label, value, accent, active, onClick }: { label: string; value:
       ].join(' ')}
       style={accent ? { borderLeft: `4px solid ${accent}` } : undefined}
     >
-      <div className="text-[13px] text-ink-sub">{label}</div>
-      <div className="mt-1 text-[32px] font-bold leading-tight tabular-nums text-ink">{value}</div>
+      {/* 有圖示的卡：圖示獨立一欄，標題與數字對齊在圖示右邊（同設計稿） */}
+      <div className="flex items-center gap-3">
+        {mark && <CircleX size={22} className="shrink-0" style={{ color: mark }} />}
+        <div className="min-w-0">
+          <div className="text-[13px] text-ink-sub">{label}</div>
+          <div className="mt-1 text-[32px] font-bold leading-tight tabular-nums text-ink">{value}</div>
+        </div>
+      </div>
     </button>
   )
 }

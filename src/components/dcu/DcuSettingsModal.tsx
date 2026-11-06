@@ -20,7 +20,8 @@ import { DCU_MODES, DCU_MODE_DESC } from '@/data/dcuListPage'
  * 2026-10-16 業主意見：清單的「修改模式」搬進齒輪 → 當時新增第四個頁籤（只刻畫面）；
  *   全部頁籤都不開放，所以右上「送出」一律停用（游標顯示禁止符號）。
  * 2026-10-22 業主意見（設計稿「Untitled (4).png」）：「修改模式」併入「遠端設定」，第四個頁籤拿掉，
- *   頁籤回到三個；遠端設定＝頻道組別／RF清單模式／時間校正設定／修改模式（四選一單選）。
+ *   頁籤回到三個；遠端設定＝頻道組別／RF清單模式／時間校正設定／修改模式。
+ * 2026-11-04 業主意見：修改模式由四選一單選鈕改為下拉選單，選中模式的說明顯示在下拉下方。
  *   · **頁籤全部暫不啟用**：頁籤帶禁止符號、仍可點開瀏覽，內容用 FeatureNotice 停用；
  *     重啟DCU／Ping 只是示意，按鈕不能執行（OnlinePanel 的模擬執行邏輯保留，要恢復把 online 的 inactive 拿掉）
  */
@@ -236,17 +237,20 @@ function RemotePanel({ dcu, mode }: { dcu: DcuRow; mode: string }) {
           </button>
         </label>
         <Field label="時間校正設定" placeholder="Input" />
-        <div className="flex flex-col gap-1">
+        {/* 2026-11-04 業主意見：修改模式由單選鈕改為下拉；原本 hover 才看得到的模式說明改常駐在下拉下方 */}
+        <label className="flex flex-col gap-1">
           <span className="text-[12px] text-ink-sub">修改模式</span>
-          <div className="flex h-[38px] flex-wrap items-center gap-x-4">
-            {MODE_ORDER.map((m) => (
-              <label key={m} title={DCU_MODE_DESC[m]} className="flex cursor-pointer items-center gap-1.5 whitespace-nowrap text-[13px] text-ink">
-                <input type="radio" name="dcu-remote-mode" checked={picked === m} onChange={() => setPicked(m)} className="size-4 cursor-pointer accent-danger" />
-                {m}
-              </label>
-            ))}
-          </div>
-        </div>
+          <select
+            value={picked}
+            onChange={(e) => setPicked(e.target.value)}
+            className="rounded-lg border border-border bg-inset/50 px-3 py-2 text-[13px] text-ink focus:outline-none focus:border-brand"
+          >
+            {MODE_ORDER.map((m) => <option key={m} value={m}>{m}</option>)}
+          </select>
+          {DCU_MODE_DESC[picked as keyof typeof DCU_MODE_DESC] && (
+            <span className="text-[12px] leading-snug text-ink-mut">{DCU_MODE_DESC[picked as keyof typeof DCU_MODE_DESC]}</span>
+          )}
+        </label>
       </div>
     </div>
   )

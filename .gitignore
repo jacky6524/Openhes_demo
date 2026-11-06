@@ -26,3 +26,7 @@ Thumbs.db
 
 # 正式前端（Nuxt）為獨立 git 倉庫，不納入本倉庫
 openhes-front/
+
+# 正式前端快照（11/04 取得，對照用）
+openhes_frontend*/
+openhes_frontend*.zip

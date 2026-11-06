@@ -99,14 +99,20 @@ export const mag = [
  * 2026-10-22 業主新色票「新告警色票.png」（系統總覽與 DCU 總覽地圖）：
  *   告警 #ED6063 / 良好 #9DD39F / 注意 #FFB800。
  *   （原本是前端 newDashboardRegions.ts 的 良好 #E5E7EB 中性灰／注意 #FFD230／告警 #FB2C36。）
- * stroke 是色票各自加深的一階，只用在區塊外框；fill 與 accent 都是色票原色。
+ * 2026-11-04 業主再調：良好綠彩度調淡五成、注意改 #FDC700、告警改 #DE1A1A；
+ *   同日再依「三色協調」在 OKLCH 對齊（色相照業主的三色不動）：
+ *   · 良好：協調時一度用 #A6C9A6，業主隨後要求**改回原色 #9DD39F**（stroke 也回到 #79B87C）
+ *   · 注意 #FDC700 不動（L 0.85，三色的亮度基準）
+ *   · 告警 #DE1A1A → #E03930：原色 L 0.57 比另外兩色暗一大截、大面積填色很重，提到 L 0.60 並稍降彩度
+ *   規則：嚴重度越高彩度越高（0.06 → 0.17 → 0.21）；三色的 stroke 一律比 fill 暗一階（OKLCH L −0.10）。
+ * stroke 只用在區塊外框；fill 與 accent 都是色票原色。
  * `accent` 供填色太淡讀不出來的地方使用（legend dot、status pill、gauge arc）。
  */
 export type HealthKey = 'good' | 'warning' | 'alert'
 export const health: Record<HealthKey, { fill: string; stroke: string; accent: string; label: string }> = {
-  good: { fill: '#9DD39F', stroke: '#79B87C', accent: '#9DD39F', label: '良好' },
-  warning: { fill: '#FFB800', stroke: '#D99C00', accent: '#FFB800', label: '注意' },
-  alert: { fill: '#ED6063', stroke: '#C94A4D', accent: '#ED6063', label: '警告' },
+  good: { fill: '#9DD39F', stroke: '#79B87C', accent: '#9DD39F', label: '良好' }, // 2026-11-04 業主：綠改回 #9DD39F
+  warning: { fill: '#FDC700', stroke: '#DDA800', accent: '#FDC700', label: '注意' },
+  alert: { fill: '#E03930', stroke: '#B3241E', accent: '#E03930', label: '警告' },
 }
 
 /**

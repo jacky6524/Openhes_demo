@@ -1,22 +1,21 @@
 import { hashStr } from './readTasks'
+import { MDMS_DATA_TYPES, type MdmsTypeKey } from './readDataTypes'
 
 /**
  * 讀表管理 · MDMS上拋的 mock 資料（設計稿「MDMS上拋-1／-2」）。
- * 每種資料類型依自己的更新週期切成時段（LP 15 分鐘、ALT／PQ 1 小時、MN／DRR 每天），
+ * 每種資料類型依自己的更新週期切成時段（LP 15 分鐘、ALT 等 1 小時、MN／DRR 每天），
  * 每個時段有「已上拋／總數」。TODO: 上線改讀 MDMS 上拋統計 API。
+ *
+ * 2026-11-04 業主意見：資料類型改成單選下拉，並「以後端資料為準」——後端上拋紀錄
+ * （GET /api/p6xml/upload/status）只有 MeterReadings 的 lp／alt／mn 與 EndDeviceEvents（事件），
+ * 所以只列這 4 種（定義在 data/readDataTypes.ts）。原本的 PQ、DRR 拿掉；原本把 ALT 標成「事件資料」也已改正。
  */
-export const MDMS_TYPES = [
-  { key: 'LP', label: '負載資料', title: 'LP負載資料', cadence: '每15分鐘更新', stepMin: 15, total: 806_000 },
-  { key: 'ALT', label: '事件資料', title: 'ALT事件資料', cadence: '每1小時更新', stepMin: 60, total: 802_000 },
-  { key: 'MN', label: '午夜資料', title: 'MN午夜資料', cadence: '每天更新', stepMin: 1440, total: 433_004 },
-  { key: 'PQ', label: '定時供電品質資料', title: 'PQ定時供電品質資料', cadence: '每1小時更新', stepMin: 60, total: 120_000 },
-  { key: 'DRR', label: '需量復歸報表', title: 'DRR需量復歸報表', cadence: '每天更新', stepMin: 1440, total: 38_000 },
-] as const
-export type MdmsKey = (typeof MDMS_TYPES)[number]['key']
-export type MdmsType = (typeof MDMS_TYPES)[number]
+export const MDMS_TYPES = MDMS_DATA_TYPES
+export type MdmsKey = MdmsTypeKey
+export type MdmsType = (typeof MDMS_DATA_TYPES)[number]
 
-/** 預設勾選：負載／事件／午夜 */
-export const DEFAULT_MDMS_KEYS: MdmsKey[] = ['LP', 'ALT', 'MN']
+/** 預設勾選：負載／定時供電品質／午夜（同改版前的預設） */
+export const DEFAULT_MDMS_KEYS: MdmsKey[] = ['MN', 'LP', 'ALT']
 
 /** 達成率低於此值算「注意」（紅字、趨勢圖紅帶） */
 export const MDMS_ALERT = 90
@@ -38,7 +37,7 @@ export function parseLocal(v: string): number | null {
   const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(v)
   return m ? Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]) : null
 }
-export function fmtStamp(ts: number, withTime = true, sep = '-') {
+export function fmtStamp(ts: number, withTime = true, sep = '/') {
   const d = new Date(ts)
   const date = `${d.getUTCFullYear()}${sep}${pad(d.getUTCMonth() + 1)}${sep}${pad(d.getUTCDate())}`
   return withTime ? `${date} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}` : date

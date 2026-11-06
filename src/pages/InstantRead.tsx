@@ -1,10 +1,14 @@
 import { useMemo, useRef, useState } from 'react'
-import { ArrowRight, Check, RotateCw, X } from 'lucide-react'
+import { Check, RotateCw, X } from 'lucide-react'
 import { Th, SortHead, StampLines, InfiniteFooter, useInfiniteRows, RED, type SortDir } from '@/components/table/tableBits'
+import { fmtDate } from '@/lib/format'
 import { SimpleModal, BTN_PRIMARY } from '@/components/shared/SimpleModal'
 import { PageTitle } from '@/components/shared/PageTitle'
-import { TargetSearch, FIELD_BOX, type TargetMode } from '@/components/shared/TargetSearch'
-import { READ_TASKS, taskMeters, meterReadings, type ReadTask, type TaskMeter } from '@/data/readTasks'
+import { TargetSearchMulti, FIELD_BOX, parseTargets, type TargetMode } from '@/components/shared/TargetSearch'
+import { READ_TASKS, taskMeters, meterReadings, type ReadTask } from '@/data/readTasks'
+import { ODR_TYPES, dataTypeOf, type OdrKey } from '@/data/readDataTypes'
+import { useDeviceGroups, type DeviceGroup, type GroupKind } from '@/store/useDeviceGroups'
+import { Field, GroupSelect, QueryButtons, RangeInput } from '@/components/shared/QueryFields'
 
 /**
  * 讀表管理 · 即時讀表（設計稿「即時讀表-1」列表、「即時讀表-2」ondemand 讀取結果彈窗）。
@@ -13,58 +17,81 @@ import { READ_TASKS, taskMeters, meterReadings, type ReadTask, type TaskMeter } 
  * 頁籤內再有一組「排程時間」區間只篩這個頁籤。列表無限捲動（業主不要頁碼）。
  * 點一列開彈窗：基本資料＋每顆電表有沒有回報；點已回報的電表，右側看讀值。
  * 資料全為 mock（data/readTasks.ts）。
+ *
+ * 2026-11-03 業主意見：群組改成下拉（內容＝裝置群組頁的群組；DCU群組比對電表所屬 DCU、
+ * 電表群組比對表號）；資料類型拿掉 ALL；讀表備註移到最後；
+ * 時間一律 24 小時制、以 15 分為單位；資料時間單次上限一個月。
+ * 2026-11-04 業主意見：群組回到「搜尋模式」與表號／電號同層級的單選，選群組時輸入框換成群組下拉。
+ * 同日依設計稿「即時讀表01.png」：搜尋模式改成膠囊頁籤（表號／電號／群組），表號、電號改為
+ * 多行輸入框，可輸入一筆或貼上多筆（換行分隔），任一筆對上任務裡的電表就算命中（TargetSearchMulti）。
  */
-const DATA_TYPES = ['ALL', '午夜資料', '負載資料'] as const
+// 資料類型下拉：7 項、與 MDMS上拋共用（data/readDataTypes.ts，2026-11-04 業主指定）
 
 interface Query {
   mode: TargetMode
-  text: string
+  text: string // 表號／電號模式的輸入（多筆以換行分隔）
+  group: string // 群組模式選的群組：`${kind}:${群組名}`，'' ＝未選
   note: string
-  dataType: (typeof DATA_TYPES)[number]
-  from: string // datetime-local：YYYY-MM-DDTHH:mm
+  dataType: OdrKey
+  from: string // YYYY-MM-DDTHH:mm（分鐘只會是 00／15／30／45）
   to: string
   lastN: string
   overdue: string
 }
-const EMPTY: Query = { mode: 'meterNo', text: '', note: '', dataType: 'ALL', from: '', to: '', lastN: '', overdue: '' }
+const EMPTY: Query = { mode: 'meterNo', text: '', group: '', note: '', dataType: 'MN', from: '', to: '', lastN: '', overdue: '' }
+
+type Groups = Record<GroupKind, DeviceGroup[]>
 
 const stamp = (v: string) => v.replace('T', ' ')
 
-function matches(t: ReadTask, q: Query) {
+function matches(t: ReadTask, q: Query, groups: Groups) {
+  if (q.mode === 'group' && q.group) {
+    const i = q.group.indexOf(':')
+    const kind = q.group.slice(0, i) as GroupKind
+    const ids = new Set(groups[kind]?.find((g) => g.name === q.group.slice(i + 1))?.ids ?? [])
+    const field = kind === 'dcu' ? 'dcuSerial' : 'meterNo'
+    if (!taskMeters(t).some((m) => ids.has(m[field]))) return false
+  }
   if (q.note.trim() && !t.note.toLowerCase().includes(q.note.trim().toLowerCase())) return false
-  if (q.dataType !== 'ALL' && t.dataType !== q.dataType) return false
-  if (q.from && t.dataStart.slice(0, 16) < stamp(q.from)) return false
-  if (q.to && t.dataEnd.slice(0, 16) > stamp(q.to)) return false
+  if (t.dataType !== q.dataType) return false
+  // common／del_total_kwh 是即時值（後端 needTimePeriod=false），不吃資料時間條件
+  const timed = dataTypeOf(q.dataType).needTimePeriod
+  if (timed && q.from && t.dataStart.slice(0, 16) < stamp(q.from)) return false
+  if (timed && q.to && t.dataEnd.slice(0, 16) > stamp(q.to)) return false
   if (q.overdue && t.overdue < Number(q.overdue)) return false
-  const text = q.text.trim().toLowerCase()
-  if (text) {
-    const mode = q.mode
-    if (mode === 'group') return t.group.toLowerCase().includes(text)
-    return taskMeters(t).some((m) => m[mode].toLowerCase().includes(text))
+  const targets = parseTargets(q.text).map((s) => s.toLowerCase())
+  if (q.mode !== 'group' && targets.length) {
+    const key = q.mode
+    return taskMeters(t).some((m) => {
+      const v = m[key].toLowerCase()
+      return targets.some((x) => v.includes(x))
+    })
   }
   return true
 }
 
 /** 套用整組查詢；「最後資料(筆)」＝最近的 N 筆（依讀取開始時間新→舊） */
-function runQuery(q: Query): ReadTask[] {
-  const hit = READ_TASKS.filter((t) => matches(t, q))
+function runQuery(q: Query, groups: Groups): ReadTask[] {
+  const hit = READ_TASKS.filter((t) => matches(t, q, groups))
   const n = parseInt(q.lastN, 10)
   if (!(n > 0)) return hit
   return [...hit].sort((a, b) => b.readStart.localeCompare(a.readStart)).slice(0, n)
 }
 
-interface Tab { id: number; query: Query; count: number }
+/** 頁籤在按搜尋當下就把結果算好，之後群組被改也不影響已開的頁籤 */
+interface Tab { id: number; rows: ReadTask[] }
 
 export function InstantRead() {
+  const groups = useDeviceGroups((s) => s.groups)
   const [draft, setDraft] = useState<Query>(EMPTY)
   const nextId = useRef(2)
-  const [tabs, setTabs] = useState<Tab[]>([{ id: 1, query: EMPTY, count: READ_TASKS.length }])
+  const [tabs, setTabs] = useState<Tab[]>(() => [{ id: 1, rows: runQuery(EMPTY, groups) }])
   const [activeId, setActiveId] = useState(1)
   const set = <K extends keyof Query>(k: K, v: Query[K]) => setDraft((d) => ({ ...d, [k]: v }))
 
   const search = () => {
     const id = nextId.current++
-    setTabs((ts) => [...ts, { id, query: draft, count: runQuery(draft).length }])
+    setTabs((ts) => [...ts, { id, rows: runQuery(draft, groups) }])
     setActiveId(id)
   }
   const clear = () => setDraft(EMPTY)
@@ -77,22 +104,29 @@ export function InstantRead() {
   const active = tabs.find((t) => t.id === activeId) ?? tabs[0]
 
   return (
-    <div className="flex flex-col gap-3 p-4 min-w-[1280px]">
+    <div className="flex h-full min-h-[680px] min-w-[1280px] flex-col gap-3 p-4">
       <PageTitle title="即時讀表" />
 
       <div className="flex flex-col gap-2">
-        <TargetSearch label="搜尋模式" mode={draft.mode} text={draft.text} onMode={(m) => set('mode', m)} onText={(v) => set('text', v)} onEnter={search} />
+        <TargetSearchMulti
+          mode={draft.mode}
+          text={draft.text}
+          onMode={(m) => set('mode', m)}
+          onText={(v) => set('text', v)}
+          onSubmit={search}
+          groupInput={<GroupSelect value={draft.group} onChange={(v) => set('group', v)} />}
+        />
         <div className="flex flex-wrap items-end gap-2">
-          <Field label="讀表備註">
-            <input value={draft.note} onChange={(e) => set('note', e.target.value)} onKeyDown={(e) => e.key === 'Enter' && search()} placeholder="Input" className={`${FIELD_BOX} w-[240px]`} />
-          </Field>
           <Field label="選擇資料類型">
-            <select value={draft.dataType} onChange={(e) => set('dataType', e.target.value as Query['dataType'])} className={`${FIELD_BOX} w-[144px]`}>
-              {DATA_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+            <select value={draft.dataType} onChange={(e) => set('dataType', e.target.value as OdrKey)} className={`${FIELD_BOX} w-[200px]`}>
+              {ODR_TYPES.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
             </select>
           </Field>
-          <Field label="資料時間">
-            <RangeInput from={draft.from} to={draft.to} onFrom={(v) => set('from', v)} onTo={(v) => set('to', v)} />
+          {/* common／del_total_kwh 讀的是即時值（後端 needTimePeriod=false）→ 資料時間停用 */}
+          <Field label="資料時間" hint={dataTypeOf(draft.dataType).needTimePeriod ? '單次查詢上限 1 個月' : '此類型讀取即時值，不需資料時間'}>
+            <fieldset disabled={!dataTypeOf(draft.dataType).needTimePeriod} className="disabled:cursor-not-allowed disabled:opacity-50">
+              <RangeInput from={draft.from} to={draft.to} maxMonths={1} onChange={(from, to) => setDraft((d) => ({ ...d, from, to }))} />
+            </fieldset>
           </Field>
           <Field label="最後資料 (筆)">
             <input value={draft.lastN} onChange={(e) => set('lastN', e.target.value.replace(/\D/g, ''))} onKeyDown={(e) => e.key === 'Enter' && search()} placeholder="全部" className={`${FIELD_BOX} w-[120px]`} />
@@ -100,16 +134,15 @@ export function InstantRead() {
           <Field label="設定逾期時間 (10分鐘起)">
             <input value={draft.overdue} onChange={(e) => set('overdue', e.target.value.replace(/\D/g, ''))} onKeyDown={(e) => e.key === 'Enter' && search()} placeholder="10" className={`${FIELD_BOX} w-[176px]`} />
           </Field>
-          <button onClick={clear} className="rounded-lg border border-border bg-surface px-3 py-2 text-[13px] font-semibold text-ink-sub hover:border-brand hover:text-brand">
-            清除條件
-          </button>
-          <button onClick={search} className="rounded-lg bg-ink px-3 py-2 text-[13px] font-semibold text-white hover:opacity-90">
-            搜尋
-          </button>
+          <Field label="讀表備註">
+            <input value={draft.note} onChange={(e) => set('note', e.target.value)} onKeyDown={(e) => e.key === 'Enter' && search()} placeholder="Input" className={`${FIELD_BOX} w-[240px]`} />
+          </Field>
+          <QueryButtons onClear={clear} onSearch={search} />
         </div>
       </div>
 
-      <div className="rounded-card bg-surface border border-border shadow-card">
+      {/* 撐滿剩餘高度，表格在卡片內自己捲（2026-11-06） */}
+      <div className="flex min-h-0 flex-1 flex-col rounded-card bg-surface border border-border shadow-card">
         <div className="flex items-center justify-between px-4 pt-4">
           <h2 className="text-[15px] font-semibold text-ink">即時讀表紀錄</h2>
         </div>
@@ -118,7 +151,7 @@ export function InstantRead() {
             const on = t.id === active.id
             return (
               <div key={t.id} className={`relative inline-flex items-center gap-1.5 px-3 py-2.5 text-[13px] ${on ? 'font-semibold text-brand' : 'text-ink-mut'}`}>
-                <button onClick={() => setActiveId(t.id)} className="whitespace-nowrap">報表列表 ({t.count})</button>
+                <button onClick={() => setActiveId(t.id)} className="whitespace-nowrap">報表列表 ({t.rows.length})</button>
                 {tabs.length > 1 && (
                   <button onClick={() => closeTab(t.id)} title="關閉頁籤" className="grid size-4 place-items-center rounded hover:bg-inset hover:text-ink">
                     <X size={13} />
@@ -130,7 +163,7 @@ export function InstantRead() {
           })}
         </div>
         {/* key：換頁籤就重置該頁籤自己的排程時間與排序 */}
-        <TaskPanel key={active.id} query={active.query} />
+        <TaskPanel key={active.id} base={active.rows} />
       </div>
     </div>
   )
@@ -140,8 +173,7 @@ export function InstantRead() {
 
 type SortKey = 'no' | 'instanceId' | 'dataType' | 'readStart' | 'readEnd' | 'dataStart' | 'dataEnd' | 'overdue' | 'doneAt' | 'replied'
 
-function TaskPanel({ query }: { query: Query }) {
-  const base = useMemo(() => runQuery(query), [query])
+function TaskPanel({ base }: { base: ReadTask[] }) {
   const [draft, setDraft] = useState({ from: '', to: '' })
   const [sched, setSched] = useState({ from: '', to: '' })
   const [sortKey, setSortKey] = useState<SortKey>('no')
@@ -161,7 +193,7 @@ function TaskPanel({ query }: { query: Query }) {
     })
   }, [base, sched, sortKey, sortDir])
 
-  const { visible, sentinelRef, hasMore } = useInfiniteRows(rows.length, [query, sched, sortKey, sortDir], 30)
+  const { visible, sentinelRef, hasMore } = useInfiniteRows(rows.length, [base, sched, sortKey, sortDir], 30)
   const toggleSort = (k: SortKey) => {
     if (k === sortKey) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
     else { setSortKey(k); setSortDir('asc') }
@@ -171,10 +203,10 @@ function TaskPanel({ query }: { query: Query }) {
   )
 
   return (
-    <div className="px-4 pb-4">
+    <div className="flex min-h-0 flex-1 flex-col px-4 pb-4">
       <div className="flex items-end gap-2 py-3">
         <Field label="排程時間">
-          <RangeInput from={draft.from} to={draft.to} onFrom={(v) => setDraft((d) => ({ ...d, from: v }))} onTo={(v) => setDraft((d) => ({ ...d, to: v }))} />
+          <RangeInput from={draft.from} to={draft.to} onChange={(from, to) => setDraft({ from, to })} />
         </Field>
         <button onClick={() => setSched(draft)} className="rounded-lg border border-border bg-surface px-3 py-2 text-[13px] font-semibold text-ink hover:border-brand hover:text-brand">
           搜尋
@@ -188,8 +220,8 @@ function TaskPanel({ query }: { query: Query }) {
         </button>
       </div>
 
-      <div className="overflow-hidden rounded-lg border border-border">
-        <div ref={scrollRef} className="max-h-[calc(100vh-470px)] min-h-[240px] overflow-auto">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border">
+        <div ref={scrollRef} className="min-h-[240px] flex-1 overflow-auto">
           <table className="w-full min-w-[1180px] text-[13px] border-collapse">
             <thead>
               <tr className="text-ink-sub">
@@ -212,7 +244,7 @@ function TaskPanel({ query }: { query: Query }) {
                   <td className="px-3 py-2.5 tabular-nums text-ink">{t.no}</td>
                   <td className="px-3 py-2.5 font-mono text-[12px] text-ink"><span className="block w-[150px] break-all leading-tight">{t.instanceId}</span></td>
                   <td className="px-3 py-2.5 text-ink whitespace-nowrap">{t.note}</td>
-                  <td className="px-3 py-2.5 text-ink whitespace-nowrap">{t.dataType}</td>
+                  <td className="px-3 py-2.5 text-ink whitespace-nowrap">{dataTypeOf(t.dataType).label}</td>
                   {[t.readStart, t.readEnd, t.dataStart, t.dataEnd].map((v, i) => (
                     <td key={i} className="px-3 py-2.5 tabular-nums text-ink"><StampLines value={v.slice(0, 16)} /></td>
                   ))}
@@ -240,28 +272,52 @@ function TaskPanel({ query }: { query: Query }) {
 
 /* ───────────────────────── ondemand 讀取結果彈窗 ───────────────────────── */
 
+/** ondemand 結果兩張表的列高與共用樣式（左右列要對齊，高度必須固定） */
+const ROW_H = 38
+const HEAD = 'sticky top-0 z-10 bg-inset'
+const CELL = 'px-3 tabular-nums text-ink align-middle'
+
 function ResultModal({ task, onClose }: { task: ReadTask; onClose: () => void }) {
   const meters = useMemo(() => taskMeters(task), [task])
-  const [picked, setPicked] = useState<TaskMeter | null>(null)
-  const { visible, sentinelRef, hasMore } = useInfiniteRows(meters.length, [task.no], 10)
+  /**
+   * 2026-11-04 業主意見：資料時間、累積電量要跟電表同步捲動、全部直接列出（方便對照），
+   * 不再「點左邊一顆電表 → 右邊看讀值」。同日第二版：讀值獨立成右邊一張表，但與左表同步下滑。
+   *   左表  電號／表號／回報，一顆電表一列，列高＝它的讀值筆數 × ROW_H
+   *   右表  資料時間／累積電量，一筆讀值一列（負載資料每顆 4 筆、午夜資料 1 筆；沒回報一列「—」）
+   * 兩張表放在同一個捲動容器裡並排 —— 天生同步，不用監聽 scroll 互相對齊；表頭各自 sticky。
+   */
+  const groups = useMemo(
+    () => meters.map((m) => ({ m, readings: m.replied ? meterReadings(task, m) : [] as Array<[string, string]> })),
+    [meters, task],
+  )
+  const { visible, sentinelRef, hasMore } = useInfiniteRows(groups.length, [task.no], 20)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const shown = groups.slice(0, visible)
+  /** 右表讀值欄的欄名依類型（累積電量／電壓／最大需量／事件碼） */
+  const valueLabel = dataTypeOf(task.dataType).valueLabel
 
+  /** 下載全部＝兩張表合併（一筆讀值一列；沒回報的電表讀值留空） */
   const download = () => {
-    const csv = ['電號,表號,回報', ...meters.map((m) => `${m.elecNo},${m.meterNo},${m.replied ? 'Y' : 'N'}`)].join('\n')
+    const lines = [`電號,表號,回報,資料時間,${valueLabel}`]
+    for (const { m, readings } of groups) {
+      const head = `${m.elecNo},${m.meterNo},${m.replied ? 'Y' : 'N'}`
+      if (readings.length === 0) lines.push(`${head},,`)
+      else for (const [t, v] of readings) lines.push(`${head},${fmtDate(t)},${v}`)
+    }
     const a = document.createElement('a')
-    a.href = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' }))
+    a.href = URL.createObjectURL(new Blob(['﻿' + lines.join('\n')], { type: 'text/csv;charset=utf-8' }))
     a.download = `ondemand-${task.instanceId.slice(0, 8)}.csv`
     a.click()
     URL.revokeObjectURL(a.href)
   }
 
   const info: Array<[string, string]> = [
-    ['資料類型', task.typeKey],
+    ['資料類型', dataTypeOf(task.dataType).odr ?? ''], // 後端 demand-types 的 name
     ['Task ID', task.instanceId],
     ['讀表數量', String(task.total)],
-    ['資料開始時間', task.dataStart],
+    ['資料開始時間', fmtDate(task.dataStart)],
     ['已回報電表數', String(task.replied)],
-    ['資料結束時間', task.dataEnd],
+    ['資料結束時間', fmtDate(task.dataEnd)],
   ]
 
   return (
@@ -283,87 +339,70 @@ function ResultModal({ task, onClose }: { task: ReadTask; onClose: () => void })
           ))}
         </div>
 
-        <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-4">
-          <div className="overflow-hidden rounded-lg border border-border">
-            <div ref={scrollRef} className="max-h-[420px] overflow-auto">
-              <table className="w-full text-[13px] border-collapse">
+        <div className="overflow-hidden rounded-lg border border-border">
+          <div ref={scrollRef} className="max-h-[460px] overflow-auto">
+            {/* 兩張表並排在同一個捲動區、一起捲動；2026-11-06 設計稿：中間不留空隙、表頭連成一條，
+                右表左側一條分隔線，視覺上是一張表 */}
+            <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-start">
+              <table className="w-full table-fixed border-separate border-spacing-0 text-[13px]">
+                <colgroup>
+                  <col style={{ width: '40%' }} />
+                  <col style={{ width: '38%' }} />
+                  <col style={{ width: '22%' }} />
+                </colgroup>
                 <thead>
                   <tr className="text-ink-sub">
-                    <Th className="sticky top-0 z-10 bg-inset">電號</Th>
-                    <Th className="sticky top-0 z-10 bg-inset">表號</Th>
-                    <Th className="sticky top-0 z-10 bg-inset">回報</Th>
+                    <Th className={HEAD}>電號</Th>
+                    <Th className={HEAD}>表號</Th>
+                    <Th className={HEAD}>回報</Th>
                   </tr>
                 </thead>
                 <tbody>
-                  {meters.slice(0, visible).map((m, i) => {
-                    const on = picked === m
-                    return (
-                      <tr
-                        key={i}
-                        onClick={() => setPicked(m)}
-                        className={`cursor-pointer border-b border-divider hover:bg-inset/40 ${on ? 'bg-brand-soft-hover' : ''}`}
-                      >
-                        <td className="px-3 py-2.5 tabular-nums text-ink">{m.elecNo}</td>
-                        <td className="px-3 py-2.5 tabular-nums text-ink">{m.meterNo}</td>
-                        <td className="px-3 py-2.5">
-                          {m.replied ? <Check size={16} className="text-danger" /> : <X size={16} className="text-ink-mut" />}
-                        </td>
-                      </tr>
-                    )
+                  {shown.map(({ m, readings }, gi) => (
+                    <tr key={gi} style={{ height: Math.max(1, readings.length) * ROW_H }}>
+                      <td className={`${CELL} border-b border-border`}>{m.elecNo}</td>
+                      <td className={`${CELL} border-b border-border`}>{m.meterNo}</td>
+                      <td className="border-b border-border px-3 align-middle">
+                        {m.replied ? <Check size={16} className="text-danger" /> : <X size={16} className="text-ink-mut" />}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              <table className="w-full table-fixed border-separate border-spacing-0 border-l border-border text-[13px]">
+                <colgroup>
+                  <col style={{ width: '56%' }} />
+                  <col style={{ width: '44%' }} />
+                </colgroup>
+                <thead>
+                  <tr className="text-ink-sub">
+                    <Th className={HEAD}>資料時間</Th>
+                    <Th className={HEAD}>{valueLabel}</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {shown.flatMap(({ readings }, gi) => {
+                    const rows: Array<[string, string] | null> = readings.length ? readings : [null]
+                    return rows.map((r, ri) => {
+                      // 每顆電表的最後一筆畫深一點的線，和左表的電表分隔線對齊
+                      const line = ri === rows.length - 1 ? 'border-b border-border' : 'border-b border-divider'
+                      return (
+                        <tr key={`${gi}-${ri}`} style={{ height: ROW_H }}>
+                          <td className={`${CELL} ${line}`}>{r ? fmtDate(r[0]) : <span className="text-ink-mut">—</span>}</td>
+                          <td className={`${CELL} ${line}`}>{r ? r[1] : <span className="text-ink-mut">—</span>}</td>
+                        </tr>
+                      )
+                    })
                   })}
                 </tbody>
               </table>
-              <div ref={sentinelRef} />
             </div>
-            <InfiniteFooter loaded={visible} total={meters.length} hasMore={hasMore} />
+            <div ref={sentinelRef} />
           </div>
-
-          <div className="rounded-lg bg-inset/60 p-4">
-            {picked && picked.replied ? (
-              <div className="flex flex-col gap-2">
-                <h3 className="text-[14px] font-semibold text-ink">{picked.meterNo} 讀值</h3>
-                <table className="w-full text-[13px] border-collapse">
-                  <thead>
-                    <tr className="text-ink-sub"><Th>資料時間</Th><Th>累積電量 (kWh)</Th></tr>
-                  </thead>
-                  <tbody>
-                    {meterReadings(task, picked).map(([t, v]) => (
-                      <tr key={t} className="border-b border-divider">
-                        <td className="px-3 py-2 tabular-nums text-ink">{t}</td>
-                        <td className="px-3 py-2 tabular-nums text-ink">{v}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <h3 className="text-[14px] font-semibold text-ink">無資料</h3>
-            )}
-          </div>
+          <InfiniteFooter loaded={Math.min(visible, groups.length)} total={groups.length} hasMore={hasMore} onTop={() => scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })} />
         </div>
       </div>
     </SimpleModal>
-  )
-}
-
-/* ───────────────────────── 小零件 ───────────────────────── */
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label className="flex flex-col gap-1">
-      <span className="px-2 text-[12px] text-ink-sub">{label}</span>
-      {children}
-    </label>
-  )
-}
-
-function RangeInput({ from, to, onFrom, onTo }: { from: string; to: string; onFrom: (v: string) => void; onTo: (v: string) => void }) {
-  const inner = 'bg-transparent text-[13px] tabular-nums text-ink focus:outline-none'
-  return (
-    <div className={`${FIELD_BOX} flex items-center gap-2 py-[5px]`}>
-      <input type="datetime-local" value={from} max={to || undefined} onChange={(e) => onFrom(e.target.value)} className={inner} />
-      <ArrowRight size={14} className="text-ink-mut" />
-      <input type="datetime-local" value={to} min={from || undefined} onChange={(e) => onTo(e.target.value)} className={inner} />
-    </div>
   )
 }

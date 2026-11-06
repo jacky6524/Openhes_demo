@@ -115,7 +115,7 @@ const TELECOMS = ['Far EasTone', 'Chunghwa Telecom', 'Taiwan Mobile']
 
 export function topologyOf(serial: string): { head: TopologyHead; nodes: TopologyNode[] } {
   const r = mulberry32(hash(serial) ^ 0x54_4f_50_4f)
-  const stamp = '2025-01-01 15:00:00'
+  const stamp = '2025/01/01 15:00:00'
 
   const node = (depth: number): TopologyNode => {
     const meterNo = `KT${19000000 + Math.floor(r() * 999999)}`
@@ -179,7 +179,7 @@ export const METER_LIST_ROWS: MeterListRow[] = Array.from({ length: 100 }, (_, i
   const online = r() > 0.16
   const dcu = DCU_LIST_ROWS[Math.floor(r() * DCU_LIST_ROWS.length)]
   const stamp = (sameDay: boolean) =>
-    sameDay ? '2025-01-01 10:30:00' : `2024-12-${pad(26 + Math.floor(r() * 5), 2)} 10:30:00`
+    sameDay ? '2025/01/01 10:30:00' : `2024/12/${pad(26 + Math.floor(r() * 5), 2)} 10:30:00`
   const lpSame = online && r() > 0.12
   const mnSame = online && r() > 0.1
   /**

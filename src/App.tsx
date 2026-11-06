@@ -8,7 +8,7 @@ import { RegistrationConflict } from '@/pages/RegistrationConflict'
 import { DeviceGroups } from '@/pages/DeviceGroups'
 import { DeviceRecord } from '@/pages/DeviceRecord'
 import { DisabledList } from '@/pages/DisabledList'
-import { DeviceModule, ModuleDeviceList, ChannelPlan } from '@/pages/DeviceModule'
+import { DeviceModule, ChannelPlan } from '@/pages/DeviceModule'
 import { InstantRead } from '@/pages/InstantRead'
 import { MdmsUpload } from '@/pages/MdmsUpload'
 import { StatsReport } from '@/pages/StatsReport'
@@ -18,6 +18,7 @@ import { DcuWarRoom } from '@/pages/DcuWarRoom'
 import { AccountAdmin } from '@/pages/AccountAdmin'
 import { FunctionAdmin } from '@/pages/FunctionAdmin'
 import { RolePermission } from '@/pages/RolePermission'
+import { ParamSettings } from '@/pages/ParamSettings'
 import { useNav } from '@/store/useNav'
 
 export default function App() {
@@ -42,8 +43,6 @@ export default function App() {
         <DisabledList />
       ) : view === 'deviceModule' ? (
         <DeviceModule />
-      ) : view === 'moduleList' ? (
-        <ModuleDeviceList />
       ) : view === 'channelPlan' ? (
         <ChannelPlan />
       ) : view === 'instantRead' ? (
@@ -64,6 +63,8 @@ export default function App() {
         <FunctionAdmin />
       ) : view === 'permRole' ? (
         <RolePermission />
+      ) : view === 'permParams' ? (
+        <ParamSettings />
       ) : (
         <SystemOverview />
       )}

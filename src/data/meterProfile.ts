@@ -82,7 +82,7 @@ export function meterProfile(meterNo: string): { chart: ProfilePoint[]; rows: Pr
   const rows: ProfileRow[] = Array.from({ length: 48 }, (_, i) => {
     const hh = 10 - Math.floor(i / 6)
     const mm = 30 - ((i * 5) % 60)
-    const time = `2025-01-01 ${pad((hh + 24) % 24, 2)}:${pad((mm + 60) % 60, 2)}:00`
+    const time = `2025/01/01 ${pad((hh + 24) % 24, 2)}:${pad((mm + 60) % 60, 2)}:00`
     const kwh = () => (4437.6 + Math.round(rr() * 40) / 10000).toFixed(4)
     return {
       rindex: 570 - i,

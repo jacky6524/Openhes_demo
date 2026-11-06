@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import { status as statusTok } from '@/tokens'
 import type { DcuStatus } from '@/data/dcuList'
+import { fmtDate } from '@/lib/format'
 
 /* Shared table primitives used by the DCU list and DCU detail screens. */
 
@@ -23,9 +24,11 @@ export function Th({ children, className = '' }: { children?: ReactNode; classNa
 
 /**
  * 時間戳上下兩行（日期／時間）—— 2026-10-01 業主意見日期要帶西元年，
- * 右側窄列表放一行太寬，拆成兩行。輸入 'YYYY-MM-DD HH:mm'；沒有空白就原樣顯示。
+ * 右側窄列表放一行太寬，拆成兩行。輸入 'YYYY/MM/DD HH:mm'（傳入 - 分隔也會轉成斜線，全站統一 2026-11-04）；
+ * 沒有空白就原樣顯示。
  */
-export function StampLines({ value }: { value: string }) {
+export function StampLines({ value: raw }: { value: string }) {
+  const value = fmtDate(raw)
   const i = value.indexOf(' ')
   if (i < 0) return <>{value}</>
   return (
@@ -51,30 +54,27 @@ export function StatusPill({ status }: { status: DcuStatus }) {
   )
 }
 
-/** 三態裝置狀態（正常／斷線／停用）—— 樣式與 StatusPill 一致 */
-export function StatePill({ state }: { state: 'active' | 'offline' | 'disabled' }) {
-  const tone =
-    state === 'offline'
-      ? { bg: statusTok.danger.bg, fg: RED, label: '斷線' }
-      : state === 'disabled'
-        ? { bg: '#EFEFF1', fg: '#6B5E62', label: '停用' }
-        : { bg: statusTok.normal.bg, fg: GREEN, label: '正常' }
+/**
+ * 「狀態」欄（啟用／停用）—— DCU清單、電表清單共用（2026-11-04 業主意見：以 DCU清單的呈現為準）。
+ * 啟用＝灰字；停用＝灰底標籤，前面不加圓點（圓點留給連線狀態用，避免兩欄長得一樣）。
+ */
+export function EnabledState({ enabled }: { enabled: boolean }) {
+  if (enabled) return <span className="text-ink-sub">啟用</span>
   return (
-    <span
-      className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[12px] font-medium"
-      style={{ background: tone.bg, color: tone.fg }}
-    >
-      <span className="h-1.5 w-1.5 rounded-full" style={{ background: tone.fg }} />
-      {tone.label}
+    <span className="inline-flex items-center rounded-md px-2 py-0.5 text-[12px] font-medium" style={{ background: '#EFEFF1', color: '#6B5E62' }}>
+      停用
     </span>
   )
 }
 
-/** 讀表百分比：≥80% 純文字，50–80% 橙、＜50% 紅 */
-export function PercentBadge({ percent }: { percent: number }) {
+/**
+ * 百分比徽章：≥good 純文字，warn～good 橙、＜warn 紅。
+ * 預設 80／50（舊版裝置列表規格）；裝置列表改吃燈號門檻 API 時傳 97／95（config/statusThresholds.ts）。
+ */
+export function PercentBadge({ percent, good = 80, warn = 50 }: { percent: number; good?: number; warn?: number }) {
   const v = Math.round(percent * 10) / 10
-  if (v >= 80) return <span className="tabular-nums text-ink">{v}%</span>
-  const tone = v < 50 ? statusTok.danger : statusTok.warning
+  if (v >= good) return <span className="tabular-nums text-ink">{v}%</span>
+  const tone = v < warn ? statusTok.danger : statusTok.warning
   return (
     <span
       className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[12px] font-semibold tabular-nums"
@@ -82,6 +82,21 @@ export function PercentBadge({ percent }: { percent: number }) {
     >
       <span className="h-1.5 w-1.5 rounded-full" style={{ background: tone.fg }} />
       {v}%
+    </span>
+  )
+}
+
+/**
+ * 表頭 hover 說明（單位、計算口徑）：表頭文字加虛線底線，滑過在下方浮出說明框。
+ * 包在 SortHead／純文字外面用；表格捲動框會裁掉浮框，所以浮框寬度刻意收窄、只放一兩行。
+ */
+export function HeadHint({ hint, children }: { hint: ReactNode; children: ReactNode }) {
+  return (
+    <span className="group relative inline-flex">
+      <span className="border-b border-dashed border-border-strong">{children}</span>
+      <span className="pointer-events-none absolute left-0 top-full z-40 mt-1.5 w-max max-w-[220px] whitespace-normal rounded-lg border border-border bg-surface px-2.5 py-1.5 text-[11.5px] font-normal leading-snug text-ink-sub opacity-0 shadow-card transition-opacity duration-150 group-hover:opacity-100">
+        {hint}
+      </span>
     </span>
   )
 }

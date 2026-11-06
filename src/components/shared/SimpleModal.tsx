@@ -1,7 +1,12 @@
 import { useEffect, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 
-/** 小型彈窗外框（樣式比照 DcuModeModal）：標題、右上動作列、Esc／點背景關閉 */
+/**
+ * 小型彈窗外框（樣式比照 DcuModeModal）：標題、右上動作列、Esc／點背景關閉。
+ * 一律 portal 到 document.body：從頂欄（relative z-10，自成疊層）開的彈窗原本被困在頂欄那層，
+ * 會被內容區的 sticky 表頭蓋住（2026-11-06 個人資料維護）。
+ */
 export function SimpleModal({
   title,
   onClose,
@@ -21,7 +26,7 @@ export function SimpleModal({
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/40 backdrop-fade" onClick={onClose} />
       <div
@@ -39,7 +44,8 @@ export function SimpleModal({
         </div>
         <div className="min-h-0 flex-1 overflow-auto p-4">{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 

@@ -30,14 +30,14 @@ function hash(s: string) {
 const pad = (n: number, w: number) => String(n).padStart(w, '0')
 
 /** 查詢區間迄日 —— 與電表詳細資料的資料時間同一組（2025-01-01 ～ 2025-01-07） */
-export const LOG_RANGE = { from: '2025-01-01', to: '2025-01-07', days: 7 }
+export const LOG_RANGE = { from: '2025/01/01', to: '2025/01/07', days: 7 }
 
-/** 第 i 筆的時間戳（由新到舊，每筆間隔 minutes 分鐘），格式 YYYY-MM-DD HH:mm:ss */
+/** 第 i 筆的時間戳（由新到舊，每筆間隔 minutes 分鐘），格式 YYYY/MM/DD HH:mm:ss */
 function stamp(i: number, minutes: number) {
   const end = Date.UTC(2025, 0, 7, 10, 30)
   const d = new Date(end - i * minutes * 60_000)
   return (
-    `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1, 2)}-${pad(d.getUTCDate(), 2)} ` +
+    `${d.getUTCFullYear()}/${pad(d.getUTCMonth() + 1, 2)}/${pad(d.getUTCDate(), 2)} ` +
     `${pad(d.getUTCHours(), 2)}:${pad(d.getUTCMinutes(), 2)}:${pad(d.getUTCSeconds(), 2)}`
   )
 }

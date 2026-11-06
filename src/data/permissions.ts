@@ -77,10 +77,10 @@ function hash(s: string) {
 }
 const pad = (n: number, w = 2) => String(n).padStart(w, '0')
 
-/** 由種子導出的時間字串 YYYY-MM-DD HH:mm:ss */
+/** 由種子導出的時間字串 YYYY/MM/DD HH:mm:ss */
 function stampOf(seed: number, baseDay = 1) {
   const d = baseDay + (seed % 28)
-  return `2025-${pad(1 + ((seed >> 3) % 11))}-${pad(d)} ${pad(seed % 24)}:${pad((seed >> 2) % 60)}:${pad((seed >> 5) % 60)}`
+  return `2025/${pad(1 + ((seed >> 3) % 11))}/${pad(d)} ${pad(seed % 24)}:${pad((seed >> 2) % 60)}:${pad((seed >> 5) % 60)}`
 }
 
 const NAMES = ['sgc-dev', 'sgc-qa', 'sgc-ops', 'tp-eng', 'ntp-eng', 'tch-eng', 'khh-eng', 'audit01', 'ami-ops', 'hes-admin']
@@ -160,7 +160,7 @@ export const SEED_FUNC_ITEMS: FuncItem[] = [
   { id: 'FN-003', page: '裝置列表', actions: ['新增', '編輯', '刪除', '匯出'] },
   { id: 'FN-006', page: 'DCU詳細資料', actions: ['轉移電表', '遠端設定', '線上操作'] },
   { id: 'FN-008', page: '功能項目管理', actions: ['新增', '編輯'] },
-].map((f) => ({ ...f, updatedAt: '2025-01-01 00:00:00' }))
+].map((f) => ({ ...f, updatedAt: '2025/01/01 00:00:00' }))
 
 /* ------------------------------------------------------ 角色權限 */
 

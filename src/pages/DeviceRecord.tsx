@@ -11,9 +11,10 @@ import { PageTitle } from '@/components/shared/PageTitle'
  * 篩選在按「搜尋」時才套用，「清除條件」回到預設。資料全為 mock。
  */
 type Kind = 'dcu' | 'meter'
+// 2026-11-06 業主意見：Meter 排前面、預設 Meter
 const TABS = [
-  { key: 'dcu', label: 'DCU 修改紀錄' },
   { key: 'meter', label: 'Meter 修改紀錄' },
+  { key: 'dcu', label: 'DCU 修改紀錄' },
 ] as const
 
 /** 單格：字串＝一行；[前, 後]＝兩行 */
@@ -68,7 +69,7 @@ const mkDcu = (): Row[] => Array.from({ length: 40 }, (_, i) => ({
   contract: ['108-FET', '-'],
   note: ['108-P11', '-'],
   note2: ['1150324', '1150424'],
-  time: '2025-01-01 10:30:00',
+  time: '2025/01/01 10:30:00',
   who: 'FET-吳佳芸 修改',
   _state: STATES[i % 5 === 0 ? 1 : 0],
   _comm: i % 4 === 0 ? 'RF' : 'PLC',
@@ -91,7 +92,7 @@ const mkMeter = (): Row[] => Array.from({ length: 40 }, (_, i) => ({
   note: ['108-P11', '-'],
   note2: ['1150324', '1150424'],
   note3: ['1150324', '1150424'],
-  time: '2025-01-01 10:30:00',
+  time: '2025/01/01 10:30:00',
   _state: STATES[i % 5 === 0 ? 1 : 0],
   _fan: `18BE92FFFF${String(18548 + i).padStart(6, '0')}`,
 } as Row))
@@ -109,7 +110,7 @@ interface Q {
 const EMPTY: Q = { mode: 'FAN MAC', text: '', office: '', a: 'ALL', b: 'ALL', c: 'ALL', d: 'ALL', e: 'ALL', f: 'ALL', from: '2025-01-01', to: '2025-01-01', dcuText: '' }
 
 export function DeviceRecord() {
-  const [kind, setKind] = useState<Kind>('dcu')
+  const [kind, setKind] = useState<Kind>('meter')
   const [draft, setDraft] = useState<Q>(EMPTY)
   const [applied, setApplied] = useState<Q>(EMPTY)
   const scrollRef = useRef<HTMLDivElement>(null)

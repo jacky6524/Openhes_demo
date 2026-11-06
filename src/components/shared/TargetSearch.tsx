@@ -1,8 +1,8 @@
-import { Search } from 'lucide-react'
+import { PillTabs } from '@/components/shared/PillTabs'
 
 /**
- * 讀表管理兩頁共用的「對象搜尋」：表號／電號／群組 單選＋輸入框
- * （設計稿「即時讀表-1」「MDMS上拋-1」左上角；標題一個叫「搜尋模式」、一個叫「重新上傳MDMS」）。
+ * 讀表管理（即時讀表、MDMS上拋）的「對象搜尋」：表號／電號／群組 —— 膠囊頁籤＋多行輸入框（TargetSearchMulti）。
+ * 2026-11-04 起兩頁共用同一個版本；原本 MDMS上拋用的單選＋單行版（TargetSearch）已移除。
  */
 export const TARGET_MODES = [
   { key: 'meterNo', label: '表號' },
@@ -14,50 +14,51 @@ export type TargetMode = (typeof TARGET_MODES)[number]['key']
 export const FIELD_BOX =
   'rounded-md border border-border bg-surface px-3 py-2 text-[13px] text-ink placeholder:text-ink-mut focus:outline-none focus:border-brand'
 
-export function TargetSearch({
-  label,
-  mode,
-  text,
-  onMode,
-  onText,
-  onEnter,
+/** 多筆輸入框的內容 → 去頭尾空白、去空行、去重複的清單（換行分隔；貼上時夾帶的逗號、Tab 也當分隔） */
+export function parseTargets(text: string): string[] {
+  return [...new Set(text.split(/[\n\r,\t]+/).map((s) => s.trim()).filter(Boolean))]
+}
+
+/**
+ * 即時讀表的「對象搜尋」（2026-11-04 業主設計稿「即時讀表01.png」）：
+ *   上方膠囊頁籤 表號／電號／群組；
+ *   表號、電號 → 多行輸入框，可輸入一筆或貼上多筆（換行分隔），右下角顯示已輸入筆數；
+ *   群組 → 由頁面傳入的群組下拉（設計稿沒畫群組模式，沿用下拉）。
+ * Ctrl+Enter（⌘+Enter）直接搜尋；單按 Enter 是換行。
+ */
+export function TargetSearchMulti({
+  mode, text, onMode, onText, onSubmit, groupInput,
 }: {
-  label: string
   mode: TargetMode
   text: string
   onMode: (m: TargetMode) => void
   onText: (v: string) => void
-  onEnter?: () => void
+  onSubmit?: () => void
+  groupInput: React.ReactNode
 }) {
+  const label = TARGET_MODES.find((m) => m.key === mode)?.label ?? ''
+  const count = parseTargets(text).length
   return (
-    <div className="flex flex-col gap-1">
-      <span className="px-2 text-[12px] text-ink-sub">{label}</span>
-      <div className="flex items-center gap-2">
-        <div className="flex h-[38px] items-center gap-3 px-2">
-          {TARGET_MODES.map((m) => (
-            <label key={m.key} className="flex cursor-pointer items-center gap-1.5 text-[13px] text-ink">
-              <input
-                type="radio"
-                name={`target-${label}`}
-                checked={mode === m.key}
-                onChange={() => onMode(m.key)}
-                className="size-4 cursor-pointer accent-danger"
-              />
-              {m.label}
-            </label>
-          ))}
-        </div>
-        <div className="relative">
-          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-mut" />
-          <input
+    <div className="flex flex-col gap-2">
+      <PillTabs tabs={TARGET_MODES} value={mode} onChange={onMode} />
+      {mode === 'group' ? (
+        groupInput
+      ) : (
+        <div className="relative w-[360px]">
+          {/* 2026-11-04 業主嫌太大：480px／6 行 → 360px／3 行；右下角仍可拖曳拉高 */}
+          <textarea
             value={text}
             onChange={(e) => onText(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && onEnter?.()}
-            placeholder="請輸入"
-            className={`${FIELD_BOX} w-[240px] pl-9`}
+            onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); onSubmit?.() } }}
+            placeholder={`請輸入${label}，可輸入一筆或貼上多筆，以換行分隔。`}
+            rows={3}
+            className={`${FIELD_BOX} block min-h-[76px] w-full resize-y pb-6 leading-relaxed`}
           />
+          {count > 0 && (
+            <span className="pointer-events-none absolute bottom-2 right-6 text-[12px] tabular-nums text-ink-mut">已輸入 {count} 筆</span>
+          )}
         </div>
-      </div>
+      )}
     </div>
   )
 }

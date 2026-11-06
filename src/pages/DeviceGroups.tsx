@@ -4,6 +4,7 @@ import { DCU_LIST_ROWS, METER_LIST_ROWS } from '@/data/dcuListPage'
 import { Th, SortHead, InfiniteFooter, useInfiniteRows, type SortDir } from '@/components/table/tableBits'
 import { SimpleModal, BTN_GHOST, BTN_PRIMARY } from '@/components/shared/SimpleModal'
 import { PageTitle } from '@/components/shared/PageTitle'
+import { useDeviceGroups, GROUP_KINDS, type GroupKind } from '@/store/useDeviceGroups'
 
 /**
  * 裝置管理 · 裝置群組（Figma 3977:31162 DCU／4304:31797 電表；2026-10-22 業主新版設計稿
@@ -16,14 +17,10 @@ import { PageTitle } from '@/components/shared/PageTitle'
  * 設計稿 DCU 表有兩欄都叫「DCU編號」，判斷是複製貼上的筆誤，這裡仍用 設備序號／DCU編號／用電地址。
  * 「建立群組」彈窗設計稿沒給，沿用名稱欄位並加上群組類型。資料全為 mock。
  */
-type Kind = 'dcu' | 'meter'
-const KINDS: Array<{ key: Kind; label: string }> = [
-  { key: 'dcu', label: 'DCU群組' },
-  { key: 'meter', label: '電表群組' },
-]
+type Kind = GroupKind
+const KINDS = GROUP_KINDS
 
 interface Device { id: string; code: string; address: string }
-interface Group { name: string; ids: string[]; creator: string }
 interface Sel { kind: Kind; name: string }
 
 const CATALOG: Record<Kind, Device[]> = {
@@ -34,21 +31,12 @@ const COLS: Record<Kind, [string, string, string]> = {
   dcu: ['設備序號', 'DCU編號', '用電地址'],
   meter: ['表號', '電號', '用電地址'],
 }
-const seedGroups = (k: Kind): Group[] => {
-  const ids = CATALOG[k].map((d) => d.id)
-  const all: Group[] = [
-    { name: '群組A', ids: ids.slice(0, 20), creator: 'system' },
-    { name: '群組B', ids: ids.slice(20, 32), creator: 'system' },
-    { name: '群組C', ids: ids.slice(32, 37), creator: 'system' },
-  ]
-  return k === 'dcu' ? all : all.slice(0, 2) // 設計稿：DCU群組 (3)、電表群組 (2)
-}
-
 const BOX =
   'rounded-md border border-border bg-surface px-3 py-2 text-[13px] text-ink placeholder:text-ink-mut focus:outline-none focus:border-brand'
 
 export function DeviceGroups() {
-  const [groups, setGroups] = useState<Record<Kind, Group[]>>({ dcu: seedGroups('dcu'), meter: seedGroups('meter') })
+  const groups = useDeviceGroups((s) => s.groups)
+  const patchGroups = useDeviceGroups((s) => s.patchGroups)
   const [sel, setSel] = useState<Sel | null>({ kind: 'dcu', name: '群組A' })
   const [open, setOpen] = useState<Record<Kind, boolean>>({ dcu: true, meter: true })
   const [q, setQ] = useState('')
@@ -73,7 +61,6 @@ export function DeviceGroups() {
   const allChecked = devices.length > 0 && devices.every((d) => checked.has(d.id))
   const someChecked = devices.some((d) => checked.has(d.id))
 
-  const patchGroups = (k: Kind, fn: (gs: Group[]) => Group[]) => setGroups((all) => ({ ...all, [k]: fn(all[k]) }))
   const pick = (k: Kind, name: string) => { setSel({ kind: k, name }); setChecked(new Set()) }
   const toggle = (id: string) => setChecked((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
   const toggleAll = () => setChecked(allChecked ? new Set() : new Set(devices.map((d) => d.id)))

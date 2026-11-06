@@ -175,11 +175,11 @@ const TZ_OFFSET = 8 * 3600_000
 export const MINUTES_SINCE_MIDNIGHT = 14 * 60
 /** 該時間戳是否落在當日（列表的「非當日標紅」用同一個判定） */
 export const isSameDay = (minsAgo: number) => minsAgo <= MINUTES_SINCE_MIDNIGHT
-/** 距今 n 分鐘 → 'YYYY-MM-DD HH:mm'（2026-10-01 業主意見：日期一律帶西元年） */
+/** 距今 n 分鐘 → 'YYYY/MM/DD HH:mm'（2026-10-01 業主意見：日期一律帶西元年；2026-11-04 全站統一用斜線） */
 export function stampOf(minsAgo: number): string {
   const d = new Date(DEMO_NOW + TZ_OFFSET - minsAgo * 60_000)
   const p = (n: number) => String(n).padStart(2, '0')
-  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`
+  return `${d.getUTCFullYear()}/${p(d.getUTCMonth() + 1)}/${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`
 }
 
 /**

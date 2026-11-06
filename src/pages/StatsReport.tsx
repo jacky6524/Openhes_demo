@@ -87,8 +87,8 @@ const INITIAL: Job[] = Array.from({ length: 40 }, (_, i) => {
     id: `68jnjknj${(890800 + n * 37).toString(16).padStart(6, '0')}d`.slice(0, 16),
     type, state, size, error,
     note: '--',
-    createdAt: '2025-01-01 10:30:00',
-    generatedAt: '2025-01-01 10:30:00',
+    createdAt: '2025/01/01 10:30:00',
+    generatedAt: '2025/01/01 10:30:00',
     params: {
       contract: `C${1000 + (n % 5)}`,
       area: `A${10 + (n % 4)}`,
@@ -216,12 +216,22 @@ export function StatsReport() {
           <button onClick={apply} className="rounded-lg bg-ink px-3 py-2 text-[13px] font-semibold text-white hover:opacity-90">
             搜尋
           </button>
-          <button
-            title="報表產生完成時的下載提醒（Demo 暫無實際通知）"
-            className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-inset px-3 py-2 text-[13px] font-semibold text-ink-sub hover:text-brand"
-          >
-            <Info size={14} />下載提醒
-          </button>
+          {/* 2026-11-06 設計稿：滑過顯示 Excel 列數上限說明 */}
+          <div className="group relative ml-auto">
+            <button className="inline-flex items-center gap-1.5 rounded-lg bg-inset px-3 py-2 text-[13px] font-semibold text-ink-sub group-hover:text-brand">
+              <Info size={14} />下載提醒
+            </button>
+            <div className="pointer-events-none invisible absolute right-0 top-full z-30 mt-2 w-[320px] rounded-lg border border-border bg-surface p-4 opacity-0 shadow-card transition-opacity group-hover:visible group-hover:opacity-100">
+              <div className="mb-2 flex items-center gap-2 text-[14px] font-bold text-ink">
+                <Info size={16} className="text-danger" />下載提醒
+              </div>
+              <p className="text-[13px] leading-relaxed text-ink-sub">
+                Excel 限制列數最多為 1,048,576 列，請注意報表包含的電表數量。
+                <br />
+                例如在讀表資料，選擇區間為 30 天，總共 350 顆表，Loadprofile 在沒有缺資料的情況下會有 1,008,000 筆資料。
+              </p>
+            </div>
+          </div>
         </div>
       </div>
 
