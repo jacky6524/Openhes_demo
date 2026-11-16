@@ -5,7 +5,7 @@ import {
   METER_LIST_ROWS, METER_CATEGORIES, MODULE_MODELS, METER_GROUPS,
   type MeterListRow,
 } from '@/data/dcuListPage'
-import { Th, StatusPill, EnabledState, SortHead, StampLines, type SortDir } from '@/components/table/tableBits'
+import { Th, StatusPill, EventBadge, ONLINE_LABELS, SortHead, StampLines, type SortDir } from '@/components/table/tableBits'
 import { STICKY_TH, useInfiniteRows } from '@/components/shared/Tabs'
 import { MeterDetailModal } from '@/components/dcu/MeterDetailModal'
 import { MeterSettingsModal } from '@/components/dcu/MeterSettingsModal'
@@ -30,8 +30,16 @@ import { status as statusTok } from '@/tokens'
  *   · 標題旁只寫「共 N 筆」，不再寫「已載入 M」
  *   · 模組型號與模組序號同字級（原本序號小一號）
  *   · 不用「修改模式」：齒輪（裝置設定）不再開修改模式頁籤
+ *
+ * 2026-11-11 依正式機 API 欄位文件（1111調整內容/OpenHES_DCU與電表清單_API欄位_UIUX.md）同步欄位：
+ *   · 欄位與順序：區處及營業區、連線狀態、電號、表號、模組型號、DCU編號、DCU序號、FAN MAC、模組序號、地址、IP、
+ *     最後LP時間、最後MN時間、操作（取代 10-16 的順序）。正式機清單**沒有「狀態」欄**，拿掉；「狀態」篩選仍保留
+ *   · 模組型號與模組序號拆成兩欄；新增 DCU編號、FAN MAC
+ *   · 可排序欄：區處及營業區、電號、表號、模組型號、FAN MAC、地址（同正式機）
+ *   · 連線狀態文字「在線／離線」；區處及營業區格式「02-北南 62」；缺值顯示「-」，時間缺值「--」
+ *   · 詳細資料圖示有事件數 badge（> 0 才顯示）
  */
-type SortKey = 'elecNo' | 'meterNo' | 'moduleModel' | 'dcuSerial' | 'address' | 'ip' | 'lastLp' | 'lastMn'
+type SortKey = 'office' | 'elecNo' | 'meterNo' | 'moduleModel' | 'fanMac' | 'address'
 
 const DCU_FIELDS = [
   { key: 'dcuSerial', label: 'DCU序號' },
@@ -110,7 +118,7 @@ export function MeterList() {
     reset()
   }
   const head = (k: SortKey, label: string) => (
-    <Th className={STICKY_TH}><SortHead label={label} active={sortKey === k} dir={sortDir} onClick={() => toggleSort(k)} /></Th>
+    <Th className={`${STICKY_TH} !whitespace-normal`}><SortHead label={label} active={sortKey === k} dir={sortDir} onClick={() => toggleSort(k)} /></Th>
   )
   /** 最後LP／MN 時間：非當日標紅（與其他電表清單同一條規則）；只到時分，日期用斜線（'YYYY/MM/DD HH:mm'，同正式版） */
   const stale = (sameDay: boolean) => (sameDay ? undefined : statusTok.danger.fg)
@@ -201,33 +209,38 @@ export function MeterList() {
         {/* 表格 —— 自己是捲動容器、表頭 sticky；欄寬隨視窗伸縮，不出現左右捲軸 */}
         <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-4" onScroll={onScroll}>
           <table className="w-full table-fixed text-[13px] border-collapse">
+            {/* 欄位與順序比照正式機（2026-11-11 API 欄位文件 §4.4）；正式機清單沒有獨立「狀態」欄 */}
             <colgroup>
-              <col style={{ width: '9%' }} />{/* 區處及營業區 */}
-              <col style={{ width: '5%' }} />{/* 狀態 */}
+              <col style={{ width: '6%' }} />{/* 區處及營業區 */}
               <col style={{ width: '6%' }} />{/* 連線狀態 */}
-              <col style={{ width: '10%' }} />{/* 電號 */}
-              <col style={{ width: '10%' }} />{/* 表號 */}
-              <col style={{ width: '17%' }} />{/* 地址 */}
-              <col style={{ width: '11%' }} />{/* 模組型號／序號 */}
-              <col style={{ width: '10%' }} />{/* DCU序號 */}
-              <col style={{ width: '9%' }} />{/* IP */}
+              <col style={{ width: '8%' }} />{/* 電號 */}
+              <col style={{ width: '8%' }} />{/* 表號 */}
+              <col style={{ width: '8%' }} />{/* 模組型號 */}
+              <col style={{ width: '9%' }} />{/* DCU編號 */}
+              <col style={{ width: '9%' }} />{/* DCU序號 */}
+              <col style={{ width: '9%' }} />{/* FAN MAC */}
+              <col style={{ width: '8%' }} />{/* 模組序號 */}
+              <col style={{ width: '11%' }} />{/* 地址 */}
+              <col style={{ width: '6%' }} />{/* IP */}
               <col style={{ width: '6%' }} />{/* 最後LP */}
               <col style={{ width: '6%' }} />{/* 最後MN */}
-              <col style={{ width: '64px' }} />{/* 動作 */}
+              <col style={{ width: '64px' }} />{/* 操作 */}
             </colgroup>
             <thead>
               <tr className="text-ink-sub">
-                <Th className={`${STICKY_TH} !whitespace-normal`}>區處及營業區</Th>
-                <Th className={STICKY_TH}>狀態</Th>
+                {head('office', '區處及營業區')}
                 <Th className={STICKY_TH}>連線狀態</Th>
                 {head('elecNo', '電號')}
                 {head('meterNo', '表號')}
+                {head('moduleModel', '模組型號')}
+                <Th className={STICKY_TH}>DCU編號</Th>
+                <Th className={STICKY_TH}>DCU序號</Th>
+                {head('fanMac', 'FAN MAC')}
+                <Th className={STICKY_TH}>模組序號</Th>
                 {head('address', '地址')}
-                {head('moduleModel', '模組型號 / 序號')}
-                {head('dcuSerial', 'DCU序號')}
-                {head('ip', 'IP')}
-                {head('lastLp', '最後LP時間')}
-                {head('lastMn', '最後MN時間')}
+                <Th className={STICKY_TH}>IP</Th>
+                <Th className={`${STICKY_TH} !whitespace-normal`}>最後LP時間</Th>
+                <Th className={`${STICKY_TH} !whitespace-normal`}>最後MN時間</Th>
                 <Th className={STICKY_TH} />
               </tr>
             </thead>
@@ -235,28 +248,24 @@ export function MeterList() {
               {rows.map((m) => (
                 <tr key={m.meterNo} className="border-b border-divider align-middle hover:bg-inset/40">
                   <td className="px-3 py-3 text-ink-sub">{m.office}</td>
-                  {/* 狀態欄比照 DCU清單（2026-11-04 業主意見）：停用＝灰底標籤（原為紅字），啟用＝灰字 */}
-                  <td className="px-3 py-3"><EnabledState enabled={m.enabled} /></td>
-                  <td className="px-3 py-3"><StatusPill status={m.online ? 'online' : 'offline'} /></td>
+                  <td className="px-3 py-3"><StatusPill status={m.online ? 'online' : 'offline'} labels={ONLINE_LABELS} /></td>
                   <td className="px-3 py-3 font-mono text-[14px] font-semibold text-ink break-all">{m.elecNo}</td>
                   <td className="px-3 py-3 font-mono text-[14px] font-semibold text-ink break-all">{m.meterNo}</td>
-                  <td className="px-3 py-3 text-[14px] leading-snug text-ink">{m.address}</td>
-                  <td className="px-3 py-3">
-                    <div className="flex flex-col leading-snug">
-                      <span className="text-[13px] text-ink">{m.moduleModel}</span>
-                      {/* 序號不用等寬字：等寬字字身較矮，同為 13px 看起來仍小一號（業主 2026-11-04） */}
-                      <span className="text-[13px] tabular-nums text-ink-sub break-all">{m.moduleSerial}</span>
-                    </div>
-                  </td>
-                  {/* 沒有掛 DCU 的電表明寫「無」，不留空白（避免被當成資料缺漏） */}
-                  <td className="px-3 py-3 font-mono text-ink-sub break-all">{m.dcuSerial || <span className="font-sans text-ink-mut">無</span>}</td>
-                  <td className="px-3 py-3 font-mono text-ink-sub whitespace-nowrap">{m.ip}</td>
-                  <td className="px-3 py-3 tabular-nums" style={{ color: stale(m.lastLpSameDay) }}><StampLines value={hm(m.lastLp)} /></td>
-                  <td className="px-3 py-3 tabular-nums" style={{ color: stale(m.lastMnSameDay) }}><StampLines value={hm(m.lastMn)} /></td>
+                  <td className="px-3 py-3 text-ink break-all">{m.moduleModel}</td>
+                  {/* 沒有掛 DCU 的電表：缺值一律「-」（正式機規則，不留白、不當成 0） */}
+                  <td className="px-3 py-3 font-mono text-ink-sub break-all">{m.dcuCode || <span className="font-sans text-ink-mut">-</span>}</td>
+                  <td className="px-3 py-3 font-mono text-ink-sub break-all">{m.dcuSerial || <span className="font-sans text-ink-mut">-</span>}</td>
+                  <td className="px-3 py-3 font-mono text-ink-sub break-all">{m.fanMac}</td>
+                  {/* 序號不用等寬字：等寬字字身較矮，同為 13px 看起來仍小一號（業主 2026-11-04） */}
+                  <td className="px-3 py-3 tabular-nums text-ink-sub break-all">{m.moduleSerial}</td>
+                  <td className="px-3 py-3 text-[14px] leading-snug text-ink"><span className="line-clamp-2" title={m.address}>{m.address}</span></td>
+                  <td className="px-3 py-3 font-mono text-ink-sub break-all">{m.ip}</td>
+                  <td className="px-3 py-3 tabular-nums" style={{ color: stale(m.lastLpSameDay) }}>{m.lastLp ? <StampLines value={hm(m.lastLp)} /> : '--'}</td>
+                  <td className="px-3 py-3 tabular-nums" style={{ color: stale(m.lastMnSameDay) }}>{m.lastMn ? <StampLines value={hm(m.lastMn)} /> : '--'}</td>
                   <td className="px-2 py-3">
                     <div className="flex items-center justify-end gap-2">
-                      <button onClick={() => setDetailMeter(m.meterNo)} title="詳細資料" className="text-ink-mut hover:text-brand">
-                        <ClipboardList size={15} />
+                      <button onClick={() => setDetailMeter(m.meterNo)} title={m.eventCount ? `詳細資料（${m.eventCount} 筆事件）` : '詳細資料'} className="text-ink-mut hover:text-brand">
+                        <EventBadge count={m.eventCount}><ClipboardList size={15} /></EventBadge>
                       </button>
                       {/* 2026-10-01 業主意見：齒輪功能暫不啟用 → 疊禁止符號，仍可點開瀏覽（彈窗上方說明、操作停用） */}
                       <button onClick={() => setSettingsRow(m)} title="裝置設定（暫不啟用，僅供瀏覽）" className="relative inline-grid place-items-center text-ink-mut hover:text-brand">
@@ -269,7 +278,7 @@ export function MeterList() {
               ))}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={12} className="px-3 py-10 text-center text-ink-mut">
+                  <td colSpan={14} className="px-3 py-10 text-center text-ink-mut">
                     {applied ? '查無符合條件的電表' : <NotSearched />}
                   </td>
                 </tr>
@@ -311,8 +320,9 @@ function toMeterRow(m: MeterListRow): DcuMeterRow {
   }
 }
 
+/** 輸入框／下拉一律固定 36px 高（h-9）：只靠 py 撐高時，原生 select 與 input 算出來的高度不同，會差 1～2px（2026-11-11） */
 const BOX =
-  'rounded-md border border-border bg-surface px-3 py-2 text-[13px] text-ink placeholder:text-ink-mut focus:outline-none focus:border-brand'
+  'h-9 rounded-md border border-border bg-surface px-3 text-[13px] text-ink placeholder:text-ink-mut focus:outline-none focus:border-brand'
 
 function FilterField({ label, children }: { label: string; children: React.ReactNode }) {
   return (

@@ -21,14 +21,14 @@ export function MeterTransferPanel({ model }: { model: string }) {
   const [menu, setMenu] = useState(false)
   const [target, setTarget] = useState('')
 
-  // 轉移目標＝其他 DCU（不能轉給自己）
-  const targets = useMemo(
-    () => DCU_LIST_ROWS.map((d) => d.serial).filter((s) => s !== model),
-    [model],
-  )
-  useEffect(() => { setTarget(targets[0] ?? '') }, [targets])
+  // 轉移目標：2026-11-11 依業主意見由下拉改成直接輸入 DCU 編號（DCU 數量多，下拉找不到）。
+  // 輸入後即時檢查：不能轉給自己、要是系統裡存在的 DCU。
+  const known = useMemo(() => new Set(DCU_LIST_ROWS.map((d) => d.serial.toUpperCase())), [])
+  const t = target.trim().toUpperCase()
+  const targetErr = !t ? '' : t === model.toUpperCase() ? '不能轉移至原 DCU' : !known.has(t) ? '查無此 DCU 編號' : ''
+  const targetOk = !!t && !targetErr
   // 換一台 DCU 就重來，避免把上一台的選取帶過去
-  useEffect(() => { setPicked(new Set()) }, [model])
+  useEffect(() => { setPicked(new Set()); setTarget('') }, [model])
 
   const rows = useMemo(
     () => all.filter((m) => m.meterNo.toLowerCase().includes(q.trim().toLowerCase())),
@@ -124,15 +124,15 @@ export function MeterTransferPanel({ model }: { model: string }) {
 
         <label className="flex flex-col gap-1">
           <span className="text-[12px] text-ink-mut">轉移至DCU</span>
-          <select
+          <input
             value={target}
             onChange={(e) => setTarget(e.target.value)}
-            className="rounded-lg border border-border bg-surface px-3 py-2 text-[13px] text-ink focus:outline-none focus:border-brand"
-          >
-            {targets.slice(0, 30).map((t) => (
-              <option key={t} value={t}>{t}</option>
-            ))}
-          </select>
+            placeholder="請輸入 DCU 編號"
+            className={`rounded-lg border bg-surface px-3 py-2 text-[13px] font-mono text-ink placeholder:font-sans placeholder:text-ink-mut focus:outline-none ${
+              targetErr ? 'border-brand' : 'border-border focus:border-brand'
+            }`}
+          />
+          {targetErr && <span className="text-[12px] text-brand">{targetErr}</span>}
         </label>
 
         <div className="flex min-h-0 flex-col gap-1">
@@ -162,8 +162,8 @@ export function MeterTransferPanel({ model }: { model: string }) {
             清除
           </button>
           <button
-            disabled={!picked.size}
-            title={picked.size ? `將 ${picked.size} 顆電表轉移至 ${target}` : '請先選取要轉移的電表'}
+            disabled={!picked.size || !targetOk}
+            title={!picked.size ? '請先選取要轉移的電表' : !targetOk ? '請輸入有效的目標 DCU 編號' : `將 ${picked.size} 顆電表轉移至 ${t}`}
             className="flex-1 rounded-lg bg-brand px-4 py-1.5 text-[13px] font-medium text-white hover:bg-brand-deep disabled:opacity-40"
           >
             確定轉移

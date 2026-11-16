@@ -26,7 +26,8 @@ function hash(s: string) {
 const pad = (n: number, w: number) => String(n).padStart(w, '0')
 
 export const CHANNELS = ['D', 'E', 'F'] as const
-export const COMM_TYPES = ['4G-R', 'LTE', 'ADSL'] as const
+/** 通訊方式：正式機 UI 選項 LTE／ADSL／4G-R／SATCOM（2026-11-11 對齊 API 欄位文件） */
+export const COMM_TYPES = ['LTE', 'ADSL', '4G-R', 'SATCOM'] as const
 export const DCU_MODELS = ['SGDC-A16TF', 'SGDC-A14TF', 'SGDC-W61TF'] as const
 /** 模式選項（2026-10-16 業主指定）與各自的說明；順序依業主給的排列 */
 export const DCU_MODES = ['關閉RF', 'MN優先80%', '正常模式', '讀取1天LP'] as const
@@ -38,14 +39,28 @@ export const DCU_MODE_DESC: Record<(typeof DCU_MODES)[number], string> = {
 }
 export const DCU_GROUPS = ['北一組', '北二組', '中一組', '南一組'] as const
 
+/**
+ * 區處及營業區＝tpcAreaCode＋areaName＋tpcBuCode，正式機顯示「07-台中 86」（2026-11-11 API 欄位文件）。
+ * 三個欄位都缺時顯示「-」。
+ */
+export const AREAS = [['01', '北市'], ['02', '北南'], ['03', '北西']] as const
+export function fmtArea(code?: string, name?: string, bu?: string) {
+  if (!code && !name && !bu) return '-'
+  return `${[code, name].filter(Boolean).join('-')}${bu ? ` ${bu}` : ''}`
+}
+
 export interface DcuListRow {
-  serial: string // DCU序號
-  code: string // DCU編號
+  serial: string // DCU序號（dcuId）
+  code: string // DCU編號（districtId）
   online: boolean // 連線狀態
   enabled: boolean // 狀態（啟用／停用）
   meterCount: number // 電表數
   address: string
-  office: string // 區處及營業區
+  areaCode: string // tpcAreaCode
+  areaName: string // areaName
+  buCode: string // tpcBuCode（營業區，2 碼）
+  office: string // 區處及營業區（上面三個組好的顯示字串）
+  eventCount: number // 事件數：> 0 才在詳細資料圖示上顯示 badge
   whitelistOnline: number // 白名單電表連線數
   channel: (typeof CHANNELS)[number] // 頻道組別
   comm: (typeof COMM_TYPES)[number] // 連線類型（4G-R／LTE／ADSL）
@@ -66,14 +81,24 @@ export const DCU_LIST_ROWS: DcuListRow[] = Array.from({ length: 100 }, (_, i) =>
   const online = r() > 0.18
   const enabled = r() > 0.06
   const meterCount = Math.floor(r() * 3)
+  const code = `B${5000 + Math.floor(r() * 999)}DC${30 + Math.floor(r() * 69)}-${1 + Math.floor(r() * 8)}`
+  const address = `新北市新店區${STREETS[Math.floor(r() * STREETS.length)]}${100 + Math.floor(r() * 200)}巷${1 + Math.floor(r() * 20)}號`
+  // 亂數取用順序維持原樣（區處、營業區），其他欄位才不會跟著變
+  const [areaCode, areaName] = AREAS[Math.floor(r() * 3)]
+  const buCode = String(60 + Math.floor(r() * 5))
+  const evt = hash(serial + ':evt')
   return {
     serial,
-    code: `B${5000 + Math.floor(r() * 999)}DC${30 + Math.floor(r() * 69)}-${1 + Math.floor(r() * 8)}`,
+    code,
     online,
     enabled,
     meterCount,
-    address: `新北市新店區${STREETS[Math.floor(r() * STREETS.length)]}${100 + Math.floor(r() * 200)}巷${1 + Math.floor(r() * 20)}號`,
-    office: `0${1 + Math.floor(r() * 3)} 北南-${60 + Math.floor(r() * 5)}`,
+    address,
+    areaCode,
+    areaName,
+    buCode,
+    office: fmtArea(areaCode, areaName, buCode),
+    eventCount: evt % 4 === 0 ? 1 + (evt % 9) : 0,
     // 白名單電表連線數不會超過電表數
     whitelistOnline: online ? Math.min(meterCount, Math.floor(r() * (meterCount + 1))) : 0,
     channel: CHANNELS[Math.floor(r() * CHANNELS.length)],
@@ -152,7 +177,11 @@ export const METER_GROUPS = ['北一組', '北二組', '中一組', '南一組']
 
 /** 裝置管理 · 電表清單 (Figma 3677:26714) 的列 */
 export interface MeterListRow {
-  office: string // 區處及營業區
+  areaCode: string // tpcAreaCode
+  areaName: string
+  buCode: string // tpcBuCode
+  office: string // 區處及營業區（組好的顯示字串，同 DCU清單）
+  eventCount: number // 事件數：> 0 才在詳細資料圖示上顯示 badge
   online: boolean // 連線狀態
   elecNo: string // 電號
   meterNo: string // 表號
@@ -188,8 +217,13 @@ export const METER_LIST_ROWS: MeterListRow[] = Array.from({ length: 100 }, (_, i
    * 用獨立的雜湊判定，不動上面亂數序列，其他欄位維持原值。
    */
   const noDcu = hash(meterNo + ':nodcu') % 10 === 0
+  const evt = hash(meterNo + ':evt')
   return {
+    areaCode: dcu.areaCode,
+    areaName: dcu.areaName,
+    buCode: dcu.buCode,
     office: dcu.office,
+    eventCount: evt % 5 === 0 ? 1 + (evt % 6) : 0,
     online,
     // 電號一律 11 碼、不帶 -（2026-09-29 業主意見）
     elecNo: `${pad(10 + Math.floor(r() * 89), 2)}${50000000 + Math.floor(r() * 999999)}${Math.floor(r() * 9)}`,

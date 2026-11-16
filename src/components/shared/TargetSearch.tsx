@@ -44,18 +44,20 @@ export function TargetSearchMulti({
       {mode === 'group' ? (
         groupInput
       ) : (
-        <div className="relative w-[360px]">
-          {/* 2026-11-04 業主嫌太大：480px／6 行 → 360px／3 行；右下角仍可拖曳拉高 */}
+        <div className="flex items-end gap-2">
+          {/* 2026-11-04 業主嫌太大：480px／6 行 → 360px／3 行。
+              2026-11-11 業主：預設再縮一半 → 96px → 48px（約兩行）；右下角仍可拖曳拉高，貼多筆時自己拉開。
+              高度變矮後「已輸入 N 筆」放進框裡會壓到文字，移到框外右下 */}
           <textarea
             value={text}
             onChange={(e) => onText(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); onSubmit?.() } }}
             placeholder={`請輸入${label}，可輸入一筆或貼上多筆，以換行分隔。`}
-            rows={3}
-            className={`${FIELD_BOX} block min-h-[76px] w-full resize-y pb-6 leading-relaxed`}
+            rows={2}
+            className={`${FIELD_BOX} block h-12 min-h-9 w-[360px] resize-y py-1.5 leading-[1.4]`}
           />
           {count > 0 && (
-            <span className="pointer-events-none absolute bottom-2 right-6 text-[12px] tabular-nums text-ink-mut">已輸入 {count} 筆</span>
+            <span className="whitespace-nowrap pb-1 text-[12px] tabular-nums text-ink-mut">已輸入 {count} 筆</span>
           )}
         </div>
       )}

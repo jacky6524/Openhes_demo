@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState, type ReactNode } from 'react'
 import { Search } from 'lucide-react'
-import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { Area, AreaChart, CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { METER_LIST_ROWS, DCU_LIST_ROWS, type MeterListRow, type DcuListRow } from '@/data/dcuListPage'
 import { Th, SortHead, InfiniteFooter, useInfiniteRows, type SortDir } from '@/components/table/tableBits'
 import { status as statusTok } from '@/tokens'
@@ -24,7 +24,11 @@ import { PillTabs } from '@/components/shared/PillTabs'
  *   DCU序號      卡片＋網管資料：訊號強度趨勢折線＋表格並排（撐滿剩餘高度）
  * 2026-11-06 業主設計稿：搜尋模式改膠囊頁籤（同即時讀表）；「事件資料」「網管資料」標題原本浮在頁面底色上，
  *   改放進表格卡片內、表格上方。
- * mock 的「現在」＝2025/01/01 15:00（與電表清單最後 LP 時間同一天），LP 時間軸與卡片上的最後LP時間對得上。
+ * 2026-11-11 業主意見＋設計稿（1111調整內容/1110修改）：
+ *   表號／FAN IMEI/MAC → 版面相同：卡片＋左下「連線紀錄」表＋右下「讀表 × 連線概況」LP/MN/ALT 三線（比照系統總覽）
+ *   DCU序號             → 卡片＋左下「連線紀錄」表＋右下「訊號強度趨勢」
+ *   圖表與連線紀錄一律為「近 24 小時」（每小時一筆）。頁名「即裝即查」業主仍在確認是否改名，暫不動。
+ * mock 的「現在」＝2025/01/01 15:00；近 24 小時＝2024/12/31 16:00 ～ 2025/01/01 15:00。
  */
 const MODES = [
   { key: 'meterNo', label: '表號' },
@@ -33,11 +37,16 @@ const MODES = [
 ] as const
 type Mode = (typeof MODES)[number]['key']
 
-/** 各搜尋模式的預設搜尋內容（取清單第一筆，確保按下搜尋一定查得到；2026-10-22 業主要求先填預設值） */
+/**
+ * 各搜尋模式的預設搜尋內容（2026-10-22 業主要求先填預設值，按下搜尋一定查得到）。
+ * 2026-11-11：原本取清單第一筆，剛好是斷線、最後回報在 24 小時之外的表 → 圖表、連線紀錄全空，
+ * 業主以為沒做好。改取「在線、今天有回報」的第一顆表／在線的第一台 DCU。
+ */
+const SAMPLE_METER = METER_LIST_ROWS.find((m) => m.online && m.lastLpSameDay) ?? METER_LIST_ROWS[0]
 const SAMPLE: Record<Mode, string> = {
-  meterNo: METER_LIST_ROWS[0].meterNo,
-  fanMac: METER_LIST_ROWS[0].fanMac,
-  dcuSerial: DCU_LIST_ROWS[0].serial,
+  meterNo: SAMPLE_METER.meterNo,
+  fanMac: SAMPLE_METER.fanMac,
+  dcuSerial: (DCU_LIST_ROWS.find((d) => d.online) ?? DCU_LIST_ROWS[0]).serial,
 }
 
 type Result = { kind: 'meter'; m: MeterListRow; mode: Mode } | { kind: 'dcu'; d: DcuListRow } | 'none' | null
@@ -63,15 +72,14 @@ export function InstantQuery() {
     <div className="flex h-full min-h-[760px] min-w-[1280px] flex-col gap-3 p-4">
       <PageTitle title="即裝即查" />
       <div className="flex flex-col gap-1">
-        <span className="px-2 text-[12px] text-ink-sub">搜尋模式</span>
         <PillTabs tabs={MODES} value={mode} onChange={(k) => { setMode(k); setText(SAMPLE[k]); setResult(null) }} />
         <div className="mt-1 flex flex-wrap items-center gap-2">
           <input
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && search()}
-            placeholder="請輸入"
-            className={`${BOX} w-[240px]`}
+            placeholder={`請輸入${MODES.find((x) => x.key === mode)!.label}`}
+            className={`${BOX} w-[480px]`}
           />
           <button onClick={clear} className="rounded-lg border border-border bg-surface px-3 py-2 text-[13px] font-semibold text-ink-sub hover:border-brand hover:text-brand">
             清除條件
@@ -84,13 +92,13 @@ export function InstantQuery() {
 
       {result === null && <Card><Empty text="請選擇搜尋模式並輸入關鍵字後按「搜尋」" /></Card>}
       {result === 'none' && <Card><Empty text="查無符合條件的裝置" /></Card>}
-      {result && result !== 'none' && result.kind === 'meter' && <MeterResult m={result.m} mode={result.mode} />}
+      {result && result !== 'none' && result.kind === 'meter' && <MeterResult m={result.m} />}
       {result && result !== 'none' && result.kind === 'dcu' && <DcuResult d={result.d} />}
     </div>
   )
 }
 
-/* ───────────────────────── 三種結果版面 ───────────────────────── */
+/* ───────────────────────── 兩種結果版面 ───────────────────────── */
 
 function lpStamp(s: string) {
   const [d, t] = s.split(' ')
@@ -110,44 +118,27 @@ function ConnTag({ online }: { online: boolean }) {
   )
 }
 
-function MeterResult({ m, mode }: { m: MeterListRow; mode: Mode }) {
+/** 表號、FAN IMEI/MAC 兩種模式查到的都是電表，版面相同（2026-11-11 設計稿） */
+function MeterResult({ m }: { m: MeterListRow }) {
   /** 一部分電表 OpenHES 沒有首次註冊記錄（紅字提示，設計稿即為此狀態） */
   const noFirst = seedOf(m.meterNo) % 2 === 0
   const stamp = lpStamp(m.lastLp)
-  const reg = (
-    <Section title="電表註冊">
-      <Cell label="時間" value={stamp} />
-      <Cell label="表號" value={m.meterNo} />
-      <Cell label="電號" value={m.elecNo} />
-      <Cell label="FAN" value={m.fanMac} />
-      <Cell label="模組韌體型號" value={m.moduleModel} />
-      <Cell label="模組韌體版本" value="--" />
-      <Cell label="狀態" value="已註冊" />
-      <Cell label="首次註冊時間" value={noFirst ? missing('OpenHES目前沒有記錄首次註冊時間') : stamp} />
-      <Cell label="來源 HES" value={sourceHes(m.meterNo)} />
-      <Cell label="IP address" value={noFirst ? missing('OpenHES目前沒有記錄首次註冊IP') : m.ip} />
-    </Section>
-  )
-
-  if (mode === 'fanMac') {
-    return (
-      <>
-        <Card>{reg}</Card>
-        <SortTable
-          title="事件資料"
-          fill
-          columns={['事件時間', '事件碼', '說明', 'HES接收時間', 'OpenHES接收時間']}
-          sortable={[0, 3, 4]}
-          rows={eventRows(m.meterNo)}
-        />
-      </>
-    )
-  }
-
+  const hours = useMemo(() => meterHours(m), [m])
   return (
     <>
       <Card>
-        {reg}
+        <Section title="電表註冊">
+          <Cell label="時間" value={stamp} />
+          <Cell label="表號" value={m.meterNo} />
+          <Cell label="電號" value={m.elecNo} />
+          <Cell label="FAN" value={m.fanMac} />
+          <Cell label="模組韌體型號" value={m.moduleModel} />
+          <Cell label="模組韌體版本" value="--" />
+          <Cell label="狀態" value="已註冊" />
+          <Cell label="首次註冊時間" value={noFirst ? missing('OpenHES目前沒有記錄首次註冊時間') : stamp} />
+          <Cell label="來源 HES" value={sourceHes(m.meterNo)} />
+          <Cell label="IP address" value={noFirst ? missing('OpenHES目前沒有記錄首次註冊IP') : m.ip} />
+        </Section>
         <Section title="最後連線回報" stamp={stamp}>
           <Cell label="Cell ID" value={String(8000000 + (seedOf(m.meterNo) % 99999))} />
           <Cell label="IP" value={m.ip} />
@@ -156,10 +147,9 @@ function MeterResult({ m, mode }: { m: MeterListRow; mode: Mode }) {
         </Section>
         <Section title="最後LP時間" stamp={stamp} />
       </Card>
-      {/* 結果下方：兩張圖撐滿剩餘高度 */}
-      <div className="grid min-h-[300px] flex-1 grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)] gap-3">
-        <LpStrip m={m} />
-        <SignalCard title="今日訊號強度" hint="每小時取樣・dBm，越接近 0 越好" points={meterSignal(m)} empty="今日沒有訊號回報" />
+      <div className="grid min-h-[320px] flex-1 grid-cols-2 gap-3">
+        <SortTable title="連線紀錄" hint="近 24 小時" fill columns={['連線日期', '訊號強度']} sortable={[0]} rows={connRows(hours)} empty={`近 24 小時沒有連線紀錄（最後回報 ${stamp}）`} />
+        <ReadRateCard hours={hours} lastStamp={stamp} />
       </div>
     </>
   )
@@ -168,6 +158,7 @@ function MeterResult({ m, mode }: { m: MeterListRow; mode: Mode }) {
 function DcuResult({ d }: { d: DcuListRow }) {
   const noFirst = seedOf(d.serial) % 2 === 0
   const stamp = '2026/08/26 15:00'
+  const hours = useMemo(() => dcuHours(d), [d])
   return (
     <>
       <Card>
@@ -188,139 +179,229 @@ function DcuResult({ d }: { d: DcuListRow }) {
           <Cell label="連線狀態" value={<ConnTag online={d.online} />} />
         </Section>
       </Card>
-      <div className="grid min-h-[300px] flex-1 grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)] gap-3">
-        <SignalCard title="訊號強度趨勢" hint="每日一筆・dBm，越接近 0 越好" points={dcuSignal(d.serial)} empty="沒有網管資料" />
-        <SortTable title="網管資料" fill columns={['連線日期', '訊號強度']} sortable={[0]} rows={signalRows(d.serial)} />
+      <div className="grid min-h-[320px] flex-1 grid-cols-2 gap-3">
+        <SortTable title="連線紀錄" hint="近 24 小時" fill columns={['連線日期', '訊號強度']} sortable={[0]} rows={connRows(hours)} empty="近 24 小時沒有連線紀錄" />
+        <SignalCard title="訊號強度趨勢" hint="近 24 小時・每小時一筆・dBm，越接近 0 越好" points={hours} empty="近 24 小時沒有連線紀錄" />
       </div>
     </>
   )
 }
 
-/* ───────────────────────── mock 表格資料 ───────────────────────── */
+/* ───────────────────────── 近 24 小時 mock 資料（2026-11-11） ───────────────────────── */
 
-const EVENTS: Array<[string, string]> = [
-  ['-56', 'FAN跟電表失聯'],
-  ['-12', '電表重新上線'],
-  ['3', '電表時間校正'],
-]
-function eventRows(seed: string): string[][] {
-  const s = seedOf(seed)
-  return Array.from({ length: 45 }, (_, i) => {
-    const [code, desc] = EVENTS[(s + i) % EVENTS.length]
-    const day = String(1 + (i % 28)).padStart(2, '0')
-    return [`2025/01/${day} 10:30:00`, code, desc, `2025/01/${day} 10:30:00`, `2025/01/${day} 10:30:00`]
-  })
-}
-function signalRows(seed: string): string[][] {
-  const s = seedOf(seed)
-  return Array.from({ length: 45 }, (_, i) => [
-    `2025/01/${String(1 + (i % 28)).padStart(2, '0')} 10:30:00`,
-    String(-(50 + ((s + i * 7) % 30))),
-  ])
-}
-
-/* ───────────────────────── 圖表（2026-11-04） ───────────────────────── */
-
-const TODAY = '2025/01/01' // mock 的「今天」（與電表清單 lastLp 同格式）
-const NOW_SLOT = 15 * 4 // mock 的「現在」＝15:00；之前的格子才算過去
-
-type LpSlot = 'ok' | 'miss' | 'future'
 const pad2 = (n: number) => String(n).padStart(2, '0')
-const slotTime = (i: number) => `${pad2(Math.floor(i / 4))}:${pad2((i % 4) * 15)}`
+/** mock 的「現在」＝2025/01/01 15:00；近 24 小時＝前一天 16:00 起，每小時一格，共 24 格 */
+const NOW_HOUR = 15
+const HOURS = Array.from({ length: 24 }, (_, i) => {
+  const h = (NOW_HOUR + 1 + i) % 24
+  const date = i < 24 - NOW_HOUR - 1 ? '2024/12/31' : '2025/01/01'
+  return { label: `${pad2(h)}:00`, full: `${date} ${pad2(h)}:00`, key: `${date} ${pad2(h)}` }
+})
 
-/** 今日 96 個 15 分鐘格：最後 LP 之前大多收到（偶有缺漏），之後到現在都是缺漏，現在以後是未到時間 */
-function lpSlots(m: MeterListRow): LpSlot[] {
-  const [date, time] = m.lastLp.split(' ')
-  const [hh, mm] = time.split(':').map(Number)
-  const cutoff = date === TODAY ? hh * 4 + Math.floor(mm / 15) : -1
+type RateKey = 'lp' | 'midnight' | 'alt'
+/** [實收筆數, 應收筆數]；null＝該小時本來就不該有這類資料（例如 MN 只在 00 點那一小時） */
+type Count = [number, number] | null
+
+interface HourPoint {
+  label: string
+  full: string
+  /** 該小時的訊號強度 dBm；null＝該小時沒有連線 */
+  v: number | null
+  /** 每小時讀表率（%）＝實收 ÷ 應收；null＝該小時不應收 */
+  lp: number | null
+  midnight: number | null
+  alt: number | null
+  cnt: Record<RateKey, Count>
+}
+
+/** 每小時應收筆數：LP 每 15 分一筆＝4；ALT 每小時 1 筆；MN 每日 1 筆，落在 00 點那一小時 */
+const EXPECT: Record<RateKey, (hour: number) => number> = {
+  lp: () => 4,
+  alt: () => 1,
+  midnight: (h) => (h === 0 ? 1 : 0),
+}
+const pct = (c: Count) => (c ? Math.round((c[0] / c[1]) * 1000) / 10 : null)
+
+/**
+ * 電表近 24 小時（2026-11-11）：先產生**每小時實收筆數**，讀表率一律由筆數算出，數字可以逐格核對。
+ *   連線中的小時：LP 偶爾漏 1～2 筆、ALT 偶爾漏 1 筆（依表號 hash 固定，重整不變）
+ *   最後 LP（＝最後回報）之後沒有連線 → 全部 0 筆
+ */
+function meterHours(m: MeterListRow): HourPoint[] {
+  const last = m.lastLp.slice(0, 13) // 'YYYY/MM/DD HH'
   const s = seedOf(m.meterNo)
-  return Array.from({ length: 96 }, (_, i) => {
-    if (i >= NOW_SLOT) return 'future'
-    if (i > cutoff) return 'miss'
-    return (s + i * 7) % 37 === 0 ? 'miss' : 'ok'
+  const base = -(68 + (s % 18))
+  return HOURS.map((h, i) => {
+    const hour = Number(h.label.slice(0, 2))
+    const on = m.online || h.key <= last
+    const got: Record<RateKey, number> = {
+      lp: !on ? 0 : (s + i * 7) % 23 === 0 ? 2 : (s + i * 7) % 7 === 0 ? 3 : 4,
+      alt: !on ? 0 : (s + i * 5) % 9 === 0 ? 0 : 1,
+      midnight: on ? 1 : 0,
+    }
+    const cnt = Object.fromEntries(
+      (['lp', 'midnight', 'alt'] as RateKey[]).map((k) => {
+        const exp = EXPECT[k](hour)
+        return [k, exp ? [Math.min(got[k], exp), exp] : null]
+      }),
+    ) as Record<RateKey, Count>
+    return {
+      label: h.label,
+      full: h.full,
+      v: on ? base + (((s >> (i % 8)) + i * 5) % 11) - 5 : null,
+      lp: pct(cnt.lp),
+      midnight: pct(cnt.midnight),
+      alt: pct(cnt.alt),
+      cnt,
+    }
   })
 }
 
-const LP_TONE: Record<LpSlot, { bg: string; label: string }> = {
-  ok: { bg: statusTok.normal.fg, label: '已收到' },
-  miss: { bg: statusTok.danger.fg, label: '缺漏' },
-  future: { bg: statusTok.inactive.bg, label: '未到時間' },
+/** DCU 近 24 小時：每小時一筆訊號強度；斷線的 DCU 最後 6 小時沒有回報 */
+function dcuHours(d: DcuListRow): HourPoint[] {
+  const s = seedOf(d.serial)
+  return HOURS.map((h, i) => ({
+    label: h.label,
+    full: h.full,
+    v: d.online || i < 18 ? -(78 + ((s + i * 7) % 26)) : null,
+    lp: null,
+    midnight: null,
+    alt: null,
+    cnt: { lp: null, midnight: null, alt: null },
+  }))
 }
 
-function LpStrip({ m }: { m: MeterListRow }) {
-  const slots = useMemo(() => lpSlots(m), [m])
-  const [hover, setHover] = useState<number | null>(null)
-  const ok = slots.filter((x) => x === 'ok').length
-  const miss = slots.filter((x) => x === 'miss').length
+/** 連線紀錄表：有連線的小時各一筆，新到舊 */
+function connRows(hours: HourPoint[]): string[][] {
+  return hours.filter((h) => h.v !== null).reverse().map((h) => [`${h.full}:00`, String(h.v)])
+}
+
+/* ───────────────────────── 圖表 ───────────────────────── */
+
+/** 與系統總覽 SharedMetricCard 同色票 */
+const RATE_SERIES = [
+  { key: 'lp', label: 'LP 讀表率', short: 'LP', color: '#5E5CE6', note: '每 15 分 1 筆，每小時應收 4 筆' },
+  { key: 'midnight', label: 'MN 午夜讀表率', short: 'MN', color: '#64D2FF', note: '每日 1 筆，00 點那一小時應收' },
+  { key: 'alt', label: 'ALT 讀表率', short: 'ALT', color: '#FF858D', note: '每小時應收 1 筆' },
+] as const
+
+const fmtPct = (n: number | null) => (n === null ? '--' : `${n % 1 ? n.toFixed(1) : n}%`)
+
+function ReadRateCard({ hours, lastStamp }: { hours: HourPoint[]; lastStamp: string }) {
+  /** 近 24 小時完全沒有連線（斷線很久的表）：讀表率全是 0，線會貼在底部看不出來 → 疊一層說明 */
+  const silent = hours.every((h) => h.v === null)
+  // 24 小時合計：實收 / 應收
+  const total = useMemo(
+    () =>
+      RATE_SERIES.map((r) => {
+        let got = 0
+        let exp = 0
+        for (const h of hours) {
+          const c = h.cnt[r.key]
+          if (c) { got += c[0]; exp += c[1] }
+        }
+        return { ...r, got, exp, rate: exp ? Math.round((got / exp) * 1000) / 10 : null }
+      }),
+    [hours],
+  )
   return (
     <div className="flex min-h-0 flex-col rounded-card border border-border bg-surface p-4 shadow-card">
       <div className="flex items-baseline justify-between gap-3">
-        <SectionTitle title="今日 LP 回報" />
-        <span className="text-[12px] tabular-nums text-ink-sub">
-          {hover !== null
-            ? <>{TODAY.replace(/-/g, '/')} {slotTime(hover)}　<b className="text-ink">{LP_TONE[slots[hover]].label}</b></>
-            : <>已收到 <b className="text-ink">{ok}</b> / 應收 {NOW_SLOT} 筆（至 15:00）・缺漏 <b className="text-ink">{miss}</b></>}
-        </span>
+        <SectionTitle title="讀表 × 連線概況" />
+        <span className="text-[12px] text-ink-mut">近 24 小時・每小時讀表率＝實收 ÷ 應收</span>
       </div>
-      {/* 24 欄（小時）× 4 列（每 15 分）；格子隨卡片高度伸縮 */}
-      <div className="mt-3 flex min-h-0 flex-1 gap-2" onMouseLeave={() => setHover(null)}>
-        <div className="grid shrink-0 grid-rows-4 gap-[2px] py-0 text-[11px] tabular-nums text-ink-mut">
-          {['00', '15', '30', '45'].map((q) => <span key={q} className="flex items-center">:{q}</span>)}
-        </div>
-        <div className="grid min-h-0 flex-1 grid-flow-col grid-cols-[repeat(24,minmax(0,1fr))] grid-rows-4 gap-[2px]">
-          {slots.map((st, i) => (
-            <span
-              key={i}
-              onMouseEnter={() => setHover(i)}
-              className={`rounded-[3px] ${hover === i ? 'ring-2 ring-ink ring-offset-1' : ''}`}
-              style={{ background: LP_TONE[st].bg, boxShadow: st === 'future' ? 'inset 0 0 0 1px #E5E7EB' : undefined }}
-            />
-          ))}
-        </div>
-      </div>
-      <div className="mt-1 flex gap-2">
-        <span className="w-[22px] shrink-0" />
-        <div className="grid flex-1 grid-cols-[repeat(24,minmax(0,1fr))] text-[11px] tabular-nums text-ink-mut">
-          {Array.from({ length: 24 }, (_, h) => <span key={h}>{h % 3 === 0 ? pad2(h) : ''}</span>)}
-        </div>
-      </div>
-      <div className="mt-2 flex items-center gap-4 text-[12px] text-ink-sub">
-        {(Object.keys(LP_TONE) as LpSlot[]).map((k) => (
-          <span key={k} className="flex items-center gap-1.5">
-            <span className="size-2.5 rounded-sm" style={{ background: LP_TONE[k].bg, boxShadow: k === 'future' ? 'inset 0 0 0 1px #D1D5DB' : undefined }} />
-            {LP_TONE[k].label}
-          </span>
+      {/* 24 小時合計（兼圖例）：hover 看應收規則 */}
+      <div className="mt-3 grid grid-cols-3 gap-2">
+        {total.map((t) => (
+          <div key={t.key} className="rounded-lg bg-inset px-3 py-2" title={t.note}>
+            <div className="flex items-center gap-1.5 text-[12px] text-ink-sub">
+              <span className="h-[7px] w-2.5 rounded-[2px]" style={{ background: t.color }} />
+              {t.label}
+            </div>
+            <div className="mt-0.5 flex items-baseline gap-2 tabular-nums">
+              <b className="text-[20px] font-bold text-ink">{fmtPct(t.rate)}</b>
+              <span className="text-[12px] text-ink-sub">{t.got} / {t.exp} 筆</span>
+            </div>
+          </div>
         ))}
+      </div>
+      <div className="relative mt-2 min-h-[180px] flex-1">
+        {silent && (
+          <div className="absolute inset-0 z-10 grid place-items-center">
+            <div className="rounded-lg border border-border bg-surface/95 px-4 py-3 text-center text-[13px] shadow-card">
+              <div className="font-semibold" style={{ color: statusTok.danger.fg }}>近 24 小時沒有任何回報</div>
+              <div className="mt-0.5 text-ink-sub">最後回報 {lastStamp}，此期間讀表率皆為 0%</div>
+            </div>
+          </div>
+        )}
+        <ResponsiveContainer width="100%" height="100%">
+          <AreaChart data={hours} margin={{ top: 8, right: 12, bottom: 0, left: 0 }}>
+            <defs>
+              {RATE_SERIES.map((r) => (
+                <linearGradient key={r.key} id={`iq-grad-${r.key}`} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={r.color} stopOpacity={0.16} />
+                  <stop offset="100%" stopColor={r.color} stopOpacity={0.02} />
+                </linearGradient>
+              ))}
+            </defs>
+            <CartesianGrid vertical={false} stroke="#EEF0F3" />
+            <XAxis dataKey="label" tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: '#6A7282' }} interval={1} />
+            <YAxis domain={[0, 100]} ticks={[0, 25, 50, 75, 100]} tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: '#6A7282' }} width={34} unit="%" />
+            <Tooltip cursor={{ stroke: '#C9CDD4', strokeDasharray: '3 3' }} content={<RateTip />} />
+            {RATE_SERIES.map((r) => (
+              <Area
+                key={r.key}
+                type="linear"
+                dataKey={r.key}
+                name={r.label}
+                stroke={r.color}
+                strokeWidth={1.8}
+                fill={`url(#iq-grad-${r.key})`}
+                connectNulls={false}
+                // 每小時都打點，數值一格一格看得到；MN 一天只有一點，不打點會看不見
+                dot={{ r: r.key === 'midnight' ? 4 : 2.5, fill: '#fff', stroke: r.color, strokeWidth: 1.5 }}
+                activeDot={{ r: 4, stroke: '#fff', strokeWidth: 2 }}
+                isAnimationActive={false}
+              />
+            ))}
+          </AreaChart>
+        </ResponsiveContainer>
       </div>
     </div>
   )
 }
 
-interface SigPoint { label: string; full: string; v: number | null }
-
-/** 電表今日每小時訊號（dBm）：斷線的表在最後 LP 之後就沒有回報 */
-function meterSignal(m: MeterListRow): SigPoint[] {
-  const [date, time] = m.lastLp.split(' ')
-  const cutoffH = date === TODAY ? Number(time.slice(0, 2)) : -1
-  const s = seedOf(m.meterNo)
-  const base = -(68 + (s % 18))
-  return Array.from({ length: 15 }, (_, h) => ({
-    label: `${pad2(h)}:00`,
-    full: `${TODAY.replace(/-/g, '/')} ${pad2(h)}:00`,
-    v: m.online || h <= cutoffH ? base + (((s >> (h % 8)) + h * 5) % 11) - 5 : null,
-  }))
-}
-
-/** DCU 網管資料：與右側表格同一份資料，每天一筆、依日期排序 */
-function dcuSignal(serial: string): SigPoint[] {
-  const byDay = new Map<string, number>()
-  for (const [t, v] of signalRows(serial)) byDay.set(t.slice(0, 10), Number(v))
-  return [...byDay].sort(([a], [b]) => a.localeCompare(b)).map(([d, v]) => ({ label: d.slice(5).replace('-', '/'), full: d.replace(/-/g, '/'), v }))
+function RateTip({ active, payload }: { active?: boolean; payload?: Array<{ payload: HourPoint }> }) {
+  const p = active ? payload?.[0]?.payload : null
+  if (!p) return null
+  return (
+    <div className="min-w-[220px] rounded-lg border border-border bg-surface px-3 py-2 text-[12px] shadow-card">
+      <div className="mb-1 tabular-nums text-ink-sub">{p.full}</div>
+      {p.v === null && <div className="mb-1" style={{ color: statusTok.danger.fg }}>該小時無連線</div>}
+      {RATE_SERIES.map((r) => {
+        const c = p.cnt[r.key]
+        return (
+          <div key={r.key} className="flex items-center gap-2 leading-[1.8]">
+            <span className="size-2 rounded-full" style={{ background: r.color }} />
+            <span className="text-ink-sub">{r.short}</span>
+            {c ? (
+              <span className="ml-auto tabular-nums text-ink">
+                <span className="text-ink-sub">{c[0]} / {c[1]} 筆＝</span>
+                <b className="font-medium">{fmtPct(p[r.key])}</b>
+              </span>
+            ) : (
+              <span className="ml-auto text-ink-mut">本小時不需讀</span>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
 }
 
 const WEAK_DBM = -110
 
-function SignalCard({ title, hint, points, empty }: { title: string; hint: string; points: SigPoint[]; empty: string }) {
+function SignalCard({ title, hint, points, empty }: { title: string; hint: string; points: HourPoint[]; empty: string }) {
   const has = points.some((p) => p.v !== null)
   const line = statusTok.info.fg
   return (
@@ -334,7 +415,7 @@ function SignalCard({ title, hint, points, empty }: { title: string; hint: strin
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={points} margin={{ top: 8, right: 40, bottom: 0, left: 0 }}>
               <CartesianGrid vertical={false} stroke="#EEF0F3" />
-              <XAxis dataKey="label" tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: '#6A7282' }} minTickGap={16} />
+              <XAxis dataKey="label" tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: '#6A7282' }} interval={1} />
               <YAxis domain={[-120, -40]} ticks={[-120, -100, -80, -60, -40]} tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: '#6A7282' }} width={40} />
               <ReferenceLine y={WEAK_DBM} stroke={statusTok.danger.fg} strokeDasharray="3 3" label={{ value: '偏弱', position: 'right', fill: statusTok.danger.fg, fontSize: 11 }} />
               <Tooltip cursor={{ stroke: '#C9CDD4', strokeDasharray: '3 3' }} content={<SigTip />} />
@@ -349,14 +430,14 @@ function SignalCard({ title, hint, points, empty }: { title: string; hint: strin
   )
 }
 
-function SigTip({ active, payload }: { active?: boolean; payload?: Array<{ payload: SigPoint }> }) {
+function SigTip({ active, payload }: { active?: boolean; payload?: Array<{ payload: HourPoint }> }) {
   const p = active ? payload?.[0]?.payload : null
   if (!p) return null
   return (
     <div className="rounded-lg border border-border bg-surface px-3 py-2 text-[12px] shadow-card">
       <div className="tabular-nums text-ink-sub">{p.full}</div>
       <div className="mt-0.5 font-semibold tabular-nums text-ink">
-        {p.v === null ? '無回報' : `${p.v} dBm`}{p.v !== null && p.v < WEAK_DBM && <span className="ml-1.5 font-normal" style={{ color: statusTok.danger.fg }}>偏弱</span>}
+        {p.v === null ? '無連線' : `${p.v} dBm`}{p.v !== null && p.v < WEAK_DBM && <span className="ml-1.5 font-normal" style={{ color: statusTok.danger.fg }}>偏弱</span>}
       </div>
     </div>
   )
@@ -368,7 +449,7 @@ function SigTip({ active, payload }: { active?: boolean; payload?: Array<{ paylo
  * 獨立表格卡片：表頭釘住、表格自己捲、無限捲動（業主 2026-08-27 表格標準、不要頁碼）。
  * 只有 sortable 列出的欄位有排序箭頭；排序以字串比對（時間格式為 ISO，字串序即時間序）。
  */
-function SortTable({ title, columns, sortable, rows, fill = false }: { title?: string; columns: string[]; sortable: number[]; rows: string[][]; fill?: boolean }) {
+function SortTable({ title, hint, columns, sortable, rows, fill = false, empty = '沒有資料' }: { title?: string; hint?: string; columns: string[]; sortable: number[]; rows: string[][]; fill?: boolean; empty?: string }) {
   const [sortCol, setSortCol] = useState<number | null>(null)
   const [sortDir, setSortDir] = useState<SortDir>('asc')
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -387,7 +468,12 @@ function SortTable({ title, columns, sortable, rows, fill = false }: { title?: s
   return (
     <div className={`overflow-hidden rounded-card border border-border bg-surface shadow-card ${fill ? 'flex min-h-[300px] flex-1 flex-col' : ''}`}>
       {/* 標題在卡片內、表格上方（2026-11-06 設計稿） */}
-      {title && <div className="shrink-0 px-4 pb-3 pt-4"><SectionTitle title={title} /></div>}
+      {title && (
+        <div className="flex shrink-0 items-baseline justify-between gap-3 px-4 pb-3 pt-4">
+          <SectionTitle title={title} />
+          {hint && <span className="text-[12px] text-ink-mut">{hint}</span>}
+        </div>
+      )}
       {/* fill：撐滿父層剩餘高度（父層要是 flex column）；否則維持固定上限 */}
       <div ref={scrollRef} className={fill ? 'min-h-[200px] flex-1 overflow-auto' : 'max-h-[calc(100vh-460px)] min-h-[240px] overflow-auto'}>
         <table className="w-full text-[13px] border-collapse">
@@ -408,6 +494,9 @@ function SortTable({ title, columns, sortable, rows, fill = false }: { title?: s
                 {r.map((v, j) => <td key={j} className="px-3 py-2.5 text-ink tabular-nums">{v}</td>)}
               </tr>
             ))}
+            {sorted.length === 0 && (
+              <tr><td colSpan={columns.length} className="px-3 py-10 text-center text-[13px] text-ink-mut">{empty}</td></tr>
+            )}
           </tbody>
         </table>
         <div ref={sentinelRef} />

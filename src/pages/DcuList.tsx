@@ -5,7 +5,7 @@ import {
   DCU_LIST_ROWS, CHANNELS, COMM_TYPES, DCU_MODELS, DCU_GROUPS,
   type DcuListRow,
 } from '@/data/dcuListPage'
-import { Th, StatusPill, EnabledState, SortHead, type SortDir } from '@/components/table/tableBits'
+import { Th, StatusPill, EnabledState, EventBadge, ONLINE_LABELS, SortHead, type SortDir } from '@/components/table/tableBits'
 import { STICKY_TH, useInfiniteRows } from '@/components/shared/Tabs'
 import { TopologyModal } from '@/components/dcu/TopologyModal'
 import { DcuDetailModal } from '@/components/dcu/DcuDetailModal'
@@ -23,8 +23,15 @@ import type { DcuRow } from '@/data/dcuList'
  *     關閉RF／MN優先80%／正常模式／讀取1天LP
  *   · 欄位順序：區處及營業區、狀態、連線狀態、DCU序號、DCU編號、地址、IP、頻道組別、連線類型、模式、白名單鎖定(N/Y)
  *   · 重要資料（序號、地址）放大；整張表不出現左右捲軸；版面撐滿視窗、下方不留白，改無限捲動
+ *
+ * 2026-11-11 依正式機 API 欄位文件（1111調整內容/OpenHES_DCU與電表清單_API欄位_UIUX.md）同步欄位：
+ *   · 欄位與順序：DCU序號、DCU編號、連線狀態、狀態、電表數、地址、區處及營業區、白名單電表連線數、
+ *     頻道組別、通訊方式、IP、模式、白名單、操作（取代 10-16 的順序；「白名單鎖定」欄由「白名單 已加入／未加入」取代）
+ *   · 連線狀態文字「在線／離線」；區處及營業區格式「02-北南 62」；連線類型改名「通訊方式」，多 SATCOM
+ *   · 白名單電表連線數只在白名單已加入時顯示，否則「-」；詳細資料圖示有事件數 badge（> 0 才顯示）
+ *   · 狀態欄置中（業主 2026-11-11：停用置中、啟用不含底框）
  */
-type SortKey = 'serial' | 'code' | 'address' | 'ip' | 'channel' | 'comm' | 'mode' | 'whitelistLock'
+type SortKey = 'serial' | 'enabled' | 'meterCount' | 'address' | 'office' | 'whitelistOnline' | 'channel' | 'comm' | 'ip' | 'mode'
 
 /** 欄位搜尋的可選欄位（設計稿的「搜尋」下拉） */
 const SEARCH_FIELDS = [
@@ -83,7 +90,8 @@ export function DcuList() {
         const bv = b[sortKey]
         const d = typeof av === 'number' && typeof bv === 'number'
           ? av - bv
-          : String(av).localeCompare(String(bv))
+          : typeof av === 'boolean' ? Number(av) - Number(bv)
+          : String(av).localeCompare(String(bv), 'zh-Hant', { numeric: true })
         return sortDir === 'asc' ? d : -d
       })
     }
@@ -102,8 +110,9 @@ export function DcuList() {
     else { setSortKey(k); setSortDir('asc') }
     resetScroll()
   }
-  const head = (k: SortKey, label: string) => (
-    <Th className={STICKY_TH}><SortHead label={label} active={sortKey === k} dir={sortDir} onClick={() => toggleSort(k)} /></Th>
+  /** center：表頭置中（狀態欄） */
+  const head = (k: SortKey, label: string, center = false) => (
+    <Th className={`${STICKY_TH} !whitespace-normal ${center ? '!text-center' : ''}`}><SortHead label={label} active={sortKey === k} dir={sortDir} onClick={() => toggleSort(k)} /></Th>
   )
 
   return (
@@ -171,7 +180,7 @@ export function DcuList() {
               options={[{ value: 'enabled', label: '啟用' }, { value: 'disabled', label: '停用' }]}
             />
           </FilterField>
-          <FilterField label="連線類型">
+          <FilterField label="通訊方式">
             <Select value={draft.comm} onChange={(v) => set('comm', v)} options={COMM_TYPES} />
           </FilterField>
           <FilterField label="頻道組別">
@@ -185,58 +194,66 @@ export function DcuList() {
         {/* 表格 —— 自己是捲動容器、表頭 sticky；欄寬隨視窗伸縮，不出現左右捲軸 */}
         <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-4" onScroll={onScroll}>
           <table className="w-full table-fixed text-[13px] border-collapse">
+            {/* 欄位與順序比照正式機（2026-11-11 API 欄位文件 §3.4） */}
             <colgroup>
-              <col style={{ width: '9%' }} />{/* 區處及營業區 */}
-              <col style={{ width: '5%' }} />{/* 狀態 */}
+              <col style={{ width: '10%' }} />{/* DCU序號 */}
+              <col style={{ width: '10%' }} />{/* DCU編號 */}
               <col style={{ width: '6%' }} />{/* 連線狀態 */}
-              <col style={{ width: '11%' }} />{/* DCU序號 */}
-              <col style={{ width: '11%' }} />{/* DCU編號 */}
-              <col style={{ width: '20%' }} />{/* 地址 */}
+              <col style={{ width: '5%' }} />{/* 狀態 */}
+              <col style={{ width: '5%' }} />{/* 電表數 */}
+              <col style={{ width: '15%' }} />{/* 地址 */}
+              <col style={{ width: '8%' }} />{/* 區處及營業區 */}
+              <col style={{ width: '7%' }} />{/* 白名單電表連線數 */}
+              <col style={{ width: '5%' }} />{/* 頻道組別 */}
+              <col style={{ width: '6%' }} />{/* 通訊方式 */}
               <col style={{ width: '9%' }} />{/* IP */}
-              <col style={{ width: '6%' }} />{/* 頻道組別 */}
-              <col style={{ width: '7%' }} />{/* 連線類型 */}
-              <col style={{ width: '9%' }} />{/* 模式 */}
-              <col style={{ width: '7%' }} />{/* 白名單鎖定 */}
-              <col style={{ width: SHOW_TOPOLOGY ? '96px' : '64px' }} />{/* 動作 */}
+              <col style={{ width: '8%' }} />{/* 模式 */}
+              <col style={{ width: '6%' }} />{/* 白名單 */}
+              <col style={{ width: SHOW_TOPOLOGY ? '96px' : '64px' }} />{/* 操作 */}
             </colgroup>
             <thead>
               <tr className="text-ink-sub">
-                <Th className={`${STICKY_TH} !whitespace-normal`}>區處及營業區</Th>
-                <Th className={STICKY_TH}>狀態</Th>
-                <Th className={STICKY_TH}>連線狀態</Th>
                 {head('serial', 'DCU序號')}
-                {head('code', 'DCU編號')}
+                <Th className={STICKY_TH}>DCU編號</Th>
+                <Th className={STICKY_TH}>連線狀態</Th>
+                {head('enabled', '狀態', true)}
+                {head('meterCount', '電表數')}
                 {head('address', '地址')}
-                {head('ip', 'IP')}
+                {head('office', '區處及營業區')}
+                {head('whitelistOnline', '白名單電表連線數')}
                 {head('channel', '頻道組別')}
-                {head('comm', '連線類型')}
+                {head('comm', '通訊方式')}
+                {head('ip', 'IP')}
                 {head('mode', '模式')}
-                {head('whitelistLock', '白名單鎖定')}
+                <Th className={STICKY_TH}>白名單</Th>
                 <Th className={STICKY_TH} />
               </tr>
             </thead>
             <tbody>
               {rows.map((d) => (
                 <tr key={d.serial} className="border-b border-divider align-middle hover:bg-inset/40">
-                  <td className="px-3 py-3 text-ink-sub">{d.office}</td>
-                  {/* 停用＝灰底標籤（業主 2026-10-22，原為紅字；2026-11-04 拿掉標籤前的圓點）；啟用維持純文字 */}
-                  <td className="px-3 py-3">
+                  <td className="px-3 py-3 font-mono text-[14px] font-semibold text-ink break-all">{d.serial}</td>
+                  <td className="px-3 py-3 font-mono text-[14px] font-semibold text-ink break-all">{d.code || <span className="font-sans font-normal text-ink-mut">-</span>}</td>
+                  <td className="px-3 py-3"><StatusPill status={d.online ? 'online' : 'offline'} labels={ONLINE_LABELS} /></td>
+                  {/* 停用＝灰底標籤、啟用＝純文字（無底框）；整欄置中（業主 2026-11-11） */}
+                  <td className="px-3 py-3 text-center">
                     <EnabledState enabled={d.enabled} />
                   </td>
-                  <td className="px-3 py-3"><StatusPill status={d.online ? 'online' : 'offline'} /></td>
-                  <td className="px-3 py-3 font-mono text-[14px] font-semibold text-ink break-all">{d.serial}</td>
-                  <td className="px-3 py-3 font-mono text-[14px] font-semibold text-ink break-all">{d.code}</td>
-                  <td className="px-3 py-3 text-[14px] leading-snug text-ink">{d.address}</td>
-                  <td className="px-3 py-3 font-mono text-ink-sub whitespace-nowrap">{d.ip}</td>
+                  <td className="px-3 py-3 text-right tabular-nums text-ink">{d.meterCount}</td>
+                  <td className="px-3 py-3 text-[14px] leading-snug text-ink"><span className="line-clamp-2" title={d.address}>{d.address}</span></td>
+                  <td className="px-3 py-3 text-ink-sub">{d.office}</td>
+                  {/* 正式機：whiteList=true 時才是「白名單電表連線數」；未加入白名單顯示「-」 */}
+                  <td className="px-3 py-3 text-right tabular-nums text-ink">{d.whitelisted ? d.whitelistOnline : <span className="text-ink-mut">-</span>}</td>
                   <td className="px-3 py-3 text-ink-sub">{d.channel}</td>
                   <td className="px-3 py-3 text-ink-sub">{d.comm}</td>
+                  <td className="px-3 py-3 font-mono text-ink-sub whitespace-nowrap">{d.ip}</td>
                   {/* 非預設模式用主色標出，一眼看得出哪些 DCU 被調整過 */}
                   <td className={`px-3 py-3 ${d.mode === '正常模式' ? 'text-ink-sub' : 'font-medium text-brand'}`}>{d.mode}</td>
-                  <td className="px-3 py-3 text-ink-sub">{d.whitelistLock ? 'Y' : 'N'}</td>
+                  <td className="px-3 py-3 text-ink-sub">{d.whitelisted ? '已加入' : '未加入'}</td>
                   <td className="px-2 py-3">
                     <div className="flex items-center justify-end gap-2">
-                      <button onClick={() => setDetailSerial(d.serial)} title="詳細資料" className="text-ink-mut hover:text-brand">
-                        <ClipboardList size={15} />
+                      <button onClick={() => setDetailSerial(d.serial)} title={d.eventCount ? `詳細資料（${d.eventCount} 筆事件）` : '詳細資料'} className="text-ink-mut hover:text-brand">
+                        <EventBadge count={d.eventCount}><ClipboardList size={15} /></EventBadge>
                       </button>
                       {/* 2026-10-01 業主意見：齒輪一律標「暫不啟用」（重啟DCU／Ping 也只是示意）；2026-10-16 起「修改模式」也在齒輪內 */}
                       <button onClick={() => setSettingsRow(d)} title="裝置設定（含修改模式；暫不啟用，僅供瀏覽）" className="relative inline-grid place-items-center text-ink-mut hover:text-brand">
@@ -255,7 +272,7 @@ export function DcuList() {
               ))}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={12} className="px-3 py-10 text-center text-ink-mut">
+                  <td colSpan={14} className="px-3 py-10 text-center text-ink-mut">
                     {applied ? '查無符合條件的 DCU' : <NotSearched />}
                   </td>
                 </tr>
@@ -293,8 +310,9 @@ function toDcuRow(d: DcuListRow): DcuRow {
   }
 }
 
+/** 輸入框／下拉一律固定 36px 高（h-9），與電表清單相同（2026-11-11） */
 const BOX =
-  'rounded-md border border-border bg-surface px-3 py-2 text-[13px] text-ink placeholder:text-ink-mut focus:outline-none focus:border-brand'
+  'h-9 rounded-md border border-border bg-surface px-3 text-[13px] text-ink placeholder:text-ink-mut focus:outline-none focus:border-brand'
 
 function FilterField({ label, children }: { label: string; children: React.ReactNode }) {
   return (

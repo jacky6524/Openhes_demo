@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { RotateCcw, SlidersHorizontal, CircleCheck } from 'lucide-react'
 import { Th } from '@/components/table/tableBits'
 import { health } from '@/tokens'
@@ -141,7 +141,7 @@ export function ParamSettings() {
                         <PctInput value={draft[m.key].warning} invalid={!!err} onChange={(v) => set(m.key, 'warning', v)} />
                         {err && <div className="mt-1 text-[12px]" style={{ color: health.alert.stroke }}>{err}</div>}
                       </td>
-                      <td className="px-3 py-3">{err ? <span className="text-[12px] text-ink-mut">—</span> : <LightBar t={t} />}</td>
+                      <td className="px-3 py-3">{err ? <span className="text-[12px] text-ink-mut">—</span> : <LightBar t={t} onChange={(side, v) => set(m.key, side, String(v))} />}</td>
                       <td className="px-3 py-3 text-ink-sub">{m.usedBy}</td>
                       <td className="px-3 py-3 text-[12px] leading-snug text-ink-sub">
                         <LogLine side="良好" log={log[m.key].good} />
@@ -190,16 +190,102 @@ function PctInput({ value, invalid, onChange }: { value: string; invalid: boolea
   )
 }
 
-/** 50%～100% 的色帶：紅（< 注意）／黃（注意～良好）／綠（≥ 良好），下方標出兩個門檻 */
-function LightBar({ t }: { t: ApiThreshold }) {
+type Side = 'good' | 'warning'
+const STEP = 0.1
+const MIN_GAP = STEP // 良好必須大於注意：拖曳時至少差一格
+const round1 = (v: number) => Math.round(v * 10) / 10
+
+/**
+ * 50%～100% 的色帶：紅（< 注意）／黃（注意～良好）／綠（≥ 良好），下方標出兩個門檻。
+ * 2026-11-11：色帶上方兩個箭頭可拖動調整門檻（同步回左邊輸入框）。
+ *   · 拖箭頭，或在色帶任一處按下 → 最近的那個箭頭跳過去並跟著拖
+ *   · 每格 0.1%；兩個箭頭不能交叉（良好至少比注意大 0.1）
+ *   · 箭頭可用鍵盤：Tab 選到後 ←／→ 調 0.1，Shift＋←／→ 調 1
+ */
+function LightBar({ t, onChange }: { t: ApiThreshold; onChange?: (side: Side, v: number) => void }) {
   const span = LIMIT.max - LIMIT.min
   const at = (v: number) => ((v - LIMIT.min) / span) * 100
+  const trackRef = useRef<HTMLDivElement>(null)
+  const [dragging, setDragging] = useState<Side | null>(null)
+
+  /** 依另一端限制範圍，回傳合法值 */
+  const clampSide = (side: Side, v: number) =>
+    side === 'warning'
+      ? round1(Math.min(Math.max(v, LIMIT.min), t.good - MIN_GAP))
+      : round1(Math.max(Math.min(v, LIMIT.max), t.warning + MIN_GAP))
+  const valueAt = (clientX: number) => {
+    const box = trackRef.current!.getBoundingClientRect()
+    return LIMIT.min + ((clientX - box.left) / box.width) * span
+  }
+  const move = (side: Side, v: number) => {
+    const nv = clampSide(side, v)
+    if (nv !== t[side]) onChange?.(side, nv)
+  }
+
+  const onDown = (e: React.PointerEvent<HTMLDivElement>, forced?: Side) => {
+    if (!onChange || e.button !== 0) return
+    e.preventDefault()
+    const v = valueAt(e.clientX)
+    // 按在色帶上：比良好還右邊→良好、比注意還左邊→注意，夾在中間取較近的
+    const side: Side = forced ?? (v >= t.good ? 'good' : v <= t.warning ? 'warning' : v - t.warning < t.good - v ? 'warning' : 'good')
+    trackRef.current!.setPointerCapture(e.pointerId)
+    setDragging(side)
+    // 直接抓箭頭時不跳值（避免按下的瞬間因為沒對準箭頭中心就變動）；按在色帶上才跳過去
+    if (!forced) move(side, v)
+  }
+  const onMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (dragging) move(dragging, valueAt(e.clientX))
+  }
+  const onKey = (side: Side) => (e: React.KeyboardEvent) => {
+    const d = e.key === 'ArrowLeft' || e.key === 'ArrowDown' ? -1 : e.key === 'ArrowRight' || e.key === 'ArrowUp' ? 1 : 0
+    if (!d) return
+    e.preventDefault()
+    move(side, t[side] + d * (e.shiftKey ? 1 : STEP))
+  }
+
+  const handle = (side: Side) => {
+    const active = dragging === side
+    const color = side === 'good' ? health.good.stroke : health.warning.stroke
+    return (
+      <button
+        type="button"
+        role="slider"
+        aria-label={side === 'good' ? '良好門檻' : '注意門檻'}
+        aria-valuemin={LIMIT.min}
+        aria-valuemax={LIMIT.max}
+        aria-valuenow={t[side]}
+        title={`${side === 'good' ? '良好' : '注意'}門檻 ${t[side]}%（拖曳調整；←→ 微調 0.1，Shift 加速）`}
+        onKeyDown={onKey(side)}
+        onPointerDown={(e) => { e.stopPropagation(); onDown(e as unknown as React.PointerEvent<HTMLDivElement>, side) }}
+        className="absolute top-0 -translate-x-1/2 cursor-ew-resize rounded-sm px-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+        // 良好在右、注意在左：兩個很靠近時，良好的箭頭疊在上面
+        style={{ left: `${at(t[side])}%`, zIndex: side === 'good' ? 2 : 1 }}
+      >
+        <svg width="12" height="9" viewBox="0 0 12 9" className={active ? 'scale-125' : ''} style={{ transition: 'transform .1s' }}>
+          <path d="M1 1h10L6 8z" fill={color} stroke="#fff" strokeWidth="1" strokeLinejoin="round" />
+        </svg>
+      </button>
+    )
+  }
+
   return (
     <div className="pt-1">
+      {/* 拖曳範圍＝箭頭列＋色帶 */}
+      <div
+        ref={trackRef}
+        className={`relative pt-[11px] ${onChange ? 'cursor-pointer touch-none select-none' : ''}`}
+        onPointerDown={(e) => onDown(e)}
+        onPointerMove={onMove}
+        onPointerUp={() => setDragging(null)}
+        onPointerCancel={() => setDragging(null)}
+      >
+        {onChange && handle('warning')}
+        {onChange && handle('good')}
       <div className="flex h-2.5 overflow-hidden rounded-full">
         <span style={{ width: `${at(t.warning)}%`, background: health.alert.fill }} />
         <span style={{ width: `${at(t.good) - at(t.warning)}%`, background: health.warning.fill }} />
         <span className="flex-1" style={{ background: health.good.fill }} />
+      </div>
       </div>
       {/* 兩個門檻常常很近（95／97）：注意的數字靠在刻度左邊、良好靠在右邊；離兩端太近就不畫 50／100 */}
       <div className="relative mt-1 h-4 text-[11px] tabular-nums text-ink-mut">

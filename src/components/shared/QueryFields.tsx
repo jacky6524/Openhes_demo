@@ -25,7 +25,7 @@ export const groupKey = (k: GroupKind, name: string) => `${k}:${name}`
 export function GroupSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const groups = useDeviceGroups((s) => s.groups)
   return (
-    <select value={value} onChange={(e) => onChange(e.target.value)} aria-label="群組" className={`${FIELD_BOX} w-[240px]`}>
+    <select value={value} onChange={(e) => onChange(e.target.value)} aria-label="群組" className={`${FIELD_BOX} h-9 w-[240px]`}>
       <option value="">請選擇群組</option>
       {GROUP_KINDS.map(({ key, label }) =>
         groups[key].length > 0 && (
@@ -85,7 +85,7 @@ export function RangeInput({ from, to, maxMonths, onChange }: { from: string; to
     onChange(f, t)
   }
   return (
-    <div className={`${FIELD_BOX} flex items-center gap-2 py-[5px]`}>
+    <div className={`${FIELD_BOX} flex h-9 items-center gap-2 py-0`}>
       <DateTime15 value={from} onChange={setFrom} />
       <ArrowRight size={14} className="text-ink-mut" />
       <DateTime15 value={to} onChange={setTo} />
@@ -93,14 +93,14 @@ export function RangeInput({ from, to, maxMonths, onChange }: { from: string; to
   )
 }
 
-/** 清除條件／搜尋兩顆按鈕（兩頁同一組樣式） */
+/** 清除條件／搜尋兩顆按鈕（兩頁同一組樣式）。與下拉、日期區間同為 36px 高（h-9，2026-11-11） */
 export function QueryButtons({ onClear, onSearch }: { onClear: () => void; onSearch: () => void }) {
   return (
     <>
-      <button onClick={onClear} className="rounded-lg border border-border bg-surface px-3 py-2 text-[13px] font-semibold text-ink-sub hover:border-brand hover:text-brand">
+      <button onClick={onClear} className="h-9 rounded-lg border border-border bg-surface px-3 text-[13px] font-semibold text-ink-sub hover:border-brand hover:text-brand">
         清除條件
       </button>
-      <button onClick={onSearch} className="rounded-lg bg-ink px-3 py-2 text-[13px] font-semibold text-white hover:opacity-90">
+      <button onClick={onSearch} className="h-9 rounded-lg bg-ink px-3 text-[13px] font-semibold text-white hover:opacity-90">
         搜尋
       </button>
     </>
@@ -143,7 +143,7 @@ export function MultiSelect<T extends string>({
         aria-haspopup="listbox"
         aria-expanded={open}
         title={labels.join('、')}
-        className={`${FIELD_BOX} flex w-full items-center justify-between gap-2 text-left`}
+        className={`${FIELD_BOX} flex h-9 w-full items-center justify-between gap-2 py-0 text-left`}
       >
         <span className={`truncate ${labels.length ? '' : 'text-ink-mut'}`}>{text}</span>
         <ChevronDown size={14} className={`shrink-0 text-ink-mut transition-transform ${open ? 'rotate-180' : ''}`} />

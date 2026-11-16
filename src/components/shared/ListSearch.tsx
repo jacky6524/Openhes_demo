@@ -11,13 +11,14 @@ export function SearchButtons({ onSearch, onReset }: { onSearch: () => void; onR
     <div className="flex items-center gap-2">
       <button
         onClick={onSearch}
-        className="inline-flex items-center gap-1.5 rounded-md bg-brand px-4 py-2 text-[13px] font-medium text-white hover:bg-brand-deep"
+        className="inline-flex h-9 items-center gap-1.5 rounded-md bg-brand px-4 text-[13px] font-medium text-white hover:bg-brand-deep"
       >
         <Search size={14} />搜尋
       </button>
+      {/* 兩顆按鈕與輸入框／下拉同為 36px 高（h-9），並排時上下緣對齊 */}
       <button
         onClick={onReset}
-        className="rounded-md border border-border bg-surface px-4 py-2 text-[13px] text-ink-sub hover:border-brand hover:text-brand"
+        className="h-9 rounded-md border border-border bg-surface px-4 text-[13px] text-ink-sub hover:border-brand hover:text-brand"
       >
         重設
       </button>

@@ -39,11 +39,12 @@ const TABS: readonly TabItem<TabKey>[] = [
 /**
  * 電表資料的子頁籤 —— 2026-09-03 依業主意見移除「白名單內停用電表」，
  * 停用電表併回白名單頁籤、靠排序帶到後面即可，不另設篩選。
- * 「名單外電表」＝白名單應屬別台、實際連進本台，因此加註「他台連入」。
+ * 「名單外電表」＝白名單應屬別台、實際連進本台。原加註「他台連入」，
+ * 2026-11-11 依業主意見移除該字眼。
  */
 const METER_GROUPS = [
   { key: 'white', label: '白名單電表' },
-  { key: 'outside', label: '名單外電表（他台連入）' },
+  { key: 'outside', label: '名單外電表' },
 ] as const
 type GroupKey = (typeof METER_GROUPS)[number]['key']
 

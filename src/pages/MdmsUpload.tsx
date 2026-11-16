@@ -4,6 +4,7 @@ import { PageTitle } from '@/components/shared/PageTitle'
 import { TargetSearchMulti, parseTargets, type TargetMode } from '@/components/shared/TargetSearch'
 import { Field, GroupSelect, MultiSelect, QueryButtons, RangeInput } from '@/components/shared/QueryFields'
 import { status as statusTok } from '@/tokens'
+import { ReuploadBar } from '@/components/mdms/ReuploadBar'
 import {
   MDMS_TYPES, DEFAULT_MDMS_KEYS, MDMS_ALERT, buckets, fmtStamp, parseLocal,
   type MdmsBucket, type MdmsKey, type MdmsType,
@@ -21,6 +22,8 @@ import {
  * 同日業主確認：資料時間**單次上限 1 個月**（同即時讀表）；資料類型要**能同時比較多種** → 複選下拉。
  *   選多種：上排每種類型一張最新時段卡，趨勢圖用膠囊頁籤切換類型
  *   只選一種：上排顯示該類型最新三個時段
+ * 2026-11-11 業主意見：卡片與趨勢分析之間加一行「重新上拋」（搜尋並執行上拋，components/mdms/ReuploadBar.tsx）；
+ *   上方搜尋列＝看上拋狀況（dashboard），這一行＝重新上拋，兩者分開。
  */
 const GREEN = statusTok.normal.fg
 const RED = statusTok.danger.fg
@@ -90,7 +93,7 @@ export function MdmsUpload() {
       {series.length === 0 ? (
         <div className="rounded-card border border-border bg-surface py-16 text-center text-[13px] text-ink-mut shadow-card">請至少選擇一種資料類型</div>
       ) : (
-        <ChartView series={series} />
+        <ChartView series={series} from={applied.from} to={applied.to} />
       )}
     </div>
   )
@@ -107,7 +110,7 @@ const fmtOf = (t: MdmsType) => (t.stepMin >= 1440 ? 'date' : 'time')
  * 選多種：上排每種類型一張「最新時段」卡（最多 4 張一列），趨勢圖用膠囊頁籤切換類型；
  * 只選一種：上排三張＝該類型最新三個時段（第一張帶類型名稱），趨勢圖不需頁籤。
  */
-function ChartView({ series }: { series: Series }) {
+function ChartView({ series, from, to }: { series: Series; from: string; to: string }) {
   const [pick, setPick] = useState<MdmsKey>(series[0].type.key)
   const cur = series.find((s) => s.type.key === pick) ?? series[0]
   const single = series.length === 1
@@ -126,6 +129,8 @@ function ChartView({ series }: { series: Series }) {
           ))}
         </div>
       )}
+      {/* 重新上拋：資料類型跟著下方趨勢的頁籤 */}
+      <ReuploadBar typeKey={cur.type.key} from={from} to={to} />
       <TrendPanel series={series} cur={cur} onPick={setPick} />
     </>
   )

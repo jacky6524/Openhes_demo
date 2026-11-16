@@ -41,7 +41,13 @@ export function StampLines({ value: raw }: { value: string }) {
   )
 }
 
-export function StatusPill({ status }: { status: DcuStatus }) {
+/**
+ * 連線狀態標籤。labels 預設「連線／斷線」；DCU清單、電表清單比照正式機用「在線／離線」（2026-11-11 API 欄位文件）。
+ * status＝null（後端無法判讀）時顯示中性的「-」，不當成離線。
+ */
+export const ONLINE_LABELS: [string, string] = ['在線', '離線']
+export function StatusPill({ status, labels = ['連線', '斷線'] }: { status: DcuStatus | null; labels?: [string, string] }) {
+  if (status === null) return <span className="text-ink-mut">-</span>
   const online = status === 'online'
   return (
     <span
@@ -49,7 +55,21 @@ export function StatusPill({ status }: { status: DcuStatus }) {
       style={{ background: online ? statusTok.normal.bg : statusTok.danger.bg, color: online ? GREEN : RED }}
     >
       <span className="h-1.5 w-1.5 rounded-full" style={{ background: online ? GREEN : RED }} />
-      {online ? '連線' : '斷線'}
+      {online ? labels[0] : labels[1]}
+    </span>
+  )
+}
+
+/** 詳細資料圖示＋事件數 badge：count > 0 才顯示（正式機 eventCount；0 或缺值不顯示，避免視覺噪音） */
+export function EventBadge({ count, children }: { count?: number | null; children: ReactNode }) {
+  return (
+    <span className="relative inline-grid place-items-center">
+      {children}
+      {!!count && count > 0 && (
+        <span className="absolute -right-2 -top-2 min-w-[15px] rounded-full px-1 text-center text-[10px] font-bold leading-[15px] text-white" style={{ background: RED }}>
+          {count > 99 ? '99+' : count}
+        </span>
+      )}
     </span>
   )
 }

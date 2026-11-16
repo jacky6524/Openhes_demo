@@ -31,6 +31,8 @@ interface Col<R> {
   width?: string
   /** 有給才可在表頭搜尋 */
   search?: (r: R) => string
+  /** 表頭與內容水平置中（狀態欄，2026-11-11 業主意見） */
+  center?: boolean
   cell: (r: R) => ReactNode
 }
 
@@ -39,7 +41,7 @@ const MONO_BIG = 'font-mono text-[14px] font-semibold text-ink break-all'
 
 const METER_COLS: Col<MeterListRow>[] = [
   { key: 'office', label: '區處及營業區', width: '9%', search: (m) => m.office, cell: (m) => <span className="text-ink-sub">{m.office}</span> },
-  { key: 'state', label: '狀態', width: '5%', cell: () => <EnabledState enabled={false} /> }, // 比照電表清單／DCU清單的狀態欄
+  { key: 'state', label: '狀態', width: '5%', center: true, cell: () => <EnabledState enabled={false} /> }, // 比照電表清單／DCU清單的狀態欄
   { key: 'online', label: '連線狀態', width: '7%', cell: (m) => <StatusPill status={m.online ? 'online' : 'offline'} /> },
   { key: 'elecNo', label: '電號', width: '10%', search: (m) => m.elecNo, cell: (m) => <span className={MONO_BIG}>{m.elecNo}</span> },
   { key: 'meterNo', label: '表號', width: '10%', search: (m) => m.meterNo, cell: (m) => <span className={MONO_BIG}>{m.meterNo}</span> },
@@ -48,8 +50,9 @@ const METER_COLS: Col<MeterListRow>[] = [
     key: 'module', label: '模組型號 / 序號', width: '11%', search: (m) => `${m.moduleModel} ${m.moduleSerial}`,
     cell: (m) => (
       <div className="flex flex-col leading-snug">
-        <span className="text-ink">{m.moduleModel}</span>
-        <span className="font-mono text-[12px] text-ink-mut break-all">{m.moduleSerial}</span>
+        <span className="text-[13px] text-ink">{m.moduleModel}</span>
+        {/* 比照電表清單：序號與型號同字級、不用等寬字（等寬字字身較矮看起來小一號，業主 2026-11-04／11-11） */}
+        <span className="text-[13px] tabular-nums text-ink-sub break-all">{m.moduleSerial}</span>
       </div>
     ),
   },
@@ -168,7 +171,7 @@ function DisabledTable<R extends { enabled: boolean }>({
                 <Check checked={allChecked} indeterminate={!allChecked && someChecked} onChange={toggleAll} />
               </Th>
               {cols.map((c) => (
-                <Th key={c.key} className="sticky top-0 z-10 bg-inset !whitespace-normal">
+                <Th key={c.key} className={`sticky top-0 z-10 bg-inset !whitespace-normal ${c.center ? '!text-center' : ''}`}>
                   {c.search ? (
                     <SearchHead
                       label={c.label}
@@ -190,7 +193,7 @@ function DisabledTable<R extends { enabled: boolean }>({
                   <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
                     <Check checked={checked.has(id)} onChange={() => toggle(id)} />
                   </td>
-                  {cols.map((c) => <td key={c.key} className="px-3 py-3">{c.cell(r)}</td>)}
+                  {cols.map((c) => <td key={c.key} className={`px-3 py-3 ${c.center ? 'text-center' : ''}`}>{c.cell(r)}</td>)}
                 </tr>
               )
             })}

@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import { Th, FilterHead, MenuItem, InfiniteFooter, useInfiniteRows } from '@/components/table/tableBits'
 import { PageTitle } from '@/components/shared/PageTitle'
 import { PillTabs } from '@/components/shared/PillTabs'
+import { VENDORS, VENDOR_COLOR, type Vendor } from '@/data/channelPlan'
 
 /**
  * 裝置模組（Figma 4253:31308；2026-10-22 業主新版設計稿「裝置模組-1／-2／-3」）。
@@ -10,23 +11,14 @@ import { PillTabs } from '@/components/shared/PillTabs'
  *   · FAN（電表通訊模組）與 DCU 併成同一個子項「模組型號」，用頁籤切換（原本是兩個側欄項目；不叫「裝置列表」以免和裝置管理的裝置列表撞名）
  *   · 表格首欄加「廠商」（可篩選），新增廠商 DELTA；欄位順序：廠商／系列／顯示型號／上拋型號
  *   · 依通訊形式分表格（RF／PLC／NB-IoT／LTE 各一張），通訊技術欄因此拿掉
- *   · 頻道規劃：表格首欄加廠商；新增「頻譜使用圖」（839～847 MHz，一個廠商一列、顏色區分廠商）
+ *   · 頻道規劃移到 pages/ChannelPlan.tsx（2026-11-11 改用業主頻點資料，分類＝案別）
  * 廠商篩選在同一個頁籤內的各張表共用（在任一張表頭選，全部一起套用）。
  * 資料全為 mock。
  */
 type Comm = 'RF' | 'PLC' | 'NB-IoT' | 'LTE'
 const COMMS: Comm[] = ['RF', 'PLC', 'NB-IoT', 'LTE']
 
-const VENDORS = ['SGCM', 'ELSTER', 'HEXING', 'DELTA'] as const
-type Vendor = (typeof VENDORS)[number]
-
-/** 廠商識別色（頻譜圖色塊、表格廠商色點）。刻意避開告警紅／黃／綠，不跟健康狀態混淆 */
-const VENDOR_COLOR: Record<Vendor, string> = {
-  SGCM: '#2F6BED',
-  ELSTER: '#0E9B9B',
-  HEXING: '#8B5CF6',
-  DELTA: '#EA8C00',
-}
+// 廠商清單與識別色與頻道規劃共用（data/channelPlan.ts）
 
 interface ModuleRow {
   vendor: Vendor
@@ -66,32 +58,6 @@ const build = (seed: Seed[]): ModuleRow[] =>
     [0, 1, 2].map((rev) => ({ vendor, series, comm, uploadModel: upload, displayModel: rev ? `${series}-${rev}` : series })),
   )
 const ROWS = { fan: build(FAN_SEED), dcu: build(DCU_SEED) }
-
-/* ───────────────────────── 頻道規劃資料 ───────────────────────── */
-
-/**
- * 839～847 MHz，頻道間隔 0.2 MHz：Channel n 的中心頻率 = 839.1 + 0.2n（n = 0…39，839.1～846.9）。
- * 每個組別兩個頻道：Frequency 1 在下半段（n = k）、Frequency 2 在上半段（n = k + 20），
- * 各廠商分到連續的組別，頻譜圖上一眼看出誰用哪一段、有沒有重疊。
- */
-export const SPECTRUM_MIN = 839
-export const SPECTRUM_MAX = 847
-const CH_STEP = 0.2
-const chFreq = (n: number) => 839.1 + n * CH_STEP
-
-interface ChannelRow { vendor: Vendor; group: string; ch1: number; ch2: number }
-const GROUPS_PER_VENDOR: Record<Vendor, number> = { SGCM: 6, ELSTER: 4, HEXING: 4, DELTA: 4 }
-const CHANNEL_ROWS: ChannelRow[] = (() => {
-  const out: ChannelRow[] = []
-  let k = 0
-  for (const v of VENDORS) {
-    for (let g = 0; g < GROUPS_PER_VENDOR[v]; g++, k++) {
-      out.push({ vendor: v, group: String.fromCharCode(65 + g), ch1: k, ch2: k + 20 })
-    }
-  }
-  return out
-})()
-const chLabel = (n: number) => `${n} / ${chFreq(n).toFixed(1)}`
 
 const ALL = 'ALL'
 
@@ -147,120 +113,6 @@ function CommTables({ rows }: { rows: ModuleRow[] }) {
   )
 }
 
-/* ───────────────────────── 頁面：頻道規劃 ───────────────────────── */
-
-/** 裝置模組 → 頻道規劃 */
-export function ChannelPlan() {
-  const [vendor, setVendor] = useState<string>(ALL)
-  const rows = CHANNEL_ROWS.filter((r) => vendor === ALL || r.vendor === vendor)
-  return (
-    // 2026-11-04 業主意見：頻譜圖放在表格下方、版面撐滿視窗 —— 表格吃剩下的高度並自己捲動，頻譜圖固定在底部
-    <div className="flex h-full min-w-[1280px] flex-col gap-3 p-4">
-      <PageTitle title="頻道規劃" />
-      <DataTable
-        rows={rows}
-        vendor={vendor}
-        onVendor={setVendor}
-        columns={['組別', 'Channel / Frequency 1', 'Channel / Frequency 2']}
-        cells={(r) => [r.group, chLabel(r.ch1), chLabel(r.ch2)]}
-        fill
-      />
-      <SpectrumChart rows={CHANNEL_ROWS} focus={vendor === ALL ? null : (vendor as Vendor)} />
-    </div>
-  )
-}
-
-/**
- * 頻譜使用圖：橫軸 839～847 MHz，一個廠商一列（首欄廠商），每個頻道畫成 0.2 MHz 寬的色塊、色塊上標組別。
- * 表格有篩選廠商時，其他廠商的列淡化（不隱藏，才看得出相對位置）。
- */
-function SpectrumChart({ rows, focus }: { rows: ChannelRow[]; focus: Vendor | null }) {
-  const [hover, setHover] = useState<{ row: ChannelRow; n: number; x: number; y: number } | null>(null)
-  const plotRef = useRef<HTMLDivElement>(null)
-  const span = SPECTRUM_MAX - SPECTRUM_MIN
-  const pos = (mhz: number) => ((mhz - SPECTRUM_MIN) / span) * 100
-  const ticks = Array.from({ length: span + 1 }, (_, i) => SPECTRUM_MIN + i)
-  const used = new Set(rows.flatMap((r) => [r.ch1, r.ch2])).size
-
-  return (
-    <div className="shrink-0 rounded-card border border-border bg-surface p-4 shadow-card">
-      <div className="flex items-baseline justify-between">
-        <div className="flex items-baseline gap-2">
-          <h2 className="text-[15px] font-semibold text-ink">頻譜使用圖</h2>
-          <span className="text-[12px] text-ink-mut">{SPECTRUM_MIN}～{SPECTRUM_MAX} MHz · 頻道間隔 {CH_STEP} MHz</span>
-        </div>
-        <span className="text-[12px] tabular-nums text-ink-sub">已使用 <b className="text-ink">{used}</b> / 共 {Math.round(span / CH_STEP)} 個頻道</span>
-      </div>
-
-      <div ref={plotRef} className="relative mt-3" onMouseLeave={() => setHover(null)}>
-        {VENDORS.map((v) => {
-          const mine = rows.filter((r) => r.vendor === v)
-          const dim = focus !== null && focus !== v
-          return (
-            <div key={v} className="flex items-center gap-3 py-1.5" style={{ opacity: dim ? 0.3 : 1 }}>
-              <span className="flex w-[88px] shrink-0 items-center gap-2 text-[13px] font-semibold text-ink">
-                <span className="size-2.5 rounded-sm" style={{ background: VENDOR_COLOR[v] }} />{v}
-              </span>
-              <div className="relative h-9 flex-1 rounded bg-inset">
-                {/* 1 MHz 格線 */}
-                {ticks.slice(1, -1).map((t) => (
-                  <span key={t} className="absolute inset-y-0 w-px bg-border" style={{ left: `${pos(t)}%` }} />
-                ))}
-                {mine.flatMap((r) => [r.ch1, r.ch2].map((n) => (
-                  <span
-                    key={`${r.group}-${n}`}
-                    onMouseEnter={(e) => {
-                      const box = plotRef.current?.getBoundingClientRect()
-                      if (!box) return
-                      const me = e.currentTarget.getBoundingClientRect()
-                      setHover({ row: r, n, x: me.left - box.left + me.width / 2, y: me.top - box.top })
-                    }}
-                    className="absolute inset-y-0.5 grid cursor-default place-items-center rounded-[3px] text-[11px] font-bold text-white"
-                    style={{ left: `${pos(chFreq(n) - CH_STEP / 2)}%`, width: `calc(${(CH_STEP / span) * 100}% - 1px)`, background: VENDOR_COLOR[v] }}
-                  >
-                    {r.group}
-                  </span>
-                )))}
-              </div>
-            </div>
-          )
-        })}
-
-        {/* 頻率刻度 */}
-        <div className="flex gap-3">
-          <span className="w-[88px] shrink-0" />
-          <div className="relative h-5 flex-1 text-[11px] tabular-nums text-ink-mut">
-            {ticks.map((t, i) => (
-              <span
-                key={t}
-                className="absolute top-1"
-                style={{ left: `${pos(t)}%`, transform: i === 0 ? 'none' : i === ticks.length - 1 ? 'translateX(-100%)' : 'translateX(-50%)' }}
-              >
-                {t}
-              </span>
-            ))}
-          </div>
-        </div>
-
-        {hover && (
-          <div
-            className="pointer-events-none absolute z-20 -translate-x-1/2 -translate-y-full rounded-lg border border-border bg-surface px-3 py-2 text-[12px] shadow-card"
-            style={{ left: hover.x, top: hover.y - 6 }}
-          >
-            <div className="flex items-center gap-1.5 font-semibold text-ink">
-              <span className="size-2 rounded-sm" style={{ background: VENDOR_COLOR[hover.row.vendor] }} />
-              {hover.row.vendor} · 組別 {hover.row.group}
-            </div>
-            <div className="mt-0.5 tabular-nums text-ink-sub">
-              Channel {hover.n} · {chFreq(hover.n).toFixed(1)} MHz（Frequency {hover.n === hover.row.ch1 ? 1 : 2}）
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
 /* ───────────────────────── 共用表格：首欄廠商（可篩選） ───────────────────────── */
 
 function DataTable<T extends { vendor: Vendor }>({
@@ -273,7 +125,7 @@ function DataTable<T extends { vendor: Vendor }>({
   cells: (r: T) => string[]
   /** 固定最大高度（裝置列表的分表用） */
   maxH?: string
-  /** 撐滿父層剩餘高度（頻道規劃用；父層要是 flex column） */
+  /** 撐滿父層剩餘高度（父層要是 flex column） */
   fill?: boolean
 }) {
   const [open, setOpen] = useState(false)
