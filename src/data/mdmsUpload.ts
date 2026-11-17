@@ -10,12 +10,17 @@ import { MDMS_DATA_TYPES, type MdmsTypeKey } from './readDataTypes'
  * （GET /api/p6xml/upload/status）只有 MeterReadings 的 lp／alt／mn 與 EndDeviceEvents（事件），
  * 所以只列這 4 種（定義在 data/readDataTypes.ts）。原本的 PQ、DRR 拿掉；原本把 ALT 標成「事件資料」也已改正。
  */
-export const MDMS_TYPES = MDMS_DATA_TYPES
 export type MdmsKey = MdmsTypeKey
+/**
+ * MDMS上拋頁的顯示順序（卡片、下拉、趨勢頁籤）：2026-11-17 業主要求負載(LP)排在午夜(MN)前面。
+ * 只動這一頁；共用清單 READ_DATA_TYPES 維持業主原清單順序（即時讀表仍是 午夜→負載）。
+ */
+const MDMS_ORDER: MdmsKey[] = ['LP', 'MN', 'ALT', 'event']
+export const MDMS_TYPES = [...MDMS_DATA_TYPES].sort((a, b) => MDMS_ORDER.indexOf(a.key) - MDMS_ORDER.indexOf(b.key))
 export type MdmsType = (typeof MDMS_DATA_TYPES)[number]
 
 /** 預設勾選：負載／定時供電品質／午夜（同改版前的預設） */
-export const DEFAULT_MDMS_KEYS: MdmsKey[] = ['MN', 'LP', 'ALT']
+export const DEFAULT_MDMS_KEYS: MdmsKey[] = ['LP', 'MN', 'ALT']
 
 /** 達成率低於此值算「注意」（紅字、趨勢圖紅帶） */
 export const MDMS_ALERT = 90

@@ -6,6 +6,7 @@ import { countyGeoById } from '@/data/geo/geo'
 import { statByCity } from '@/data/dcuFleet'
 import { useWarroom } from '@/store/useWarroom'
 import { SEVERITY_COLOR, SEVERITY_STROKE } from './warroomConfig'
+import { HEALTH_FILL_OPACITY } from '@/tokens'
 
 /**
  * 離島 inset —— 位置與樣式對齊系統總覽的 `.island-shortcuts`（見 map/IslandInset）：
@@ -78,7 +79,7 @@ function IslandTile({ id, label, city, width = 72, height = 38 }: { id: string; 
                 key={geo.properties.rid as string}
                 geography={geo}
                 style={{
-                  default: { fill, fillOpacity: 0.8, stroke, strokeWidth: 0.6, outline: 'none' },
+                  default: { fill, fillOpacity: HEALTH_FILL_OPACITY, stroke, strokeWidth: 0.6, outline: 'none' },
                   hover: { fill, fillOpacity: 1, stroke, strokeWidth: 0.6, outline: 'none' },
                   pressed: { fill, fillOpacity: 1, stroke, strokeWidth: 0.6, outline: 'none' },
                 }}

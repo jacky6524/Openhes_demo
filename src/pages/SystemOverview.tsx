@@ -15,7 +15,7 @@ import { MeterDrawer } from '@/components/drawer/MeterDrawer'
  *                          gap 16、min-width 1240
  *   .kpi-row            → cols 880fr / 736fr
  *   .kpi-row-left       → cols 552fr / 312fr（電表連線率 : MN午夜讀表率）
- *   .kpi-row-right      → cols 1fr / 1fr（ALT : LP）
+ *   .kpi-row-right      → cols 1fr / 1fr（LP : ALT，2026-11-17 同步正式機截圖：LP 在前）
  *   .dashboard-grid     → cols 880fr / 736fr，單列吃滿剩餘高度
  *   .right-column       → rows `96fr / 480fr / 248fr`
  *   .right-top          → cols 500fr / 220fr（DCU連線率 : 事件·停電）
@@ -43,8 +43,8 @@ export function SystemOverview() {
             <RateKpiCard metric="midnight" label="MN午夜讀表率 (%)" />
           </div>
           <div className="grid min-w-0 grid-cols-2 gap-4 [@media(max-height:943px)]:gap-3">
-            <RateKpiCard metric="alt" label="ALT 讀表率 (%)" />
-            <RateKpiCard metric="lp" label="LP 讀表率 (%)" />
+            <RateKpiCard metric="lp" label="LP即時讀表率 (%)" />
+            <RateKpiCard metric="alt" label="ALT即時讀表率 (%)" />
           </div>
         </section>
 

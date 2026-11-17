@@ -46,11 +46,11 @@ export const useCaseFilter = create<CaseFilterState>((set) => ({
 }))
 
 /**
- * 目前案別顯示文字；無篩選 → 'ALL'。
+ * 目前案別顯示文字；無篩選 → '全部'。
  * 單選 / 複選皆顯示含編碼的完整名（二案(108-FET)、三案(110-CHT)），
  * 讓左上角徽章一眼看得出標案編號與得標廠商。
  */
 export function caseLabel(selected: Set<string>): string {
-  if (selected.size === 0) return 'ALL'
+  if (selected.size === 0) return '全部'
   return CASES.filter((c) => selected.has(c.id)).map(caseFullName).join('、')
 }

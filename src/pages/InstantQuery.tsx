@@ -27,7 +27,7 @@ import { PillTabs } from '@/components/shared/PillTabs'
  * 2026-11-11 業主意見＋設計稿（1111調整內容/1110修改）：
  *   表號／FAN IMEI/MAC → 版面相同：卡片＋左下「連線紀錄」表＋右下「讀表 × 連線概況」LP/MN/ALT 三線（比照系統總覽）
  *   DCU序號             → 卡片＋左下「連線紀錄」表＋右下「訊號強度趨勢」
- *   圖表與連線紀錄一律為「近 24 小時」（每小時一筆）。頁名「即裝即查」業主仍在確認是否改名，暫不動。
+ *   圖表與連線紀錄一律為「近 24 小時」（每小時一筆）。頁名 2026-11-17 依業主改為「即時查詢」（原「即裝即查」）。
  * mock 的「現在」＝2025/01/01 15:00；近 24 小時＝2024/12/31 16:00 ～ 2025/01/01 15:00。
  */
 const MODES = [
@@ -70,7 +70,7 @@ export function InstantQuery() {
 
   return (
     <div className="flex h-full min-h-[760px] min-w-[1280px] flex-col gap-3 p-4">
-      <PageTitle title="即裝即查" />
+      <PageTitle title="即時查詢" />
       <div className="flex flex-col gap-1">
         <PillTabs tabs={MODES} value={mode} onChange={(k) => { setMode(k); setText(SAMPLE[k]); setResult(null) }} />
         <div className="mt-1 flex flex-wrap items-center gap-2">

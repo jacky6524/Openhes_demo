@@ -105,13 +105,17 @@ export const mag = [
  *   · 注意 #FDC700 不動（L 0.85，三色的亮度基準）
  *   · 告警 #DE1A1A → #E03930：原色 L 0.57 比另外兩色暗一大截、大面積填色很重，提到 L 0.60 並稍降彩度
  *   規則：嚴重度越高彩度越高（0.06 → 0.17 → 0.21）；三色的 stroke 一律比 fill 暗一階（OKLCH L −0.10）。
- * stroke 只用在區塊外框；fill 與 accent 都是色票原色。
+ * 2026-11-17 注意改為正式機截圖的 #F5D100（圖例／地圖／散點／環形取色一致；L 0.865，與原 #FDC700 幾乎同亮、
+ *   色相偏檸檬黃），stroke #D4B000 照上面規則（OKLCH L −0.10）算出。
+ * 2026-11-06 良好 fill 再改為 #D8EDD9（#9DD39F 以 40% 疊白底的預混色，同 10/30 的「更透明」版本）；
+ *   stroke 與 accent 維持 #79B87C／#9DD39F。用預混色值而非改 opacity，各地圖才會一致。
+ * stroke 只用在區塊外框；fill 與 accent 都是色票原色（良好 fill 例外，見上）。
  * `accent` 供填色太淡讀不出來的地方使用（legend dot、status pill、gauge arc）。
  */
 export type HealthKey = 'good' | 'warning' | 'alert'
 export const health: Record<HealthKey, { fill: string; stroke: string; accent: string; label: string }> = {
-  good: { fill: '#9DD39F', stroke: '#79B87C', accent: '#9DD39F', label: '良好' }, // 2026-11-04 業主：綠改回 #9DD39F
-  warning: { fill: '#FDC700', stroke: '#DDA800', accent: '#FDC700', label: '注意' },
+  good: { fill: '#D8EDD9', stroke: '#79B87C', accent: '#9DD39F', label: '良好' }, // 2026-11-06：改用淡綠（40%）
+  warning: { fill: '#F5D100', stroke: '#D4B000', accent: '#F5D100', label: '注意' }, // 2026-11-17：照正式機截圖
   alert: { fill: '#E03930', stroke: '#B3241E', accent: '#E03930', label: '警告' },
 }
 
@@ -125,8 +129,17 @@ export const noMeter = { fill: '#E5E7EB', stroke: '#C9CDD4', label: '無電表' 
 /** 地圖區塊外框 — ← 前端 regions-outline line-color */
 export const mapOutline = '#A77752'
 
-/** region fill = health colour at ~96% opacity (前端 fill-opacity) */
+/**
+ * region fill = health colour at ~96% opacity (前端 fill-opacity)。
+ * 系統總覽與 DCU總覽（故障／關係地圖、離島捷徑）共用，兩頁告警色看起來才會一模一樣（業主 2026-10-30）。
+ */
 export const HEALTH_FILL_OPACITY = 0.96
+
+/**
+ * 讀表率進度條（系統總覽「當日累積讀表」、「讀表 × 連線概況」右欄）：淡藍 blue-300，
+ * 與 status.info 同色相（2026-11-17 業主：避免與告警色混淆）。
+ */
+export const RATE_BAR = '#8EC5FF'
 
 /**
  * ← color.css: --boxshadow-cardS / --boxshadow-cardM

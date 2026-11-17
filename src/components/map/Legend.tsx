@@ -10,17 +10,13 @@ import { THRESHOLDS } from '@/config/thresholds'
  * 地圖著色綁 LP 讀表率，門檻直接讀 THRESHOLDS.lp，圖例與地圖不會走鐘。
  */
 
-/** 狀態色塊 — 前端 `.swatch`（20×12 / radius 4）；`stripe` 為「無電表」虛線條 */
+/**
+ * 狀態色塊 — 前端 `.swatch`（20×12 / radius 4）。
+ * 2026-11-17 同步正式機截圖：「無電表」改為實心淺灰色塊（原為虛線條），與地圖上的實心灰一致。
+ */
 export function Swatch({ kind }: { kind: 'good' | 'warning' | 'alert' | 'muted' }) {
-  if (kind === 'muted') {
-    return (
-      <i
-        className="inline-block h-[3px] w-5 shrink-0 rounded-full"
-        style={{ background: 'repeating-linear-gradient(to right, #CFD3DA 0 5px, transparent 5px 8px)' }}
-      />
-    )
-  }
-  return <i className="inline-block h-3 w-5 shrink-0 rounded" style={{ background: health[kind].fill }} />
+  const bg = kind === 'muted' ? noMeter.fill : health[kind].fill
+  return <i className="inline-block h-3 w-5 shrink-0 rounded" style={{ background: bg }} />
 }
 
 const ORDER = ['good', 'warning', 'alert'] as const

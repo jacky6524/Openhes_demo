@@ -32,6 +32,27 @@ export const SEVERITY_LABEL = {
   alert: health.alert.label, // 警告
 } as const
 
+/**
+ * 行政區名稱樣式 — 與系統總覽地圖同一套規則（2026-11-17 業主：黑字白邊看不清楚）：
+ * 警告紅底用白字＋深紅細描邊；其餘（良好／注意）用深字＋與底色同色的細描邊。
+ * 用於 maplibre symbol 圖層，標籤點的 properties 需帶 sevColor（見 polyLabels.ts）。
+ */
+const IS_ALERT_LABEL = ['==', ['get', 'sevColor'], SEVERITY_COLOR.alert]
+// 區名正中間被群集球的數字擋住時，改放上方／下方（偏移 1.5 字高，避開半徑 16px 的球），而不是整個藏起來
+export const AREA_LABEL_LAYOUT = {
+  'text-size': 13,
+  'text-font': ['Open Sans Semibold'],
+  'text-variable-anchor': ['center', 'top', 'bottom'],
+  'text-radial-offset': 1.5,
+}
+export const AREA_LABEL_PAINT = {
+  'text-color': ['case', IS_ALERT_LABEL, '#FFFFFF', '#2D2629'],
+  'text-halo-color': ['case', IS_ALERT_LABEL, SEVERITY_STROKE.alert, ['get', 'sevColor']],
+  'text-halo-width': 1,
+}
+/** 關係地圖 L3（選定行政區後底圖為白／灰）時改回深字白光暈 */
+export const AREA_LABEL_PAINT_PLAIN = { 'text-color': '#3A2F33', 'text-halo-color': '#FFFFFF', 'text-halo-width': 1.4 }
+
 /** 裝置狀態編碼（關係地圖） */
 export const STATUS = {
   dcuOffline: '#DB3B36', // DCU 本身斷線（紅）

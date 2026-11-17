@@ -1,17 +1,18 @@
 import { useMemo, useState } from 'react'
 import { useDashboard, useCurrentNode, useScopeLabel } from '@/store/useDashboard'
 import { getById } from '@/data/mockData'
-import { METRIC_FIELD, METRIC_LABEL } from '@/config/thresholds'
+import { METRIC_FIELD, METRIC_LABEL, rateHealth } from '@/config/thresholds'
 import { Card } from '@/components/ui/Card'
-import { status } from '@/tokens'
+import { status, health } from '@/tokens'
 import type { MetricKey } from '@/types'
 
 const UPDATE_NOTE = '資料更新時間：每小時（整點）'
 const EXCLUDE_NOTE = '備註：排除停用'
 
-// 紅區定義（7/24 會議）：連線率 ≥ 98% 且 讀表率 < 90% ＝ 連得上卻讀不到
-const CONNECT_CUT = 98
-const READ_CUT = 90
+// 紅區定義：連線率 ≥ 97% 且 讀表率 < 95% ＝ 連得上卻讀不到
+// （7/24 會議原為 98／90；2026-11-17 同步正式機截圖改為 97／95，與 LP 讀表率門檻一致）
+const CONNECT_CUT = 97
+const READ_CUT = 95
 
 /**
  * 座標軸範圍與刻度 — 與前端 NewDashboard.vue 的
@@ -35,7 +36,8 @@ const clampPos = (p: number) => Math.max(1.5, Math.min(98.5, p))
  *   .scatter-grid-line 刻度線 #e1e3e6，刻度字 12px #7d818b（畫在畫布外）
  *   .scatter-zone      右下紅區「連得上卻讀不到」
  *   .scatter-cross     2px dashed #cfd3d8 的門檻十字線
- *   .scatter-dot       #6f7cf6（異常轉紅），直徑 16–34px 隨 DCU 斷線數放大
+ *   .scatter-dot       依 LP 讀表率三態著色（良好綠／注意黃／警告紅，色值取 tokens.health.accent），
+ *                      直徑 16–34px 隨 DCU 斷線數放大（2026-11-17 同步正式機截圖，原為藍點、異常轉紅）
  *   .scatter-tooltip   232px 白底浮框
  *
  * 原本用 recharts 繪製，改為手繪是為了讓刻度、留白、點樣式與前端一致。
@@ -68,7 +70,7 @@ export function CrossScatter() {
         size: 16 + Math.max(0, Math.min(1, ratio)) * 18,
         left: clampPos(xPos(x)),
         bottom: clampPos(yPos(y)),
-        anomaly: x >= CONNECT_CUT && y < READ_CUT,
+        tone: rateHealth(readKey, y),
       }
     })
   }, [node])
@@ -89,7 +91,7 @@ export function CrossScatter() {
           <span className="pointer-events-none absolute left-0 top-full z-40 mt-2 w-[268px] translate-y-1 opacity-0 transition-all duration-150 group-hover/hc:translate-y-0 group-hover/hc:opacity-100">
             <span className="block rounded-lg border border-border bg-surface px-3 py-2 text-left shadow-card">
               <span className="mb-1 block text-[12px] font-semibold text-ink">連線率 × 讀表率比對</span>
-              <span className="block py-0.5 text-[11px] leading-snug text-ink-sub">點（區域）：大小 = DCU 斷線數</span>
+              <span className="block py-0.5 text-[11px] leading-snug text-ink-sub">點（區域）：大小 = DCU 斷線數；顏色 = LP 讀表率狀態</span>
               <span className="block py-0.5 text-[11px] leading-snug" style={{ color: status.danger.fg }}>
                 紅底區：連線率 ≥ {CONNECT_CUT}% 且 讀表率 &lt; {READ_CUT}%
               </span>
@@ -137,18 +139,16 @@ export function CrossScatter() {
             </div>
           ))}
 
-          {/* .scatter-zone — 連得上卻讀不到 */}
+          {/* .scatter-zone — 連得上卻讀不到（正式機為實心半透明紅、無文字；說明在標題 hover） */}
           <div
-            className="absolute bottom-0 right-0 z-0 flex items-end justify-end p-2.5 text-right text-[12px] font-extrabold"
+            className="absolute bottom-0 right-0 z-0"
             style={{
               left: `${clampPos(xPos(CONNECT_CUT))}%`,
               height: `${clampPos(yPos(READ_CUT))}%`,
-              background: 'rgba(255, 100, 103, 0.0625)', // 前端 --status-error-light #ff646710
-              color: status.danger.fg,
+              background: health.alert.fill,
+              opacity: 0.4,
             }}
-          >
-            連得上卻讀不到
-          </div>
+          />
 
           {/* .scatter-cross — 門檻十字虛線 */}
           <div
@@ -173,10 +173,10 @@ export function CrossScatter() {
                 height: p.size,
                 transform: 'translate(-50%, 50%)',
                 border: '1px solid rgba(255,255,255,.9)',
-                background: p.anomaly ? status.danger.fg : '#6F7CF6',
-                boxShadow: p.anomaly ? '0 2px 7px rgba(251,44,54,.2)' : '0 2px 7px rgba(73,83,200,.2)',
+                background: health[p.tone].accent,
+                boxShadow: '0 2px 7px rgba(58,42,48,.18)',
               }}
-              aria-label={`${p.name}，連線率 ${p.x.toFixed(2)}%，讀表率 ${p.y.toFixed(2)}%，DCU 斷線 ${p.disconnect}`}
+              aria-label={`${p.name}，連線率 ${p.x.toFixed(1)}%，讀表率 ${p.y.toFixed(1)}%，DCU 斷線 ${p.disconnect}`}
               onMouseEnter={() => setHovered(p.id)}
               onMouseLeave={() => setHovered((h) => (h === p.id ? null : h))}
               onFocus={() => setHovered(p.id)}
@@ -191,7 +191,7 @@ export function CrossScatter() {
                 style={{ left: 'calc(100% + 5px)' }}
               >
                 {p.name}
-                <small className="block text-[10px] leading-[1.1] text-ink-fai">{p.y.toFixed(2)}%</small>
+                <small className="block text-[10px] leading-[1.1] text-ink-fai">{p.y.toFixed(1)}%</small>
               </span>
             </button>
           ))}
@@ -213,8 +213,8 @@ export function CrossScatter() {
             >
               <strong className="text-[16px] text-ink">{hoveredPoint.name}</strong>
               <dl className="m-0 grid gap-[7px]">
-                <TipRow label="連線率" value={`${hoveredPoint.x.toFixed(2)} %`} />
-                <TipRow label="讀表率" value={`${hoveredPoint.y.toFixed(2)} %`} />
+                <TipRow label="連線率" value={`${hoveredPoint.x.toFixed(1)} %`} />
+                <TipRow label="讀表率" value={`${hoveredPoint.y.toFixed(1)} %`} />
                 <TipRow label="DCU 斷線" value={String(hoveredPoint.disconnect)} />
               </dl>
               <footer className="border-t pt-[9px] text-[11px] text-ink-fai" style={{ borderColor: '#EEE5E8' }}>

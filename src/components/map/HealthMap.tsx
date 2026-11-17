@@ -1,13 +1,12 @@
-import { useMemo, useRef, useState, type MouseEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 import { ComposableMap, Geographies, Geography } from 'react-simple-maps'
-import { geoMercator } from 'd3-geo'
+import { geoMercator, geoPath } from 'd3-geo'
 import { useDashboard, useCurrentNode } from '@/store/useDashboard'
 import { COUNTY_NODES, getById } from '@/data/mockData'
 import { geoForNode, fitTargetGeo } from '@/data/geo/geo'
 import { metricHealth } from '@/lib/health'
 import { health as healthTokens, noMeter, HEALTH_FILL_OPACITY } from '@/tokens'
 import { MapNav } from './Breadcrumb'
-import { Legend } from './Legend'
 import { LevelStats } from './LevelStats'
 import { IslandInset } from './IslandInset'
 
@@ -26,7 +25,30 @@ const MAP_UPDATE_NOTE = '更新時間：每小時（整點）'
  *   .island-shortcuts 右下、圖例上方（前端把離島放右側，不是左側）
  *   .map-legend       右下 14/14
  *   .map-region-tooltip 230px 白底浮框 + 狀態 pill
+ *
+ * 2026-11-17 同步正式機截圖：區域名標籤（L1 縣市；業主補充 L2／L3 也要標行政區名）；無電表改實心淺灰（原斜線紋）；離島框改為
+ * 澎湖／金門／連江並移到右下角；拿掉右下圖例條與左下操作提示（左上統計卡已兼圖例）。
  */
+
+/**
+ * 縣市名配色依底色決定（2026-11-17 業主：黑字白邊看不清楚）：比照正式機，紅底用白字＋深紅細描邊，
+ * 其餘（綠／黃／無電表灰）用深字＋與底色同色的細描邊——壓到縣界時仍可讀，又不會像白邊那樣糊成一團。
+ */
+type LabelCat = 'good' | 'warning' | 'alert' | 'muted'
+const LABEL_STYLE: Record<LabelCat, { fill: string; stroke: string }> = {
+  good: { fill: '#2D2629', stroke: healthTokens.good.fill },
+  warning: { fill: '#2D2629', stroke: healthTokens.warning.fill },
+  alert: { fill: '#FFFFFF', stroke: healthTokens.alert.stroke },
+  muted: { fill: '#4F4549', stroke: noMeter.fill },
+}
+
+// 小縣市標籤會互相壓到，比照正式機截圖手動錯開（單位：畫布 px）
+const LABEL_NUDGE: Record<string, [number, number]> = {
+  CYI: [-26, 4], // 嘉義市 → 往西
+  CYC: [30, 0], // 嘉義縣（包住嘉義市）→ 往東
+  KEE: [16, -8], // 基隆市
+  TPE: [-8, 4], // 台北市
+}
 
 /** 狀態 pill 配色 — 前端 `.region-status--*` */
 const STATUS_PILL: Record<'good' | 'warning' | 'alert' | 'muted', { dot: string; bg: string; fg: string }> = {
@@ -54,6 +76,8 @@ export function HealthMap() {
   const depth = useDashboard((s) => s.drillPath.length)
   const canvasRef = useRef<HTMLDivElement>(null)
   const [hover, setHover] = useState<HoverInfo | null>(null)
+  // 換層級時清掉上一層殘留的 hover 浮框（點擊下鑽時滑鼠沒移動，不會觸發 mouseleave）
+  useEffect(() => setHover(null), [node])
 
   // geographies for the current level + a projection LOCKED (fitted) to it.
   const { geographies, projection } = useMemo(() => {
@@ -72,6 +96,46 @@ export function HealthMap() {
     }
     return { geographies: geos, projection: proj }
   }, [node])
+
+  // 區域名標籤（L1 縣市、L2 行政區、L3 該區）：同一個 rid 可能有多筆圖形（合併群組、離島），
+  // 取「投影後面積最大的那塊多邊形」的重心放名字，避免被外島拉偏或重複標示
+  const labels = useMemo(() => {
+    const path = geoPath(projection as any)
+    const best = new Map<string, { area: number; poly: any; name: string }>()
+    for (const f of geographies.features as any[]) {
+      const g = f.geometry
+      if (!g) continue
+      const parts = g.type === 'MultiPolygon'
+        ? g.coordinates.map((c: unknown) => ({ type: 'Polygon', coordinates: c }))
+        : [g]
+      const id = f.properties.rid as string
+      for (const poly of parts) {
+        const area = path.area(poly)
+        const cur = best.get(id)
+        if (!cur || area > cur.area) best.set(id, { area, poly, name: f.properties.rname as string })
+      }
+    }
+    const size = node.id === 'TW' ? 13 : 12
+    const all = [...best.entries()].map(([id, { area, poly, name }]) => {
+      const [x, y] = path.centroid(poly)
+      const [dx, dy] = (node.id === 'TW' && LABEL_NUDGE[id]) || [0, 0]
+      const region = getById(id)
+      const cat: LabelCat = !region || region.metrics.meterTotal === 0 ? 'muted' : metricHealth(region.metrics, 'lp')
+      return { id, name, area, x: x + dx, y: y + dy, cat }
+    })
+    if (node.id === 'TW') return all // 全台已手動錯開
+    // 行政區層：市中心小區常擠在一起 → 由大到小放，與已放的字框重疊就不標（滑過仍有浮框顯示名稱）
+    const placed: { l: number; r: number; t: number; b: number }[] = []
+    return all
+      .sort((a, b) => b.area - a.area)
+      .filter((l) => {
+        const w = l.name.length * size + 4
+        const box = { l: l.x - w / 2, r: l.x + w / 2, t: l.y - size / 2 - 2, b: l.y + size / 2 + 2 }
+        if (placed.some((p) => box.l < p.r && box.r > p.l && box.t < p.b && box.b > p.t)) return false
+        placed.push(box)
+        return true
+      })
+  }, [node, geographies, projection])
 
   const isRoot = node.id === 'TW'
 
@@ -96,30 +160,17 @@ export function HealthMap() {
             height={H}
             style={{ width: '100%', height: '100%' }}
           >
-            {/* 斜線紋 — 無電表區域填色，與健康色系明確區隔 */}
-            <defs>
-              <pattern
-                id="noMeterHatch"
-                width={7}
-                height={7}
-                patternUnits="userSpaceOnUse"
-                patternTransform="rotate(45)"
-              >
-                <rect width={7} height={7} fill={noMeter.fill} />
-                <line x1={0} y1={0} x2={0} y2={7} stroke={noMeter.stroke} strokeWidth={1.6} />
-              </pattern>
-            </defs>
             <Geographies geography={geographies}>
               {({ geographies: features }) =>
                 features.map((geo) => {
                   const rid = geo.properties.rid as string
                   const region = getById(rid)
-                  // 無電表 (未部署) → 斜線紋，不參與健康著色 / highlight
+                  // 無電表 (未部署) → 實心淺灰，不參與健康著色 / highlight
                   const noData = !region || region.metrics.meterTotal === 0
                   // map主視覺永遠綁定 LP 讀表率 — 切換其他指標不改變地圖主色邏輯
                   const h = region ? metricHealth(region.metrics, 'lp') : 'good'
                   const tone = healthTokens[h]
-                  const baseFill = noData ? 'url(#noMeterHatch)' : tone.fill
+                  const baseFill = noData ? noMeter.fill : tone.fill
                   const baseStroke = noData ? noMeter.stroke : tone.stroke
                   const onMove = (e: MouseEvent) => {
                     const rect = canvasRef.current?.getBoundingClientRect()
@@ -155,7 +206,7 @@ export function HealthMap() {
                         },
                         hover: {
                           fill: baseFill,
-                          // 無電表區塊 hover 不強調 (維持斜線紋、不變白框) 以示不可點
+                          // 無電表區塊 hover 不強調 (維持淺灰、不變白框) 以示不可點
                           fillOpacity: 1,
                           stroke: noData ? baseStroke : '#FFFFFF',
                           strokeWidth: noData ? 0.6 : 1.4,
@@ -175,6 +226,27 @@ export function HealthMap() {
                 })
               }
             </Geographies>
+            {/* 區域名（不接滑鼠事件，點擊仍落在底下的區塊） */}
+            <g pointerEvents="none">
+              {labels.map((l) => (
+                <text
+                  key={l.id}
+                  x={l.x}
+                  y={l.y}
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                  fontSize={node.id === 'TW' ? 13 : 12}
+                  fontWeight={600}
+                  fill={LABEL_STYLE[l.cat].fill}
+                  stroke={LABEL_STYLE[l.cat].stroke}
+                  strokeWidth={2}
+                  strokeLinejoin="round"
+                  paintOrder="stroke"
+                >
+                  {l.name}
+                </text>
+              ))}
+            </g>
           </ComposableMap>
         </div>
 
@@ -213,7 +285,7 @@ export function HealthMap() {
                   LP讀表率
                 </dt>
                 <dd className="m-0 text-[13px] tabular-nums" style={{ color: '#3D3438' }}>
-                  {hover.lpRate === null ? '無資料' : `${hover.lpRate.toFixed(2)}%`}
+                  {hover.lpRate === null ? '無資料' : `${hover.lpRate.toFixed(1)}%`}
                 </dd>
               </div>
             </dl>
@@ -228,10 +300,10 @@ export function HealthMap() {
           <LevelStats />
         </div>
 
-        {/* .island-shortcuts — 離島（金門 / 馬祖），右下、圖例上方；僅全台層級 */}
+        {/* .island-shortcuts — 離島（澎湖 / 金門 / 連江），右下角；僅全台層級 */}
         {isRoot && (
           <div
-            className="absolute bottom-[58px] right-3.5 z-[2] box-border grid w-[116px] justify-items-center gap-1.5 rounded-lg border p-[9px]"
+            className="absolute bottom-3.5 right-3.5 z-[2] box-border grid w-[136px] justify-items-center gap-1.5 rounded-lg border p-[9px]"
             style={{
               borderColor: '#EADFE1',
               background: 'rgba(255,255,255,.95)',
@@ -241,32 +313,11 @@ export function HealthMap() {
             <strong className="w-full text-[12px]" style={{ color: '#6F6267' }}>
               離島
             </strong>
-            <IslandInset countyNodes={COUNTY_NODES} regionId="LJU" label="馬祖" />
-            <IslandInset countyNodes={COUNTY_NODES} regionId="KMN" label="金門" />
+            <IslandInset countyNodes={COUNTY_NODES} regionId="PEH" label="澎湖" width={96} height={46} />
+            <IslandInset countyNodes={COUNTY_NODES} regionId="KMN" label="金門" width={96} height={46} />
+            <IslandInset countyNodes={COUNTY_NODES} regionId="LJU" label="連江" width={96} height={46} />
           </div>
         )}
-
-        {/* .map-legend — 右下 */}
-        <div className="absolute bottom-3.5 right-3.5 z-[2]">
-          <Legend />
-        </div>
-
-        {/* .map-note — 操作提示，左下（前端此格為空，保留 prototype 的導引文字） */}
-        <div
-          className="absolute bottom-3.5 left-3.5 z-[2] rounded-lg border px-2.5 py-2 text-[12px]"
-          style={{
-            borderColor: '#EADFE1',
-            background: 'rgba(255,255,255,.95)',
-            boxShadow: '0 8px 20px rgba(58,42,48,.12)',
-            color: '#9F9397',
-          }}
-        >
-          {node.level === 'L3'
-            ? '返回可回到縣市 / 全台'
-            : node.level === 'L2'
-              ? '點行政區 → 單獨顯示 + DCU 詳情'
-              : '點縣市 → 向下鑽取'}
-        </div>
       </div>
     </div>
   )

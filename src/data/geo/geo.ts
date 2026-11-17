@@ -182,6 +182,8 @@ export function countiesGeoAll(): GeoCollection {
    改以左側獨立 inset 小圖呈現 (見 IslandInset)，故主圖 L1 排除這兩者。 */
 export const INSET_COUNTY_IDS = ['LJU', 'KMN'] as const // 馬祖(連江) / 金門
 const INSET_SET = new Set<string>(INSET_COUNTY_IDS)
+/** 系統總覽另把澎湖也移進離島框（2026-11-17 同步正式機截圖：離島框為 澎湖／金門／連江）；DCU總覽不受影響 */
+const OVERVIEW_INSET_SET = new Set<string>([...INSET_COUNTY_IDS, 'PEH'])
 
 /** the FeatureCollection rendered at a given drill node.
     L1/L2 render their children's areas; L3 行政區 is the leaf and renders in
@@ -191,7 +193,7 @@ export function geoForNode(node: RegionNode, countyNodes: RegionNode[]): GeoColl
   if (node.id === 'TW') {
     return {
       type: 'FeatureCollection',
-      features: countiesGeo(countyNodes).features.filter((f) => !INSET_SET.has(f.properties.rid as string)),
+      features: countiesGeo(countyNodes).features.filter((f) => !OVERVIEW_INSET_SET.has(f.properties.rid as string)),
     }
   }
   if (node.level === 'L2') return townsFC(node.name) // county → real townships
@@ -225,12 +227,11 @@ function focusFC(fc: GeoCollection): GeoCollection {
 /** geography used to fit/lock the projection at a given node */
 export function fitTargetGeo(node: RegionNode, countyNodes: RegionNode[]): GeoCollection {
   if (node.id === 'TW') {
-    // converge on the main island (+Penghu); Kinmen(KMN)/Matsu(LJU) sit on the
-    // China coast and would drag in mainland & empty sea (§1, §8) → excluded.
-    const EXCLUDE = new Set(['KMN', 'LJU'])
+    // converge on the main island; Kinmen(KMN)/Matsu(LJU) sit on the China coast and would drag
+    // in mainland & empty sea (§1, §8); Penghu(PEH) moved to the island box (2026-11-17) → all excluded.
     return {
       type: 'FeatureCollection',
-      features: countiesGeo(countyNodes).features.filter((f) => !EXCLUDE.has(f.properties.rid as string)),
+      features: countiesGeo(countyNodes).features.filter((f) => !OVERVIEW_INSET_SET.has(f.properties.rid as string)),
     }
   }
   if (node.level === 'L2') return focusFC(townsFC(node.name)) // frame the county's townships

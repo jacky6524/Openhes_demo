@@ -206,7 +206,7 @@ export function DcuList() {
               <col style={{ width: '7%' }} />{/* 白名單電表連線數 */}
               <col style={{ width: '5%' }} />{/* 頻道組別 */}
               <col style={{ width: '6%' }} />{/* 通訊方式 */}
-              <col style={{ width: '9%' }} />{/* IP */}
+              <col style={{ width: '128px' }} />{/* IP（固定寬，不換行也不溢出到隔壁欄） */}
               <col style={{ width: '8%' }} />{/* 模式 */}
               <col style={{ width: '6%' }} />{/* 白名單 */}
               <col style={{ width: SHOW_TOPOLOGY ? '96px' : '64px' }} />{/* 操作 */}

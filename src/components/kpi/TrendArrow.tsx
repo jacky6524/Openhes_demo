@@ -56,8 +56,8 @@ export function TrendArrow({
       style={{ color }}
     >
       <TrendGlyph direction={up ? 'up' : 'down'} size={size} />
-      {Math.abs(delta).toFixed(2)}
-      <TrendTip up={up} isBad={isBad} value={Math.abs(delta).toFixed(2)} align={align} />
+      {Math.abs(delta).toFixed(1)}
+      <TrendTip up={up} isBad={isBad} value={Math.abs(delta).toFixed(1)} align={align} />
     </span>
   )
 }

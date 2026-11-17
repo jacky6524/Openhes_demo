@@ -31,13 +31,14 @@ const ITEMS: { key: Cat; label: string }[] = [
 export function LevelStats() {
   const node = useCurrentNode()
 
-  const { counts, total, unitLabel } = useMemo(() => {
+  const { counts, total, unitLabel, countUnit } = useMemo(() => {
     const regions = node.children && node.children.length ? node.children : [node]
     const c: Record<Cat, number> = { good: 0, warning: 0, alert: 0, muted: 0 }
     regions.forEach((r) => (c[categorize(r)] += 1))
     // 統計單位：全台→台灣（縣市）；縣市→行政區；行政區→區
     const unit = node.id === 'TW' ? '台灣（縣市）' : node.level === 'L2' ? '行政區' : '區'
-    return { counts: c, total: regions.length, unitLabel: unit }
+    const cu = node.id === 'TW' ? '縣市' : node.level === 'L2' ? '區' : '區'
+    return { counts: c, total: regions.length, unitLabel: unit, countUnit: cu }
   }, [node])
 
   return (
@@ -49,10 +50,11 @@ export function LevelStats() {
         boxShadow: '0 8px 20px rgba(58,42,48,.12)',
       }}
     >
-      <div className="mb-2.5 flex items-center justify-between gap-3">
+      {/* 2026-11-17 同步正式機截圖：「共 N縣市」改放標題下一行 */}
+      <div className="mb-2.5 flex flex-col gap-0.5">
         <strong className="text-[13px] text-ink">{unitLabel}</strong>
         <span className="text-[12px] tabular-nums" style={{ color: '#9F9397' }}>
-          共 {total}
+          共 {total}{countUnit}
         </span>
       </div>
       <dl className="m-0 grid gap-2">

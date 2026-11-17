@@ -9,7 +9,7 @@ import { health as healthTokens, noMeter, mapOutline, HEALTH_FILL_OPACITY } from
 import type { RegionNode } from '@/types'
 
 /**
- * 離島 inset 小圖 — 金門 / 馬祖(連江) 因真實位置遠離台灣本島，畫在主圖會被投影
+ * 離島 inset 小圖 — 澎湖 / 金門 / 連江 因真實位置遠離台灣本島，畫在主圖會被投影
  * 裁掉或拉遠本島，故以獨立小圖固定呈現於地圖左側。著色 / 無電表斜線紋 / 可否下鑽
  * 邏輯與主圖一致。
  *
@@ -52,8 +52,8 @@ export function IslandInset({
   const noData = !region || region.metrics.meterTotal === 0
   const h = region ? metricHealth(region.metrics, 'lp') : 'good'
   const tone = healthTokens[h]
-  const patternId = `noMeterHatch-inset-${regionId}`
-  const fill = noData ? `url(#${patternId})` : tone.fill
+  // 無電表改實心淺灰（2026-11-17 同步正式機截圖，原為斜線紋）
+  const fill = noData ? noMeter.fill : tone.fill
 
   const clickable = !!region && !noData
 
@@ -80,12 +80,6 @@ export function IslandInset({
         height={height}
         style={{ width, height, pointerEvents: 'none', overflow: 'visible', display: 'block' }}
       >
-        <defs>
-          <pattern id={patternId} width={6} height={6} patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-            <rect width={6} height={6} fill={noMeter.fill} />
-            <line x1={0} y1={0} x2={0} y2={6} stroke={noMeter.stroke} strokeWidth={1.4} />
-          </pattern>
-        </defs>
         <Geographies geography={fc}>
           {({ geographies }) =>
             geographies.map((geo) => (

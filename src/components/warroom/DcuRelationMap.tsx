@@ -11,13 +11,14 @@ import { dcuStat, misassignedIn, misassignedOut, type MisDir } from '@/data/dcuM
 import { dcuInfo } from '@/data/dcuInfo'
 import { townsGeo, countiesGeoAll, INSET_COUNTY_IDS } from '@/data/geo/geo'
 import { IslandShortcuts } from './IslandShortcuts'
+import { HEALTH_FILL_OPACITY } from '@/tokens'
 import { addSelectedMeterLayer, setSelectedMeter } from './selectedMeterLayer'
 import { registerMap, unregisterMap, pushCamera, pullCamera, pushHistory, popHistory, clearHistory, setCameraScope, scopeKey } from './mapCamera'
 import { aggregateByArea, separateAggPoints, toAggFeatureCollection, MIN_SEP_DEG, citySepDeg } from './aggPoints'
 import {
   GROUP_COLORS, DIM_OPACITY, STATE_COLOR, STATE_LABEL, freqColor, pinColor, MIS_COLOR, STATUS,
   SEVERITY_COLOR, SEVERITY_STROKE, MAP_BG, FREQ_COLORS, OUTSIDE_FILL, OUTSIDE_OPACITY,
-  AREA_HOVER_LINE, AREA_HOVER_LINE_WIDTH, AREA_HOVER_FILL_OPACITY,
+  AREA_HOVER_LINE, AREA_HOVER_LINE_WIDTH, AREA_HOVER_FILL_OPACITY, AREA_LABEL_LAYOUT, AREA_LABEL_PAINT, AREA_LABEL_PAINT_PLAIN,
 } from './warroomConfig'
 import { registerMarkerIcons, ICON_MIS_METER, ICON_METER_DISABLED, ICON_MIS_AGG, dcuIconName } from './markerIcons'
 import { buildLabelPoints } from './polyLabels'
@@ -469,7 +470,7 @@ export function DcuRelationMap() {
       // 行政區選取層（L1／L2）—— 告警色與故障地圖同一組
       polyFC.current = latestRef.current!.buildPoly()
       map.addSource('rel-poly', { type: 'geojson', data: polyFC.current })
-      map.addLayer({ id: 'rel-poly-fill', type: 'fill', source: 'rel-poly', paint: { 'fill-color': ['get', 'sevColor'], 'fill-opacity': 0.8 } })
+      map.addLayer({ id: 'rel-poly-fill', type: 'fill', source: 'rel-poly', paint: { 'fill-color': ['get', 'sevColor'], 'fill-opacity': HEALTH_FILL_OPACITY } })
       map.addLayer({ id: 'rel-poly-line', type: 'line', source: 'rel-poly', paint: { 'line-color': ['get', 'sevStroke'], 'line-width': 0.9 } })
       // 滑過的區塊（各層級都有）：提亮＋灰色描邊。L3 的鄰區平常塗灰，滑過時要看得出「可以點過去」
       map.addLayer({
@@ -496,8 +497,8 @@ export function DcuRelationMap() {
       map.addSource('rel-poly-labels', { type: 'geojson', data: buildLabelPoints(polyFC.current) as any })
       map.addLayer({
         id: 'rel-poly-label', type: 'symbol', source: 'rel-poly-labels',
-        layout: { 'text-field': ['get', 'name'], 'text-size': 12, 'text-font': ['Open Sans Regular'] },
-        paint: { 'text-color': '#3A2F33', 'text-halo-color': '#fff', 'text-halo-width': 1.4 },
+        layout: { 'text-field': ['get', 'name'], ...AREA_LABEL_LAYOUT } as any,
+        paint: AREA_LABEL_PAINT as any,
       })
 
       /* ---- L1／L2：歸屬錯誤電表匯總球（一個行政區一顆，見 buildMisPoints） ---- */
@@ -868,11 +869,14 @@ export function DcuRelationMap() {
     map.setPaintProperty('rel-poly-fill', 'fill-color',
       (pickMode ? ['get', 'sevColor'] : ['case', ['get', 'outside'], OUTSIDE_FILL, '#FFFFFF']) as any)
     map.setPaintProperty('rel-poly-fill', 'fill-opacity',
-      (pickMode ? 0.8 : ['case', ['get', 'outside'], OUTSIDE_OPACITY, 0]) as any)
+      (pickMode ? HEALTH_FILL_OPACITY : ['case', ['get', 'outside'], OUTSIDE_OPACITY, 0]) as any)
     map.setPaintProperty('rel-poly-line', 'line-color', (pickMode ? ['get', 'sevStroke'] : BOUNDARY_LINE) as any)
     map.setPaintProperty('rel-poly-line', 'line-width', (pickMode ? 0.9 : 1) as any)
     map.setPaintProperty('rel-poly-line', 'line-opacity', (pickMode ? 1 : 0.28) as any)
     map.setPaintProperty('rel-poly-label', 'text-opacity', (pickMode ? 1 : 0.55) as any)
+    // 區名配色：L1／L2 色塊上依底色（同系統總覽）；L3 底圖白／灰，改回深字白光暈
+    const labelPaint: Record<string, unknown> = pickMode ? AREA_LABEL_PAINT : AREA_LABEL_PAINT_PLAIN
+    Object.entries(labelPaint).forEach(([k, v]) => map.setPaintProperty('rel-poly-label', k as any, v as any))
 
     // L2 的六邊形小一號（L1 維持原尺寸）
     const l2 = level !== 'taiwan'

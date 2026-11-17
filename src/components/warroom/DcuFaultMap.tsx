@@ -3,13 +3,14 @@ import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { townsGeo, countiesGeoAll, INSET_COUNTY_IDS } from '@/data/geo/geo'
 import { IslandShortcuts } from './IslandShortcuts'
+import { HEALTH_FILL_OPACITY } from '@/tokens'
 import {
   districtStats, statByDistrict, cityStats, statByCity,
   dcuById, meterById, CITIES, districtsOf, dcusInScope, ONLINE_RATE_THRESHOLDS, type Dcu,
 } from '@/data/dcuFleet'
 import {
   SEVERITY_COLOR, SEVERITY_STROKE, STATE_COLOR, STATE_LABEL, MAP_BG, CLUSTER_COLOR, CLUSTER_TEXT,
-  AREA_HOVER_LINE, AREA_HOVER_LINE_WIDTH, AREA_HOVER_FILL_OPACITY,
+  AREA_HOVER_LINE, AREA_HOVER_LINE_WIDTH, AREA_HOVER_FILL_OPACITY, AREA_LABEL_LAYOUT, AREA_LABEL_PAINT,
 } from './warroomConfig'
 import { addSelectedMeterLayer, setSelectedMeter } from './selectedMeterLayer'
 import { registerMap, unregisterMap, pushCamera, pullCamera, pushHistory, popHistory, clearHistory, setCameraScope, scopeKey } from './mapCamera'
@@ -157,7 +158,7 @@ export function DcuFaultMap() {
       registerMarkerIcons(map)
       map.addSource('poly', { type: 'geojson', data: polyFC.current })
       // 無圖磚底圖 → 色塊改用系統總覽的不透明度，邊框用同一層級的 stroke 色
-      map.addLayer({ id: 'poly-fill', type: 'fill', source: 'poly', paint: { 'fill-color': ['get', 'sevColor'], 'fill-opacity': 0.8 } })
+      map.addLayer({ id: 'poly-fill', type: 'fill', source: 'poly', paint: { 'fill-color': ['get', 'sevColor'], 'fill-opacity': HEALTH_FILL_OPACITY } })
       map.addLayer({ id: 'poly-line', type: 'line', source: 'poly', paint: { 'line-color': ['get', 'sevStroke'], 'line-width': 0.9 } })
       // 滑過的區塊：提亮＋灰色描邊（與電表歸屬地圖同一組，2026-09-29 業主意見）
       map.addLayer({ id: 'poly-hover-fill', type: 'fill', source: 'poly', filter: ['==', ['get', 'name'], ''], paint: { 'fill-color': '#FFFFFF', 'fill-opacity': AREA_HOVER_FILL_OPACITY } })
@@ -165,7 +166,7 @@ export function DcuFaultMap() {
       // 選取描邊（poly-sel / poly-sel-halo）依業主意見移除 —— 下鑽後鏡頭本身就框住該區
       // 區名另用「一名一點」的 source：直接掛在多邊形上，MultiPolygon 的離島會各標一次
       map.addSource('poly-labels', { type: 'geojson', data: buildLabelPoints(polyFC.current) as any })
-      map.addLayer({ id: 'poly-label', type: 'symbol', source: 'poly-labels', layout: { 'text-field': ['get', 'name'], 'text-size': 12, 'text-font': ['Open Sans Regular'] }, paint: { 'text-color': '#3A2F33', 'text-halo-color': '#fff', 'text-halo-width': 1.4 } })
+      map.addLayer({ id: 'poly-label', type: 'symbol', source: 'poly-labels', layout: { 'text-field': ['get', 'name'], ...AREA_LABEL_LAYOUT } as any, paint: AREA_LABEL_PAINT as any })
       const st0 = useWarroom.getState()
 
       // 群集：只呈現「故障（斷線）DCU 數」的紅球 —— 依業主意見不再畫藍色的「全部 DCU」球。

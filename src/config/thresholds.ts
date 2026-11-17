@@ -35,6 +35,14 @@ export function isRateAlert(value: number): boolean {
   return value < RATE_ALERT_BELOW
 }
 
+/**
+ * KPI 大字的三態（2026-11-17 同步正式機截圖）：良好黑字、注意黃字、警告紅字，
+ * 門檻沿用 THRESHOLDS（連線率 98／95、讀表率 97／95）。取代原本只有 <95% 轉紅的 isRateAlert。
+ */
+export function rateHealth(metric: MetricKey, value: number): Health {
+  return classify(value, THRESHOLDS[metric])
+}
+
 /** classify a single metric value against its threshold */
 export function classify(value: number, t: Threshold): Health {
   if (value >= t.good) return 'good'

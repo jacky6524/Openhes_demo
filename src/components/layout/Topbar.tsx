@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
-import { ChevronDown, UserCircle2, LogOut, PanelLeft, Check } from 'lucide-react'
+import { ChevronDown, UserCircle2, Settings, LogOut, PanelLeft, Check } from 'lucide-react'
 import { useCaseFilter, caseLabel, CASES } from '@/store/useCaseFilter'
 import { ProfileModal } from '@/components/layout/ProfileModal'
 
 /*
  * 2026-11-06 業主設計稿：拿掉「設定」、logo 前的 FET 方塊與案別徽章；案別下拉移到 logo 右側
  * （直接顯示已選案別全名）；「帳號」點開個人資料維護。
+ * 2026-11-17 同步正式機系統總覽截圖：加回「設定」（demo 無功能）；案別未選時顯示「全部」，
+ * 按鈕改為品牌淡粉底、無框，已選文字用品牌紅。
  */
 
 export function Topbar({ onToggleSidebar }: { onToggleSidebar: () => void }) {
@@ -31,6 +33,7 @@ export function Topbar({ onToggleSidebar }: { onToggleSidebar: () => void }) {
 
       <nav className="flex items-center gap-1 text-ink-sub">
         <TopAction icon={<UserCircle2 size={16} />} label="帳號" onClick={() => setProfile(true)} />
+        <TopAction icon={<Settings size={16} />} label="設定" />
         <TopAction icon={<LogOut size={16} />} label="登出" />
       </nav>
       {profile && <ProfileModal onClose={() => setProfile(false)} />}
@@ -60,19 +63,18 @@ function CaseDropdown() {
     return () => document.removeEventListener('mousedown', onDown)
   }, [open])
 
-  const label = selected.size === 0 ? 'ALL' : caseLabel(selected)
+  const label = caseLabel(selected)
 
   return (
-    <div ref={ref} className="relative">
+    <div ref={ref} className="relative shrink-0">
       <button
         onClick={() => setOpen((o) => !o)}
-        className={`ml-2 flex items-center gap-1.5 text-sm px-2.5 py-1.5 rounded-lg border border-border bg-surface hover:border-brand ${
-          open ? 'text-ink' : 'text-ink-sub hover:text-ink'
-        }`}
+        className="ml-2 flex items-center gap-1.5 whitespace-nowrap rounded-lg bg-brand-soft px-3 py-1.5 text-sm hover:bg-brand-soft-hover"
       >
-        <span className="text-ink-mut">案別</span>
-        <span className="text-ink font-semibold max-w-[420px] truncate">{label}</span>
-        <ChevronDown size={15} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
+        <span className="text-ink-sub">案別</span>
+        {/* 已選案別完整顯示，不截斷（業主 2026-11-06） */}
+        <span className="text-brand font-semibold whitespace-nowrap">{label}</span>
+        <ChevronDown size={15} className={`text-brand transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
 
       {open && (

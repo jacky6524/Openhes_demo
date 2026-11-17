@@ -221,9 +221,11 @@ export function MeterList() {
               <col style={{ width: '9%' }} />{/* FAN MAC */}
               <col style={{ width: '8%' }} />{/* 模組序號 */}
               <col style={{ width: '11%' }} />{/* 地址 */}
-              <col style={{ width: '6%' }} />{/* IP */}
-              <col style={{ width: '6%' }} />{/* 最後LP */}
-              <col style={{ width: '6%' }} />{/* 最後MN */}
+              {/* IP 固定寬：xxx.xxx.xxx.xxx 不換行約需 116px（儲存格左右留白縮為 8px）（2026-11-17 業主：IP 被換行） */}
+              <col style={{ width: '116px' }} />{/* IP */}
+              {/* 日期不換行（YYYY/MM/DD 約需 92px，留白 8px），窄螢幕下 6% 會溢出疊到隔壁欄 → 固定寬 */}
+              <col style={{ width: '92px' }} />{/* 最後LP */}
+              <col style={{ width: '92px' }} />{/* 最後MN */}
               <col style={{ width: '64px' }} />{/* 操作 */}
             </colgroup>
             <thead>
@@ -259,9 +261,9 @@ export function MeterList() {
                   {/* 序號不用等寬字：等寬字字身較矮，同為 13px 看起來仍小一號（業主 2026-11-04） */}
                   <td className="px-3 py-3 tabular-nums text-ink-sub break-all">{m.moduleSerial}</td>
                   <td className="px-3 py-3 text-[14px] leading-snug text-ink"><span className="line-clamp-2" title={m.address}>{m.address}</span></td>
-                  <td className="px-3 py-3 font-mono text-ink-sub break-all">{m.ip}</td>
-                  <td className="px-3 py-3 tabular-nums" style={{ color: stale(m.lastLpSameDay) }}>{m.lastLp ? <StampLines value={hm(m.lastLp)} /> : '--'}</td>
-                  <td className="px-3 py-3 tabular-nums" style={{ color: stale(m.lastMnSameDay) }}>{m.lastMn ? <StampLines value={hm(m.lastMn)} /> : '--'}</td>
+                  <td className="px-2 py-3 font-mono text-ink-sub whitespace-nowrap">{m.ip}</td>
+                  <td className="px-2 py-3 tabular-nums" style={{ color: stale(m.lastLpSameDay) }}>{m.lastLp ? <StampLines value={hm(m.lastLp)} /> : '--'}</td>
+                  <td className="px-2 py-3 tabular-nums" style={{ color: stale(m.lastMnSameDay) }}>{m.lastMn ? <StampLines value={hm(m.lastMn)} /> : '--'}</td>
                   <td className="px-2 py-3">
                     <div className="flex items-center justify-end gap-2">
                       <button onClick={() => setDetailMeter(m.meterNo)} title={m.eventCount ? `詳細資料（${m.eventCount} 筆事件）` : '詳細資料'} className="text-ink-mut hover:text-brand">

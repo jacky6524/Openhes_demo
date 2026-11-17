@@ -3,9 +3,10 @@ import { TrendArrow } from './TrendArrow'
 import { InfoPopover, Note } from './InfoPopover'
 import { useCurrentNode, useDashboard } from '@/store/useDashboard'
 import { fmtInt } from '@/lib/format'
-import { isRateAlert, METRIC_FIELD } from '@/config/thresholds'
+import { rateHealth, METRIC_FIELD } from '@/config/thresholds'
 import { trendDelta } from '@/lib/trends'
-import { status, text } from '@/tokens'
+import { status, text, RATE_BAR } from '@/tokens'
+import { VALUE_COLOR } from './valueTone'
 import type { MetricKey } from '@/types'
 
 /** 讀表率更新：每小時（整點） */
@@ -25,19 +26,33 @@ const READ_CALC: Partial<Record<MetricKey, string>> = {
 const SHOW_UPDATE: Partial<Record<MetricKey, boolean>> = { midnight: true }
 
 /**
+ * 當日累積讀表率（mock）：MN 每日只讀一次，累積＝當下值；LP／ALT 為整點累積，
+ * 以 node id 雜湊出 0～2.5 個百分點的差距（同一區永遠同值）。
+ */
+function dailyCumulative(nodeId: string, metric: MetricKey, value: number): number {
+  if (metric === 'midnight') return value
+  let x = 2166136261
+  for (const c of `${nodeId}:${metric}:cum`) { x ^= c.charCodeAt(0); x = Math.imul(x, 16777619) }
+  return Math.min(100, value + ((x >>> 0) / 4294967296) * 2.5)
+}
+
+/**
  * 讀表率 KPI 卡（LP / MN午夜 / ALT）— 對齊前端 `.metric-card`：
  *   padding: 0 12px; justify-content: center
  *   .metric-heading--spread → 標題與趨勢左右對齊
  *   .metric-title  14/500/ls .5px/text-secondary
  *   .metric-value  36/800/lh 40，僅 <95% 轉 --status-error-emphasis
  * Hover 顯示計算方式與「排除停用」備註（MN 另附更新時間）。
+ * 2026-11-17 同步正式機截圖：數值一位小數、依三態著色；右下加「當日累積讀表 X%」與進度條
+ * （正式機為紅色，業主要求改淡藍以避開告警色）。
  */
 export function RateKpiCard({ metric, label }: { metric: MetricKey; label: string }) {
   const node = useCurrentNode()
   const selected = useDashboard((s) => s.selectedKpi)
   const selectKpi = useDashboard((s) => s.selectKpi)
   const value = node.metrics[METRIC_FIELD[metric]]
-  const alert = isRateAlert(value)
+  const tone = rateHealth(metric, value)
+  const cum = dailyCumulative(node.id, metric, value)
 
   return (
     <Card
@@ -52,11 +67,20 @@ export function RateKpiCard({ metric, label }: { metric: MetricKey; label: strin
           </span>
           <TrendArrow delta={trendDelta(node, metric)} higherIsBetter />
         </div>
-        <div
-          className="mt-2 text-[36px] font-extrabold leading-10 tabular-nums"
-          style={{ color: alert ? status.danger.fg : text.primary }}
-        >
-          {value.toFixed(2)}
+        <div className="mt-2 flex items-end justify-between gap-4">
+          <div className="text-[36px] font-extrabold leading-10 tabular-nums" style={{ color: VALUE_COLOR[tone] }}>
+            {value.toFixed(1)}
+          </div>
+          {/* 當日累積讀表 */}
+          <div className="mb-1 grid w-[52%] max-w-[200px] min-w-[120px] gap-1.5">
+            <div className="flex items-baseline justify-between gap-2 whitespace-nowrap text-[11.5px] font-medium text-ink-sub">
+              <span>當日累積讀表</span>
+              <span className="font-bold tabular-nums text-ink">{cum.toFixed(1)}%</span>
+            </div>
+            <div className="h-[5px] w-full overflow-hidden rounded-full" style={{ background: '#EEE8EA' }}>
+              <div className="h-full rounded-full" style={{ width: `${cum}%`, background: RATE_BAR }} />
+            </div>
+          </div>
         </div>
       </div>
 

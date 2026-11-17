@@ -40,7 +40,7 @@ const NAV: NavItem[] = [
     children: [
       { label: '電表清單', view: 'meterList' },
       { label: 'DCU清單', view: 'dcuList' },
-      { label: '即裝即查', view: 'instantQuery' },
+      { label: '即時查詢', view: 'instantQuery' },
       { label: '註冊衝突', view: 'registrationConflict' },
       { label: '裝置群組', view: 'deviceGroups' },
       { label: '裝置紀錄', view: 'deviceRecord' },

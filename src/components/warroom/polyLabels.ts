@@ -49,24 +49,25 @@ function centroid(ring: number[][]): [number, number] {
 /**
  * 由多邊形 FeatureCollection 產生「一個名稱一個點」的標籤 source。
  * nameKey 預設 'name'（故障地圖與關係地圖都已在 properties 補上 name）。
+ * 點的 properties 沿用面積最大那塊多邊形的 properties（含 sevColor，供區名依底色配色）。
  */
 export function buildLabelPoints(fc: { features: any[] }, nameKey = 'name') {
-  const best = new Map<string, { area: number; ring: number[][] }>()
+  const best = new Map<string, { area: number; ring: number[][]; props: any }>()
   for (const f of fc.features) {
     const name = f.properties?.[nameKey]
     if (!name) continue
     for (const ring of ringsOf(f.geometry)) {
       const area = Math.abs(signedArea(ring))
       const cur = best.get(name)
-      if (!cur || area > cur.area) best.set(name, { area, ring })
+      if (!cur || area > cur.area) best.set(name, { area, ring, props: f.properties })
     }
   }
   return {
     type: 'FeatureCollection' as const,
-    features: [...best.entries()].map(([name, { ring }]) => ({
+    features: [...best.entries()].map(([name, { ring, props }]) => ({
       type: 'Feature' as const,
       geometry: { type: 'Point' as const, coordinates: centroid(ring) },
-      properties: { name },
+      properties: { ...props, name },
     })),
   }
 }

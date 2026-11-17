@@ -7,8 +7,10 @@ import { fmtInt } from '@/lib/format'
 import { offlineGap } from '@/lib/aggregate'
 import { trendDelta } from '@/lib/trends'
 import { dcuStats, dcuTrendDelta } from '@/lib/dcu'
-import { isRateAlert } from '@/config/thresholds'
-import { status, text } from '@/tokens'
+import { rateHealth } from '@/config/thresholds'
+import { classifySeverity } from '@/data/dcuFleet'
+import { VALUE_COLOR } from './valueTone'
+import { status } from '@/tokens'
 
 /**
  * 連線率卡（電表 / DCU）— 對齊前端 `.metric-card--wide` / `.metric-card--dcu`：
@@ -18,6 +20,8 @@ import { status, text } from '@/tokens'
  *   左：metric-title 14/500 + metric-value 36/800
  *   右：summary-bars（5px 軌道，只填未連線紅段）
  *       summary-layout: minmax(80px,1.4fr) 1fr 1fr → 未連線 / 已連線 / 總數
+ * 2026-11-17 同步正式機截圖：數值一位小數、依三態著色（電表用連線率門檻、DCU 用 ONLINE_RATE_THRESHOLDS）；
+ * 電表卡拿掉頂部進度條（DCU 卡保留）；未連線變化量依方向顯示（減少＝黑色向下、增加＝紅色向上）。
  */
 export function RatioCard({ variant }: { variant: 'meter' | 'dcu' }) {
   const node = useCurrentNode()
@@ -39,6 +43,8 @@ export function RatioCard({ variant }: { variant: 'meter' | 'dcu' }) {
           calc: '已連線電表 / 電表總數',
           // 電表連線率顯示更新時間；DCU 連線率依會議決議移除
           showUpdate: true,
+          tone: rateHealth('connect', m.connectRate),
+          showBar: false,
         }
       : {
           label: 'DCU 連線率(%)',
@@ -50,6 +56,8 @@ export function RatioCard({ variant }: { variant: 'meter' | 'dcu' }) {
           offline: dcu.offline,
           calc: '已連線DCU / DCU總數',
           showUpdate: false,
+          tone: ({ normal: 'good', warn: 'warning', alert: 'alert' } as const)[classifySeverity(dcu.rate / 100)],
+          showBar: true,
         }
 
   return (
@@ -76,6 +84,8 @@ function ConnBlock({
   total,
   totalLabel,
   offline,
+  tone,
+  showBar,
 }: {
   label: string
   rate: number
@@ -84,12 +94,15 @@ function ConnBlock({
   total: number
   totalLabel: string
   offline: number
+  tone: keyof typeof VALUE_COLOR
+  showBar: boolean
 }) {
   const offlinePct = total > 0 ? (offline / total) * 100 : 0
   const offlineDelta = Math.max(1, Math.round(offline * 0.013)) // deterministic mock Δ
+  // 連線率上升 ⇒ 未連線減少（黑色向下）；下降 ⇒ 未連線增加（紅色向上）
+  const offlineUp = trend < 0
   // 未連線 / 斷線 一律紅色標示；連線率大字預設黑字，僅低於告警值 (<95%) 轉紅。
   const offAccent = status.danger.fg
-  const rateAlert = isRateAlert(rate)
 
   return (
     <>
@@ -103,22 +116,24 @@ function ConnBlock({
         </div>
         <div
           className="mt-1 text-[36px] font-extrabold leading-10 tabular-nums"
-          style={{ color: rateAlert ? status.danger.fg : text.primary }}
+          style={{ color: VALUE_COLOR[tone] }}
         >
-          {rate.toFixed(2)}
+          {rate.toFixed(1)}
         </div>
       </div>
 
       {/* .meter-summary / .dcu-summary */}
       <div className="grid min-w-0 gap-[5px]">
-        {/* .summary-bars — 空容器只填「未連線」紅段 */}
-        <div className="flex h-[5px] w-full overflow-hidden rounded-full" style={{ background: '#EEE8EA' }}>
-          <div
-            className="shrink-0"
-            style={{ width: `${Math.max(offlinePct, offline > 0 ? 1.5 : 0)}%`, background: offAccent }}
-          />
-          <div className="flex-1" style={{ background: '#E7E3E4' }} />
-        </div>
+        {/* .summary-bars — 空容器只填「未連線」紅段（電表卡不顯示） */}
+        {showBar && (
+          <div className="flex h-[5px] w-full overflow-hidden rounded-full" style={{ background: '#EEE8EA' }}>
+            <div
+              className="shrink-0"
+              style={{ width: `${Math.max(offlinePct, offline > 0 ? 1.5 : 0)}%`, background: offAccent }}
+            />
+            <div className="flex-1" style={{ background: '#E7E3E4' }} />
+          </div>
+        )}
 
         {/* .summary-layout */}
         <div className="grid min-w-0 grid-cols-[minmax(80px,1.4fr)_minmax(0,1fr)_minmax(0,1fr)] gap-2">
@@ -129,9 +144,9 @@ function ConnBlock({
               <em className="not-italic">未連線</em>
               <small
                 className="trend-trigger group/trend relative ml-[3px] inline-flex cursor-default items-center gap-0.5 text-[12px] font-bold tabular-nums"
-                style={{ color: offAccent }}
+                style={{ color: offlineUp ? offAccent : '#2D2B2D' }}
               >
-                <TrendGlyph direction="up" size={14} />
+                <TrendGlyph direction={offlineUp ? 'up' : 'down'} size={14} />
                 {fmtInt(offlineDelta)}
                 <TrendTip method="與前一小時相比" align="left" />
               </small>
