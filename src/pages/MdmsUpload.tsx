@@ -1,197 +1,254 @@
 import { useMemo, useState } from 'react'
-import { Bar, CartesianGrid, ComposedChart, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { Bar, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { PageTitle } from '@/components/shared/PageTitle'
+import { PillTabs } from '@/components/shared/PillTabs'
 import { TargetSearchMulti, parseTargets, type TargetMode } from '@/components/shared/TargetSearch'
-import { Field, GroupSelect, MultiSelect, QueryButtons, RangeInput } from '@/components/shared/QueryFields'
-import { status as statusTok } from '@/tokens'
-import { ReuploadBar } from '@/components/mdms/ReuploadBar'
+import { Field, GroupSelect, QueryButtons, RangeInput } from '@/components/shared/QueryFields'
+import { ReuploadPanel } from '@/components/mdms/ReuploadPanel'
 import {
-  MDMS_TYPES, DEFAULT_MDMS_KEYS, MDMS_ALERT, buckets, fmtStamp, parseLocal,
-  type MdmsBucket, type MdmsKey, type MdmsType,
+  DASH_KEYS, DASH_COLOR, DASH_CADENCE, MDMS_TYPES, dashPoints, fmtStamp, parseLocal,
+  type DashKey, type DashPoint,
 } from '@/data/mdmsUpload'
 
 /**
- * 讀表管理 · MDMS上拋（設計稿「MDMS上拋-1」圖表檢視、「MDMS上拋-2」卡片檢視）。
+ * 讀表管理 · MDMS上拋。
  *
- * 條件：表號／電號／群組、資料類型（複選）、上拋電表資料時間（區間）。
- * 畫面：各類型最新時段的達成率卡片＋趨勢分析折線圖（LP／ALT／MN… 頁籤、90% 注意線、低於注意線的時段紅帶）。
- * 2026-11-04 業主意見：不需要沒有圖表的「卡片檢視」（設計稿 MDMS上拋-2），已移除，右上角切換鈕一併拿掉。
- * 達成率＝已上拋／總數，低於 MDMS_ALERT 以紅色顯示。資料全為 mock（data/mdmsUpload.ts）。
- * 2026-11-04 業主意見：輸入欄以即時讀表為準 —— 搜尋改膠囊頁籤（表號／電號／群組）＋多行輸入（可貼多筆），
- * 群組改下拉（裝置群組頁的群組），上拋電表資料時間改 24 小時制、15 分一格（共用 components/shared/QueryFields）。
- * 同日業主確認：資料時間**單次上限 1 個月**（同即時讀表）；資料類型要**能同時比較多種** → 複選下拉。
- *   選多種：上排每種類型一張最新時段卡，趨勢圖用膠囊頁籤切換類型
- *   只選一種：上排顯示該類型最新三個時段
- * 2026-11-11 業主意見：卡片與趨勢分析之間加一行「重新上拋」（搜尋並執行上拋，components/mdms/ReuploadBar.tsx）；
- *   上方搜尋列＝看上拋狀況（dashboard），這一行＝重新上拋，兩者分開。
+ * 2026-11-19 業主意見（參考圖 1119更新參考/MDMS上拋 (4).png）改版成**兩大板塊**：
+ *   左＝Dashboard「MDMS查詢」（先看）、右＝「上拋操作」（再操作，components/mdms/ReuploadPanel.tsx）。
+ *   · LP／MN／ALT 三個識別色（DASH_COLOR），**與告警無關**——達成率低也不轉紅、拿掉 90% 注意線與紅帶
+ *   · 時間搜尋以**整點**為單位（時間下拉 00:00～23:00）
+ *   · 一次搜尋同時更新三張卡與折線圖；點卡片＝切到該類型的頁籤
+ *   · 類型改用折線圖頁籤區分：ALL（三條線、只分顏色）／LP／MN／ALT（單一類型才有柱狀「缺值」筆數）
+ *   · 原本的「選擇資料類型」複選下拉拿掉（卡片固定三種，類型由頁籤切）
+ *   · 重新上拋加「群組」
+ * 折線圖 Y 軸下緣依資料自動調整（值多在 85～100，固定 0～100 會擠在頂端分不出三條線）。
+ * 卡片＝區間內最新一個時段（同參考圖：右上角是時段時間）；進行中的時段標「上拋中」，折線圖不畫進行中時段。
+ * 資料全為 mock（data/mdmsUpload.ts 的 dashPoints）。
  */
-const GREEN = statusTok.normal.fg
-const RED = statusTok.danger.fg
-const BLUE = statusTok.info.fg
-const CHART_LIMIT = 192
-
 interface Applied {
   mode: TargetMode
   text: string // 表號／電號（多筆以換行分隔）
   group: string // 群組模式選的群組：`${kind}:${群組名}`
-  keys: MdmsKey[] // 資料類型（複選下拉，依選項順序）
-  from: string // 'YYYY-MM-DDTHH:mm'（日期輸入框的格式；分鐘只會是 00／15／30／45）
+  from: string // 'YYYY-MM-DDTHH:00'
   to: string
 }
-const DEFAULT: Applied = { mode: 'meterNo', text: '', group: '', keys: DEFAULT_MDMS_KEYS, from: '2026-01-02T11:00', to: '2026-01-02T15:00' }
+const DEFAULT: Applied = { mode: 'meterNo', text: '', group: '', from: '2026-01-02T11:00', to: '2026-01-02T15:00' }
 
-const toneOf = (pct: number) => (pct < MDMS_ALERT ? RED : GREEN)
+/** 折線圖最多畫最後 48 小時（LP 15 分一點＝192 點） */
+const CHART_HOURS = 48
+type Tab = 'ALL' | DashKey
+const TABS: { key: Tab; label: string }[] = [{ key: 'ALL', label: 'ALL' }, ...DASH_KEYS.map((k) => ({ key: k, label: k }))]
+
 const fmtN = (n: number) => n.toLocaleString('en-US')
+const labelOf = (k: DashKey) => MDMS_TYPES.find((t) => t.key === k)!.label
 
 export function MdmsUpload() {
   const [draft, setDraft] = useState<Applied>(DEFAULT)
   const [applied, setApplied] = useState<Applied>(DEFAULT)
+  const [tab, setTab] = useState<Tab>('ALL')
   const set = <K extends keyof Applied>(k: K, v: Applied[K]) => setDraft((d) => ({ ...d, [k]: v }))
   const search = () => setApplied(draft)
   const clear = () => { setDraft(DEFAULT); setApplied(DEFAULT) }
 
-  // 每種選定的類型 → 範圍內各時段（新→舊）。起訖顛倒時自動對調
+  // 三種類型 → 區間內各點（舊→新）。起訖顛倒時自動對調
   const series = useMemo(() => {
     const a = parseLocal(applied.from) ?? 0
     const b = parseLocal(applied.to) ?? 0
     const [from, to] = a <= b ? [a, b] : [b, a]
-    // mock 依查詢對象錯開數字（同一組對象每次結果相同）
     const target = applied.mode === 'group' ? applied.group : parseTargets(applied.text).join(',')
     const scale = target ? `${applied.mode}:${target}` : ''
-    return MDMS_TYPES.filter((t) => applied.keys.includes(t.key)).map((type) => ({ type, rows: buckets(type, from, to, scale) }))
+    return Object.fromEntries(DASH_KEYS.map((k) => [k, dashPoints(k, from, to, scale)])) as Record<DashKey, DashPoint[]>
   }, [applied])
 
   return (
-    <div className="flex h-full min-h-[680px] min-w-[1280px] flex-col gap-3 p-4">
+    <div className="flex h-full min-h-[720px] min-w-[1280px] flex-col gap-3 p-4">
       <PageTitle title="MDMS上拋" />
 
-      <div className="flex flex-col gap-2">
-        <TargetSearchMulti
-          mode={draft.mode}
-          text={draft.text}
-          onMode={(m) => set('mode', m)}
-          onText={(v) => set('text', v)}
-          onSubmit={search}
-          groupInput={<GroupSelect value={draft.group} onChange={(v) => set('group', v)} />}
-        />
-        <div className="flex flex-wrap items-end gap-2">
-          <Field label="選擇資料類型">
-            <MultiSelect
-              options={MDMS_TYPES.map((t) => ({ value: t.key, label: t.label }))}
-              value={draft.keys}
-              onChange={(v) => set('keys', v)}
-              placeholder="請選擇資料類型"
-            />
-          </Field>
-          <Field label="上拋電表資料時間" hint="單次查詢上限 1 個月">
-            <RangeInput from={draft.from} to={draft.to} maxMonths={1} onChange={(from, to) => setDraft((d) => ({ ...d, from, to }))} />
-          </Field>
-          <QueryButtons onClear={clear} onSearch={search} />
-        </div>
-      </div>
+      <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_400px] gap-4">
+        {/* ── 左：Dashboard ── */}
+        <section className="flex min-h-0 flex-col gap-4 rounded-card border border-border bg-surface p-5 shadow-card">
+          <PanelTitle>MDMS查詢</PanelTitle>
 
-      {series.length === 0 ? (
-        <div className="rounded-card border border-border bg-surface py-16 text-center text-[13px] text-ink-mut shadow-card">請至少選擇一種資料類型</div>
-      ) : (
-        <ChartView series={series} from={applied.from} to={applied.to} />
-      )}
+          <div className="flex flex-col gap-3">
+            <TargetSearchMulti
+              mode={draft.mode}
+              text={draft.text}
+              onMode={(m) => set('mode', m)}
+              onText={(v) => set('text', v)}
+              onSubmit={search}
+              groupInput={<GroupSelect value={draft.group} onChange={(v) => set('group', v)} className="w-[360px]" />}
+            />
+            <div className="flex flex-wrap items-end gap-2">
+              <Field label="上拋電表資料時間" hint="以整點為單位，單次上限 1 個月">
+                <RangeInput from={draft.from} to={draft.to} maxMonths={1} stepMin={60} onChange={(from, to) => setDraft((d) => ({ ...d, from, to }))} />
+              </Field>
+              <QueryButtons onClear={clear} onSearch={search} />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-4">
+            {DASH_KEYS.map((k) => (
+              <RateCard key={k} k={k} b={series[k][series[k].length - 1]} active={tab === k} onClick={() => setTab(tab === k ? 'ALL' : k)} />
+            ))}
+          </div>
+
+          <TrendPanel series={series} tab={tab} onTab={setTab} />
+        </section>
+
+        {/* ── 右：上拋操作 ── */}
+        <ReuploadPanel typeKey={tab === 'ALL' ? 'LP' : tab} from={applied.from} to={applied.to} />
+      </div>
     </div>
   )
 }
 
-type OneSeries = { type: MdmsType; rows: MdmsBucket[] }
-type Series = OneSeries[]
-
-/* ───────────────────────── 圖表檢視 ───────────────────────── */
-
-const fmtOf = (t: MdmsType) => (t.stepMin >= 1440 ? 'date' : 'time')
-
-/**
- * 選多種：上排每種類型一張「最新時段」卡（最多 4 張一列），趨勢圖用膠囊頁籤切換類型；
- * 只選一種：上排三張＝該類型最新三個時段（第一張帶類型名稱），趨勢圖不需頁籤。
- */
-function ChartView({ series, from, to }: { series: Series; from: string; to: string }) {
-  const [pick, setPick] = useState<MdmsKey>(series[0].type.key)
-  const cur = series.find((s) => s.type.key === pick) ?? series[0]
-  const single = series.length === 1
+export function PanelTitle({ children, extra }: { children: React.ReactNode; extra?: React.ReactNode }) {
   return (
-    <>
-      {single ? (
-        <div className="grid grid-cols-3 gap-4">
-          {[0, 1, 2].map((i) => (
-            <RateCard key={i} title={i === 0 ? cur.type.label : undefined} b={cur.rows[i]} fmt={fmtOf(cur.type)} big={i === 0} />
-          ))}
-        </div>
-      ) : (
-        <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${Math.min(series.length, 4)}, minmax(0, 1fr))` }}>
-          {series.map(({ type, rows }) => (
-            <RateCard key={type.key} title={type.label} b={rows[0]} fmt={fmtOf(type)} big />
-          ))}
-        </div>
-      )}
-      {/* 重新上拋：資料類型跟著下方趨勢的頁籤 */}
-      <ReuploadBar typeKey={cur.type.key} from={from} to={to} />
-      <TrendPanel series={series} cur={cur} onPick={setPick} />
-    </>
+    <div className="flex items-center gap-2">
+      <span className="h-4 w-[3px] rounded-full bg-danger" />
+      <h2 className="text-[16px] font-semibold text-ink">{children}</h2>
+      {extra}
+    </div>
   )
 }
 
-function TrendPanel({ series, cur, onPick }: { series: Series; cur: OneSeries; onPick: (k: MdmsKey) => void }) {
-  const daily = cur.type.stepMin >= 1440
-  // 進行中的時段才剛開始上拋，不是真的掉線，不畫進趨勢
-  const settled = cur.rows.filter((r) => !r.inProgress)
-  const excluded = settled.length < cur.rows.length
-  const points = useMemo(() => {
-    const multiDay = settled.length > 1 && settled[0].ts - settled[settled.length - 1].ts >= 86_400_000
-    return settled
-      .slice(0, CHART_LIMIT)
-      .reverse()
-      .map((r) => ({
-        ...r,
-        label: daily ? fmtStamp(r.ts, false).slice(5) : multiDay ? fmtStamp(r.ts).slice(5) : fmtStamp(r.ts).slice(11),
-        dip: r.pct < MDMS_ALERT ? 100 : 0,
-      }))
-  }, [settled, daily])
+/* ───────────────────────── 達成率卡片 ───────────────────────── */
 
+function RateCard({ k, b, active, onClick }: { k: DashKey; b?: DashPoint; active: boolean; onClick: () => void }) {
+  const c = DASH_COLOR[k]
   return (
-    <div className="flex min-h-0 flex-1 flex-col rounded-card border border-border bg-surface p-4 shadow-card">
-      <div className="flex items-center justify-between">
-        <div className="flex items-baseline gap-2">
-          <h2 className="text-[15px] font-semibold text-ink">趨勢分析・{cur.type.label}</h2>
-          <span className="text-[12px] text-ink-mut">{cur.type.cadence}{excluded && ' · 不含進行中時段'}</span>
-        </div>
-        {/* 選了多種才需要切換 */}
-        {series.length > 1 && (
-          <div className="inline-flex rounded-full bg-inset p-1">
-            {series.map(({ type }) => {
-              const on = type.key === cur.type.key
-              return (
-                <button
-                  key={type.key}
-                  onClick={() => onPick(type.key)}
-                  className={`rounded-full px-3 py-1 text-[12px] font-bold transition-colors ${on ? 'bg-surface text-brand shadow-card' : 'text-ink-sub'}`}
-                >
-                  {type.key === 'event' ? '事件' : type.key}
-                </button>
-              )
-            })}
-          </div>
+    <button
+      type="button"
+      onClick={onClick}
+      title={active ? '再點一次回到 ALL' : `折線圖切到 ${k}`}
+      className="rounded-card px-4 pb-4 pt-3 text-left transition-shadow hover:shadow-card"
+      style={{ background: c.tint, boxShadow: active ? `inset 0 0 0 2px ${c.line}` : undefined }}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[14px] font-semibold text-ink">{labelOf(k)}</span>
+        {b && (
+          <span className="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-[12px] tabular-nums text-ink-mut">
+            {b.inProgress && <span className="rounded-full bg-surface px-1.5 py-px text-[11px] font-semibold" style={{ color: c.line }}>上拋中</span>}
+            {fmtStamp(b.ts).slice(5)}
+          </span>
         )}
       </div>
-      <div className="mt-2 text-[12px] text-ink-mut">%</div>
-      {points.length === 0 ? (
-        <div className="grid min-h-[300px] flex-1 place-items-center text-[13px] text-ink-mut">這個區間沒有已完成的時段</div>
+      {!b ? (
+        <div className="py-6 text-[13px] text-ink-mut">這個區間沒有時段</div>
       ) : (
-        <div className="min-h-[300px] flex-1" /* 趨勢圖撐滿剩餘高度（2026-11-06） */>
+        <>
+          <div className="mt-2 flex items-baseline gap-1 font-bold tabular-nums" style={{ color: c.line, fontSize: 36, lineHeight: 1.1 }}>
+            {b.pct.toFixed(2)}<span className="text-[12px] font-medium">%</span>
+          </div>
+          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-surface">
+            <div className="h-full rounded-full" style={{ width: `${Math.min(100, b.pct)}%`, background: c.line }} />
+          </div>
+          <div className="mt-2 flex justify-between text-[12px] text-ink-sub">
+            <span>已上拋</span><span>總數</span>
+          </div>
+          <div className="flex justify-between text-[15px] font-bold tabular-nums text-ink">
+            <span>{fmtN(b.uploaded)}</span><span>{fmtN(b.total)}</span>
+          </div>
+        </>
+      )}
+    </button>
+  )
+}
+
+/* ───────────────────────── 趨勢分析 ───────────────────────── */
+
+type Row = { ts: number; label: string } & Partial<Record<DashKey, number>> & { one?: DashPoint }
+
+function TrendPanel({ series, tab, onTab }: { series: Record<DashKey, DashPoint[]>; tab: Tab; onTab: (t: Tab) => void }) {
+  const keys: DashKey[] = tab === 'ALL' ? DASH_KEYS : [tab]
+
+  const { rows, yMin, cut } = useMemo(() => {
+    // 進行中的時段才剛開始上拋，不畫進趨勢
+    const settled = Object.fromEntries(keys.map((k) => [k, series[k].filter((p) => !p.inProgress)])) as Record<DashKey, DashPoint[]>
+    const last = Math.max(0, ...keys.map((k) => settled[k][settled[k].length - 1]?.ts ?? 0))
+    const minTs = last - CHART_HOURS * 3_600_000
+    const map = new Map<number, Row>()
+    for (const k of keys) {
+      for (const p of settled[k]) {
+        if (p.ts <= minTs) continue
+        const r = map.get(p.ts) ?? { ts: p.ts, label: '' }
+        r[k] = p.pct
+        if (tab !== 'ALL') r.one = p
+        map.set(p.ts, r)
+      }
+    }
+    const list = [...map.values()].sort((a, b) => a.ts - b.ts)
+    const multiDay = list.length > 1 && list[list.length - 1].ts - list[0].ts >= 86_400_000
+    for (const r of list) r.label = multiDay ? fmtStamp(r.ts).slice(5) : fmtStamp(r.ts).slice(11)
+    const total = Math.max(0, ...keys.map((k) => settled[k].length))
+    // Y 軸下緣貼近資料（值多在 85～100，0～100 會擠成一條線）：最小值往下取整到 10、再留 10
+    const vals = list.flatMap((r) => keys.map((k) => r[k]).filter((v): v is number => v !== undefined))
+    const yMin = vals.length ? Math.max(0, Math.floor(Math.min(...vals) / 10) * 10 - 10) : 0
+    return { rows: list, yMin, cut: total > 0 && settled[keys[0]][0] && settled[keys[0]][0].ts <= minTs }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [series, tab])
+
+  // X 軸只標整點，太密時再抽稀（最多約 12 個）
+  const ticks = useMemo(() => {
+    const hours = rows.filter((r) => r.ts % 3_600_000 === 0)
+    const every = Math.max(1, Math.ceil(hours.length / 12))
+    return hours.filter((_, i) => i % every === 0).map((r) => r.label)
+  }, [rows])
+
+  const cadence = tab === 'ALL' ? 'LP 每15分鐘・MN／ALT 每1小時更新' : DASH_CADENCE[tab].text
+  const one = tab !== 'ALL'
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col rounded-card border border-border p-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-baseline gap-2">
+          <h3 className="text-[15px] font-semibold text-ink">趨勢分析</h3>
+          <span className="text-[12px] text-ink-mut">{cadence} · 不含進行中時段{cut && ` · 只顯示最後 ${CHART_HOURS} 小時`}</span>
+        </div>
+        <PillTabs tabs={TABS} value={tab} onChange={onTab} />
+      </div>
+
+      {/* 圖例：ALL 只分顏色；單一類型多一個缺值柱 */}
+      <div className="mt-2 flex items-center gap-4 text-[12px] text-ink-sub">
+        <span className="text-ink-mut">達成率 %</span>
+        <span className="flex-1" />
+        {keys.map((k) => (
+          <span key={k} className="flex items-center gap-1.5"><span className="h-[3px] w-4 rounded-full" style={{ background: DASH_COLOR[k].line }} />{k}</span>
+        ))}
+        {one && (
+          <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm" style={{ background: DASH_COLOR[tab].bar }} />缺值（筆，右軸）</span>
+        )}
+      </div>
+
+      {rows.length === 0 ? (
+        <div className="grid min-h-[260px] flex-1 place-items-center text-[13px] text-ink-mut">這個區間沒有已完成的時段</div>
+      ) : (
+        <div className="min-h-[260px] flex-1">
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={points} margin={{ top: 8, right: 44, bottom: 0, left: 0 }}>
+            <ComposedChart data={rows} margin={{ top: 8, right: one ? 4 : 16, bottom: 0, left: 0 }}>
               <CartesianGrid vertical={false} stroke="#EEE7E9" />
-              <XAxis dataKey="label" tickLine={false} axisLine={false} tick={{ fontSize: 12, fill: '#8A7F83' }} minTickGap={24} />
-              <YAxis domain={[0, 100]} ticks={[0, 20, 40, 60, 80, 100]} tickLine={false} axisLine={false} tick={{ fontSize: 12, fill: '#8A7F83' }} width={36} />
-              <Tooltip content={<TrendTip />} cursor={{ stroke: '#C9C0C3', strokeDasharray: '3 3' }} />
-              <Bar dataKey="dip" fill={RED} fillOpacity={0.2} barSize={36} isAnimationActive={false} />
-              <ReferenceLine y={MDMS_ALERT} stroke={RED} strokeDasharray="3 3" label={{ value: '注意', position: 'right', fill: RED, fontSize: 12 }} />
-              <Line dataKey="pct" stroke={BLUE} strokeWidth={2.5} dot={{ r: 3.5, fill: '#fff', stroke: BLUE, strokeWidth: 2 }} activeDot={{ r: 5 }} isAnimationActive={false} />
+              <XAxis dataKey="label" ticks={ticks} interval={0} tickLine={false} axisLine={false} tick={{ fontSize: 12, fill: '#8A7F83' }} />
+              <YAxis yAxisId="pct" domain={[yMin, 100]} tickCount={6} allowDecimals={false} tickLine={false} axisLine={false} tick={{ fontSize: 12, fill: '#8A7F83' }} width={36} />
+              {one && (
+                <YAxis yAxisId="miss" orientation="right" tickLine={false} axisLine={false} tick={{ fontSize: 12, fill: '#8A7F83' }} width={56} tickFormatter={(v: number) => fmtN(v)} />
+              )}
+              <Tooltip content={<TrendTip keys={keys} />} cursor={{ stroke: '#C9C0C3', strokeDasharray: '3 3' }} />
+              {one && (
+                <Bar yAxisId="miss" dataKey={(r: Row) => r.one?.missing ?? null} name="缺值" fill={DASH_COLOR[tab].bar} maxBarSize={28} radius={[3, 3, 0, 0]} isAnimationActive={false} />
+              )}
+              {keys.map((k) => (
+                <Line
+                  key={k}
+                  yAxisId="pct"
+                  dataKey={k}
+                  connectNulls
+                  stroke={DASH_COLOR[k].line}
+                  strokeWidth={2.5}
+                  dot={rows.length <= 60 ? { r: 3.5, fill: '#fff', stroke: DASH_COLOR[k].line, strokeWidth: 2 } : false}
+                  activeDot={{ r: 5 }}
+                  isAnimationActive={false}
+                />
+              ))}
             </ComposedChart>
           </ResponsiveContainer>
         </div>
@@ -200,58 +257,32 @@ function TrendPanel({ series, cur, onPick }: { series: Series; cur: OneSeries; o
   )
 }
 
-function TrendTip({ active, payload }: { active?: boolean; payload?: Array<{ payload: MdmsBucket }> }) {
-  const p = active ? payload?.[0]?.payload : null
-  if (!p) return null
+function TrendTip({ active, payload, keys }: { active?: boolean; payload?: Array<{ payload: Row }>; keys: DashKey[] }) {
+  const r = active ? payload?.[0]?.payload : null
+  if (!r) return null
   return (
     <div className="rounded-lg border border-border bg-surface px-4 py-3 text-[13px] shadow-card">
-      <div className="mb-2 text-ink">{fmtStamp(p.ts)}</div>
-      <TipRow k="達成率" v={`${p.pct.toFixed(2)}%`} color={toneOf(p.pct)} />
-      <TipRow k="已上拋" v={fmtN(p.uploaded)} />
-      <TipRow k="總數" v={fmtN(p.total)} />
+      <div className="mb-2 text-ink">{fmtStamp(r.ts)}</div>
+      {r.one ? (
+        <>
+          <TipRow k="達成率" v={`${r.one.pct.toFixed(2)}%`} color={DASH_COLOR[keys[0]].line} />
+          <TipRow k="已上拋" v={fmtN(r.one.uploaded)} />
+          <TipRow k="總數" v={fmtN(r.one.total)} />
+          <TipRow k="缺值" v={fmtN(r.one.missing)} />
+        </>
+      ) : (
+        keys.map((k) => r[k] !== undefined && <TipRow key={k} k={k} v={`${r[k]!.toFixed(2)}%`} color={DASH_COLOR[k].line} dot />)
+      )}
     </div>
   )
 }
-function TipRow({ k, v, color }: { k: string; v: string; color?: string }) {
+function TipRow({ k, v, color, dot }: { k: string; v: string; color?: string; dot?: boolean }) {
   return (
     <div className="flex items-center justify-between gap-8 leading-6">
-      <span className="text-ink-sub">{k}</span>
+      <span className="flex items-center gap-1.5 text-ink-sub">
+        {dot && <span className="size-2 rounded-full" style={{ background: color }} />}{k}
+      </span>
       <span className="font-semibold tabular-nums text-ink" style={color ? { color } : undefined}>{v}</span>
-    </div>
-  )
-}
-
-/* ───────────────────────── 達成率卡片 ───────────────────────── */
-
-function RateCard({ title, b, fmt, big }: { title?: string; b?: MdmsBucket; fmt: 'date' | 'time'; big?: boolean }) {
-  if (!b) {
-    return (
-      <div className="rounded-card border border-border bg-surface p-4 text-[13px] text-ink-mut shadow-card">
-        {title && <div className="mb-2 font-semibold text-ink">{title}</div>}這個區間沒有時段
-      </div>
-    )
-  }
-  const color = toneOf(b.pct)
-  return (
-    <div className="overflow-hidden rounded-card border border-border bg-surface shadow-card">
-      <div className="flex items-center justify-between border-b border-divider px-4 py-2.5 text-[12px] text-ink-mut">
-        <span className={title ? 'text-[14px] font-semibold text-ink' : 'tabular-nums'}>{title ?? fmtStamp(b.ts, fmt === 'time')}</span>
-        {title && <span className="tabular-nums">{fmtStamp(b.ts, fmt === 'time')}</span>}
-      </div>
-      <div className="px-4 pb-4 pt-3">
-        <div className="flex items-baseline gap-1 font-bold tabular-nums" style={{ color, fontSize: big ? 40 : 34, lineHeight: 1.1 }}>
-          {b.pct.toFixed(2)}<span className="text-[12px] font-medium">%</span>
-        </div>
-        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-inset">
-          <div className="h-full rounded-full" style={{ width: `${Math.min(100, b.pct)}%`, background: color }} />
-        </div>
-        <div className="mt-2 flex justify-between text-[12px] text-ink-sub">
-          <span>已上拋</span><span>總數</span>
-        </div>
-        <div className="flex justify-between text-[14px] font-bold tabular-nums text-ink">
-          <span>{fmtN(b.uploaded)}</span><span>{fmtN(b.total)}</span>
-        </div>
-      </div>
     </div>
   )
 }

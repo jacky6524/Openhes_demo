@@ -5,7 +5,7 @@ import {
   DCU_LIST_ROWS, CHANNELS, COMM_TYPES, DCU_MODELS, DCU_GROUPS,
   type DcuListRow,
 } from '@/data/dcuListPage'
-import { Th, StatusPill, EnabledState, EventBadge, ONLINE_LABELS, SortHead, type SortDir } from '@/components/table/tableBits'
+import { Th, StatusPill, EnabledState, EventBadge, ONLINE_LABELS, SortHead, ListTh, OneLine, TwoLine, LIST_TD, type ColAlign, type SortDir } from '@/components/table/tableBits'
 import { STICKY_TH, useInfiniteRows } from '@/components/shared/Tabs'
 import { TopologyModal } from '@/components/dcu/TopologyModal'
 import { DcuDetailModal } from '@/components/dcu/DcuDetailModal'
@@ -30,8 +30,13 @@ import type { DcuRow } from '@/data/dcuList'
  *   · 連線狀態文字「在線／離線」；區處及營業區格式「02-北南 62」；連線類型改名「通訊方式」，多 SATCOM
  *   · 白名單電表連線數只在白名單已加入時顯示，否則「-」；詳細資料圖示有事件數 badge（> 0 才顯示）
  *   · 狀態欄置中（業主 2026-11-11：停用置中、啟用不含底框）
+ *   · 2026-11-19 業主：白名單欄 已加入／未加入 → Y／N（置中）
+ *   · 2026-11-19 業主：欄位參考台達（1119更新參考/台達dcu 清單.jpg）——順序改為
+ *     區處及營業區、電表數、電表連線數（新增）、白名單電表連線數、連線狀態、狀態、DCU編號、DCU序號、
+ *     頻道組別、連線類型（原「通訊方式」，改回台達用語）、地址、IP、模式、白名單、操作。
+ *     台達的勾選欄不加（10-16 起批次修改模式已搬進齒輪）；白名單維持 Y／N、連線狀態維持文字標籤。
  */
-type SortKey = 'serial' | 'enabled' | 'meterCount' | 'address' | 'office' | 'whitelistOnline' | 'channel' | 'comm' | 'ip' | 'mode'
+type SortKey = 'serial' | 'code' | 'online' | 'enabled' | 'meterCount' | 'meterOnline' | 'address' | 'office' | 'whitelistOnline' | 'channel' | 'comm' | 'ip' | 'mode'
 
 /** 欄位搜尋的可選欄位（設計稿的「搜尋」下拉） */
 const SEARCH_FIELDS = [
@@ -111,9 +116,11 @@ export function DcuList() {
     resetScroll()
   }
   /** center：表頭置中（狀態欄） */
-  const head = (k: SortKey, label: string, center = false) => (
-    <Th className={`${STICKY_TH} !whitespace-normal ${center ? '!text-center' : ''}`}><SortHead label={label} active={sortKey === k} dir={sortDir} onClick={() => toggleSort(k)} /></Th>
+  /** 可排序表頭；對齊規則見 tableBits 的 ListTh（與電表清單一致） */
+  const head = (k: SortKey, label: string, align: ColAlign = 'left', width?: number) => (
+    <ListTh label={label} align={align} width={width} sort={{ active: sortKey === k, dir: sortDir, onClick: () => toggleSort(k) }} />
   )
+
 
   return (
     <div className="flex h-full flex-col p-4">
@@ -180,7 +187,7 @@ export function DcuList() {
               options={[{ value: 'enabled', label: '啟用' }, { value: 'disabled', label: '停用' }]}
             />
           </FilterField>
-          <FilterField label="通訊方式">
+          <FilterField label="連線類型">
             <Select value={draft.comm} onChange={(v) => set('comm', v)} options={COMM_TYPES} />
           </FilterField>
           <FilterField label="頻道組別">
@@ -192,65 +199,53 @@ export function DcuList() {
         </div>
 
         {/* 表格 —— 自己是捲動容器、表頭 sticky；欄寬隨視窗伸縮，不出現左右捲軸 */}
-        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-4" onScroll={onScroll}>
-          <table className="w-full table-fixed text-[13px] border-collapse">
+        <div className="min-h-0 flex-1 overflow-auto px-4" onScroll={onScroll}>
+          <table className="w-full table-auto text-[13px] border-collapse">
             {/* 欄位與順序比照正式機（2026-11-11 API 欄位文件 §3.4） */}
-            <colgroup>
-              <col style={{ width: '10%' }} />{/* DCU序號 */}
-              <col style={{ width: '10%' }} />{/* DCU編號 */}
-              <col style={{ width: '6%' }} />{/* 連線狀態 */}
-              <col style={{ width: '5%' }} />{/* 狀態 */}
-              <col style={{ width: '5%' }} />{/* 電表數 */}
-              <col style={{ width: '15%' }} />{/* 地址 */}
-              <col style={{ width: '8%' }} />{/* 區處及營業區 */}
-              <col style={{ width: '7%' }} />{/* 白名單電表連線數 */}
-              <col style={{ width: '5%' }} />{/* 頻道組別 */}
-              <col style={{ width: '6%' }} />{/* 通訊方式 */}
-              <col style={{ width: '128px' }} />{/* IP（固定寬，不換行也不溢出到隔壁欄） */}
-              <col style={{ width: '8%' }} />{/* 模式 */}
-              <col style={{ width: '6%' }} />{/* 白名單 */}
-              <col style={{ width: SHOW_TOPOLOGY ? '96px' : '64px' }} />{/* 操作 */}
-            </colgroup>
+            {/* 2026-11-19 業主：內容與標題都盡量不換行 —— 不給固定欄寬，表格用 auto 版面讓每欄依內容取寬；
+                寬度夠時全部一行，不夠時只有標題在指定位置（\n）換行、地址縮成兩行，再不夠才左右捲動 */}
             <thead>
               <tr className="text-ink-sub">
+                {head('office', '區處及\n營業區')}
+                {/* 2026-11-19 業主：數字只有一兩位，欄不用那麼寬 → 標題直接疊成多行、欄寬縮到最小（width=1＝取最小寬） */}
+                {head('meterCount', '電表數', 'right', 1)}
+                {head('meterOnline', '電表\n連線數', 'right', 1)}
+                {head('whitelistOnline', '白名單\n電表\n連線數', 'right', 1)}
+                {head('online', '連線\n狀態', 'center')}
+                {head('enabled', '狀態', 'center')}
+                {head('code', 'DCU編號')}
                 {head('serial', 'DCU序號')}
-                <Th className={STICKY_TH}>DCU編號</Th>
-                <Th className={STICKY_TH}>連線狀態</Th>
-                {head('enabled', '狀態', true)}
-                {head('meterCount', '電表數')}
-                {head('address', '地址')}
-                {head('office', '區處及營業區')}
-                {head('whitelistOnline', '白名單電表連線數')}
-                {head('channel', '頻道組別')}
-                {head('comm', '通訊方式')}
+                {head('channel', '頻道\n組別', 'center')}
+                {head('comm', '連線\n類型')}
+                <ListTh label="地址" width={170} sort={{ active: sortKey === 'address', dir: sortDir, onClick: () => toggleSort('address') }} />
                 {head('ip', 'IP')}
                 {head('mode', '模式')}
-                <Th className={STICKY_TH}>白名單</Th>
-                <Th className={STICKY_TH} />
+                <ListTh label="白名單" align="center" />
+                <ListTh />
               </tr>
             </thead>
             <tbody>
               {rows.map((d) => (
                 <tr key={d.serial} className="border-b border-divider align-middle hover:bg-inset/40">
-                  <td className="px-3 py-3 font-mono text-[14px] font-semibold text-ink break-all">{d.serial}</td>
-                  <td className="px-3 py-3 font-mono text-[14px] font-semibold text-ink break-all">{d.code || <span className="font-sans font-normal text-ink-mut">-</span>}</td>
-                  <td className="px-3 py-3"><StatusPill status={d.online ? 'online' : 'offline'} labels={ONLINE_LABELS} /></td>
-                  {/* 停用＝灰底標籤、啟用＝純文字（無底框）；整欄置中（業主 2026-11-11） */}
-                  <td className="px-3 py-3 text-center">
-                    <EnabledState enabled={d.enabled} />
-                  </td>
-                  <td className="px-3 py-3 text-right tabular-nums text-ink">{d.meterCount}</td>
-                  <td className="px-3 py-3 text-[14px] leading-snug text-ink"><span className="line-clamp-2" title={d.address}>{d.address}</span></td>
-                  <td className="px-3 py-3 text-ink-sub">{d.office}</td>
+                  <td className={`${LIST_TD} text-ink-sub`}><OneLine value={d.office} /></td>
+                  <td className={`${LIST_TD} text-right tabular-nums text-ink`}>{d.meterCount}</td>
+                  <td className={`${LIST_TD} text-right tabular-nums text-ink`}>{d.meterOnline}</td>
                   {/* 正式機：whiteList=true 時才是「白名單電表連線數」；未加入白名單顯示「-」 */}
-                  <td className="px-3 py-3 text-right tabular-nums text-ink">{d.whitelisted ? d.whitelistOnline : <span className="text-ink-mut">-</span>}</td>
-                  <td className="px-3 py-3 text-ink-sub">{d.channel}</td>
-                  <td className="px-3 py-3 text-ink-sub">{d.comm}</td>
-                  <td className="px-3 py-3 font-mono text-ink-sub whitespace-nowrap">{d.ip}</td>
+                  <td className={`${LIST_TD} text-right tabular-nums text-ink`}>{d.whitelisted ? d.whitelistOnline : <span className="text-ink-mut">-</span>}</td>
+                  <td className={`${LIST_TD} text-center`}><StatusPill status={d.online ? 'online' : 'offline'} labels={ONLINE_LABELS} /></td>
+                  {/* 停用＝灰底標籤、啟用＝純文字（無底框）；整欄置中（業主 2026-11-11） */}
+                  <td className={`${LIST_TD} text-center`}><EnabledState enabled={d.enabled} /></td>
+                  <td className={`${LIST_TD} text-[13.5px] font-semibold tabular-nums text-ink`}>{d.code ? <OneLine value={d.code} /> : <span className="font-sans font-normal text-ink-mut">-</span>}</td>
+                  <td className={`${LIST_TD} text-[13.5px] font-semibold tabular-nums text-ink`}><OneLine value={d.serial} /></td>
+                  <td className={`${LIST_TD} text-center text-ink-sub`}>{d.channel}</td>
+                  <td className={`${LIST_TD} text-ink-sub`}><OneLine value={d.comm} /></td>
+                  <td className={`${LIST_TD} text-[14px] leading-snug text-ink`}><span className="line-clamp-2 block min-w-[150px] whitespace-normal leading-snug" title={d.address}>{d.address}</span></td>
+                  <td className={`${LIST_TD} tabular-nums text-ink-sub`}><OneLine value={d.ip} /></td>
                   {/* 非預設模式用主色標出，一眼看得出哪些 DCU 被調整過 */}
-                  <td className={`px-3 py-3 ${d.mode === '正常模式' ? 'text-ink-sub' : 'font-medium text-brand'}`}>{d.mode}</td>
-                  <td className="px-3 py-3 text-ink-sub">{d.whitelisted ? '已加入' : '未加入'}</td>
-                  <td className="px-2 py-3">
+                  <td className={`${LIST_TD} leading-snug ${d.mode === '正常模式' ? 'text-ink-sub' : 'font-medium text-brand'}`}>{d.mode}</td>
+                  {/* 2026-11-19 業主：已加入／未加入 → Y／N */}
+                  <td className={`${LIST_TD} text-center ${d.whitelisted ? 'font-semibold text-ink' : 'text-ink-mut'}`}>{d.whitelisted ? 'Y' : 'N'}</td>
+                  <td className={LIST_TD}>
                     <div className="flex items-center justify-end gap-2">
                       <button onClick={() => setDetailSerial(d.serial)} title={d.eventCount ? `詳細資料（${d.eventCount} 筆事件）` : '詳細資料'} className="text-ink-mut hover:text-brand">
                         <EventBadge count={d.eventCount}><ClipboardList size={15} /></EventBadge>
@@ -272,7 +267,7 @@ export function DcuList() {
               ))}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={14} className="px-3 py-10 text-center text-ink-mut">
+                  <td colSpan={15} className="px-3 py-10 text-center text-ink-mut">
                     {applied ? '查無符合條件的 DCU' : <NotSearched />}
                   </td>
                 </tr>

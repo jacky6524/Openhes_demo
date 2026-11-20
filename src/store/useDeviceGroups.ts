@@ -10,10 +10,16 @@ import { DCU_LIST_ROWS, METER_LIST_ROWS } from '@/data/dcuListPage'
 export type GroupKind = 'dcu' | 'meter'
 export interface DeviceGroup { name: string; ids: string[]; creator: string }
 
-export const GROUP_KINDS: Array<{ key: GroupKind; label: string }> = [
-  { key: 'dcu', label: 'DCU群組' },
-  { key: 'meter', label: '電表群組' },
+/**
+ * 2026-11-19 業主意見：順序改 電表 → DCU（同裝置管理選單，電表清單在前），兩種要能明顯區別 →
+ * 各給一個識別色（color 字、soft 底）與短名 short；刻意避開品牌紅與告警色。
+ * 群組下拉（QueryFields.GroupSelect）也照這個順序。
+ */
+export const GROUP_KINDS: Array<{ key: GroupKind; label: string; short: string; idLabel: string; color: string; soft: string }> = [
+  { key: 'meter', label: '電表群組', short: '電表', idLabel: '表號', color: '#2563EB', soft: '#EAF1FE' },
+  { key: 'dcu', label: 'DCU群組', short: 'DCU', idLabel: '序號', color: '#7C3AED', soft: '#F3EEFE' },
 ]
+export const kindOf = (k: GroupKind) => GROUP_KINDS.find((x) => x.key === k)!
 
 const CATALOG_IDS: Record<GroupKind, string[]> = {
   dcu: DCU_LIST_ROWS.map((d) => d.serial),

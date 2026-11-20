@@ -4,7 +4,7 @@ import {
   Cpu,
   BookOpenCheck,
   BarChart3,
-  Bell,
+  Construction,
   PackageOpen,
   ShieldCheck,
   ChevronDown,
@@ -43,7 +43,6 @@ const NAV: NavItem[] = [
       { label: '即時查詢', view: 'instantQuery' },
       { label: '註冊衝突', view: 'registrationConflict' },
       { label: '裝置群組', view: 'deviceGroups' },
-      { label: '裝置紀錄', view: 'deviceRecord' },
       { label: '停用清單', view: 'disabledList' },
     ],
   },
@@ -61,11 +60,9 @@ const NAV: NavItem[] = [
     icon: <BarChart3 size={18} />,
     // Figma 4255:33532「統計分析」：長條（熱力）圖畫面＝讀表效能，報表任務清單＝統計報表
     children: [
-      { label: '讀表效能', view: 'readPerformance' },
       { label: '統計報表', view: 'statsReport' },
     ],
   },
-  { label: '事件管理', icon: <Bell size={18} /> },
   {
     label: '裝置模組',
     icon: <PackageOpen size={18} />,
@@ -86,6 +83,17 @@ const NAV: NavItem[] = [
       { label: '角色權限管理', view: 'permRole' },
       // 2026-11-04 新增：調整燈號門檻（對應後端 AppConfig 的 status 分類）
       { label: '參數調整', view: 'permParams' },
+    ],
+  },
+  {
+    label: '待開發',
+    icon: <Construction size={18} />,
+    // 2026-11-19 業主意見：尚未定案的功能集中放這裡（頁面與路由不變，只是換位置）。
+    // 原位置：裝置紀錄←裝置管理、讀表效能←統計分析、事件管理←頂層（尚無頁面）。
+    children: [
+      { label: '裝置紀錄', view: 'deviceRecord' },
+      { label: '讀表效能', view: 'readPerformance' },
+      { label: '事件管理' },
     ],
   },
 ]

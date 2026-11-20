@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { X, Pencil, Cog, Trash2, Monitor, Loader2, Ban } from 'lucide-react'
+import { X, Pencil, Cog, Trash2, Monitor, Loader2, Ban, Lock, LockOpen } from 'lucide-react'
 import { dcuInfo } from '@/data/dcuInfo'
 import { dcuById } from '@/data/dcuFleet'
 import type { DcuRow } from '@/data/dcuList'
@@ -24,6 +24,7 @@ import { DCU_MODES, DCU_MODE_DESC } from '@/data/dcuListPage'
  * 2026-11-04 業主意見：修改模式由四選一單選鈕改為下拉選單，選中模式的說明顯示在下拉下方。
  *   · **頁籤全部暫不啟用**：頁籤帶禁止符號、仍可點開瀏覽，內容用 FeatureNotice 停用；
  *     重啟DCU／Ping 只是示意，按鈕不能執行（OnlinePanel 的模擬執行邏輯保留，要恢復把 online 的 inactive 拿掉）
+ * 2026-11-19 業主意見：遠端設定的「RF清單模式」開關改成「白名單鎖定」，圖示用鎖頭（鎖上／打開）。
  */
 const TABS = [
   { key: 'modify', label: '修改裝置', icon: Pencil, inactive: true },
@@ -211,7 +212,7 @@ const MODE_ORDER = ['正常模式', ...DCU_MODES.filter((m) => m !== '正常模�
 const CHANNEL_GROUPS = ['0', 'A', 'B', 'C', 'P']
 
 function RemotePanel({ dcu, mode }: { dcu: DcuRow; mode: string }) {
-  const [rfList, setRfList] = useState(true)
+  const [locked, setLocked] = useState(true)
   const [picked, setPicked] = useState(mode)
 
   return (
@@ -221,19 +222,19 @@ function RemotePanel({ dcu, mode }: { dcu: DcuRow; mode: string }) {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3">
         <Field label="頻道組別" kind="select" options={CHANNEL_GROUPS} />
         <label className="flex flex-col gap-1">
-          <span className="text-[12px] text-ink-sub">RF清單模式</span>
+          <span className="text-[12px] text-ink-sub">白名單鎖定</span>
           <button
             type="button"
             role="switch"
-            aria-checked={rfList}
-            onClick={() => setRfList((v) => !v)}
-            className="w-11 h-6 rounded-full p-0.5 transition-colors self-start"
-            style={{ background: rfList ? '#2B7FFF' : '#D1D5DB' }}
+            aria-checked={locked}
+            onClick={() => setLocked((v) => !v)}
+            title={locked ? '已鎖定：只允許白名單內的電表連線（點一下解鎖）' : '未鎖定：不限制連線電表（點一下鎖定）'}
+            className={`inline-flex h-9 items-center gap-2 self-start rounded-lg border px-3 text-[13px] font-semibold transition-colors ${
+              locked ? 'border-ink bg-ink text-white' : 'border-border bg-surface text-ink-sub hover:border-ink-mut'
+            }`}
           >
-            <span
-              className="block h-5 w-5 rounded-full bg-white shadow transition-transform"
-              style={{ transform: rfList ? 'translateX(20px)' : 'none' }}
-            />
+            {locked ? <Lock size={15} /> : <LockOpen size={15} />}
+            {locked ? '已鎖定' : '未鎖定'}
           </button>
         </label>
         <Field label="時間校正設定" placeholder="Input" />

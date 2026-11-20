@@ -17,6 +17,8 @@ import {
  *   · 每個設定鍵有原廠預設（defaultValue）→ 每列提供「還原預設」
  * 畫面上編輯的是草稿，改了才亮「取消／儲存變更」（同角色權限管理）；有驗證錯誤時不能儲存。
  * demo 只改記憶體（useThresholds），重新整理還原。
+ * 2026-11-19 業主意見：「良好／注意門檻」輸入框與「燈號預覽」拖曳色帶整併成一欄「門檻設定」
+ *   （色帶在上、注意／良好輸入框並排在色帶下方），列高放寬。
  * TODO: 儲存時逐鍵打 PUT /api/config/key/openhes.status.<slug>.good|warning，body { value: '0.97', updatedBy: 'webui:<帳號>' }。
  */
 const DEMO_USER = 'webui:admin'
@@ -104,19 +106,15 @@ export function ParamSettings() {
             <table className="w-full table-fixed text-[13px] border-collapse">
               <colgroup>
                 <col style={{ width: '17%' }} />
-                <col style={{ width: '12%' }} />
-                <col style={{ width: '12%' }} />
-                <col style={{ width: '25%' }} />
+                <col style={{ width: '49%' }} />
                 <col style={{ width: '13%' }} />
                 <col style={{ width: '14%' }} />
-                <col style={{ width: '96px' }} />
+                <col style={{ width: '116px' }} />
               </colgroup>
               <thead>
                 <tr className="text-ink-sub">
                   <Th className="sticky top-0 z-10 bg-inset">指標</Th>
-                  <Th className="sticky top-0 z-10 bg-inset">良好門檻（≥）</Th>
-                  <Th className="sticky top-0 z-10 bg-inset">注意門檻（≥）</Th>
-                  <Th className="sticky top-0 z-10 bg-inset">燈號預覽</Th>
+                  <Th className="sticky top-0 z-10 bg-inset">門檻設定（輸入數值或拖曳箭頭）</Th>
                   <Th className="sticky top-0 z-10 bg-inset">套用畫面</Th>
                   <Th className="sticky top-0 z-10 bg-inset">最後修改</Th>
                   <Th className="sticky top-0 z-10 bg-inset" />
@@ -129,30 +127,38 @@ export function ParamSettings() {
                   const rowChanged = changed.includes(m)
                   const isDefault = t.good === DEFAULT_THRESHOLD.good && t.warning === DEFAULT_THRESHOLD.warning
                   return (
-                    <tr key={m.key} className={`border-b border-divider align-top ${rowChanged ? 'bg-brand-soft/40' : ''}`}>
-                      <td className="px-3 py-3">
+                    <tr key={m.key} className={`border-b border-divider align-middle ${rowChanged ? 'bg-brand-soft/40' : ''}`}>
+                      <td className="px-3 py-6">
                         <div className="font-semibold text-ink">{m.label}</div>
                         <div className="mt-0.5 break-all font-mono text-[11px] text-ink-mut">openhes.status.{m.slug}.*</div>
                       </td>
-                      <td className="px-3 py-3">
-                        <PctInput value={draft[m.key].good} invalid={!!err} onChange={(v) => set(m.key, 'good', v)} />
+                      <td className="px-3 py-6">
+                        {/* 色帶在上、數值輸入在下（2026-11-19 業主：不一定要左右）；拖箭頭或打字都會同步 */}
+                        {err ? (
+                          <div className="pt-[11px]">
+                            <div className="h-2.5 rounded-full bg-inset" />
+                            <div className="mt-1 h-4" />
+                          </div>
+                        ) : (
+                          <LightBar t={t} onChange={(side, v) => set(m.key, side, String(v))} />
+                        )}
+                        <div className="mt-2 flex flex-wrap items-center gap-x-6 gap-y-1">
+                          <PctInput label="注意" color={health.warning.stroke} value={draft[m.key].warning} invalid={!!err} onChange={(v) => set(m.key, 'warning', v)} />
+                          <PctInput label="良好" color={health.good.stroke} value={draft[m.key].good} invalid={!!err} onChange={(v) => set(m.key, 'good', v)} />
+                          {err && <span className="text-[12px]" style={{ color: health.alert.stroke }}>{err}</span>}
+                        </div>
                       </td>
-                      <td className="px-3 py-3">
-                        <PctInput value={draft[m.key].warning} invalid={!!err} onChange={(v) => set(m.key, 'warning', v)} />
-                        {err && <div className="mt-1 text-[12px]" style={{ color: health.alert.stroke }}>{err}</div>}
-                      </td>
-                      <td className="px-3 py-3">{err ? <span className="text-[12px] text-ink-mut">—</span> : <LightBar t={t} onChange={(side, v) => set(m.key, side, String(v))} />}</td>
-                      <td className="px-3 py-3 text-ink-sub">{m.usedBy}</td>
-                      <td className="px-3 py-3 text-[12px] leading-snug text-ink-sub">
+                      <td className="px-3 py-6 text-ink-sub">{m.usedBy}</td>
+                      <td className="px-3 py-6 text-[12px] leading-snug text-ink-sub">
                         <LogLine side="良好" log={log[m.key].good} />
                         <LogLine side="注意" log={log[m.key].warning} />
                       </td>
-                      <td className="px-3 py-3 text-right">
+                      <td className="px-3 py-6 text-right">
                         <button
                           onClick={() => resetRow(m.key)}
                           disabled={isDefault}
                           title={`還原為原廠預設（良好 ${DEFAULT_THRESHOLD.good}%／注意 ${DEFAULT_THRESHOLD.warning}%）`}
-                          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[12px] text-ink-sub hover:bg-inset hover:text-ink disabled:opacity-40 disabled:hover:bg-transparent"
+                          className="inline-flex items-center gap-1 whitespace-nowrap rounded-md px-2 py-1 text-[12px] text-ink-sub hover:bg-inset hover:text-ink disabled:opacity-40 disabled:hover:bg-transparent"
                         >
                           <RotateCcw size={13} />還原預設
                         </button>
@@ -172,9 +178,19 @@ export function ParamSettings() {
   )
 }
 
-function PctInput({ value, invalid, onChange }: { value: string; invalid: boolean; onChange: (v: string) => void }) {
+function PctInput({ label, color, value, invalid, onChange }: {
+  label: string
+  color: string
+  value: string
+  invalid: boolean
+  onChange: (v: string) => void
+}) {
   return (
-    <div className="relative w-[110px]">
+    <label className="flex shrink-0 items-center gap-2">
+      <span className="flex items-center gap-1.5 whitespace-nowrap text-[12px] font-semibold text-ink-sub">
+        <span className="size-2 rounded-full" style={{ background: color }} />{label} ≥
+      </span>
+    <div className="relative w-[104px]">
       <input
         type="number"
         inputMode="decimal"
@@ -183,10 +199,11 @@ function PctInput({ value, invalid, onChange }: { value: string; invalid: boolea
         max={LIMIT.max}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className={`w-full rounded-md border bg-surface py-1.5 pl-3 pr-7 text-[14px] tabular-nums text-ink focus:outline-none ${invalid ? 'border-danger focus:border-danger' : 'border-border focus:border-brand'}`}
+        className={`h-9 w-full rounded-md border bg-surface pl-3 pr-7 text-[14px] tabular-nums text-ink focus:outline-none ${invalid ? 'border-danger focus:border-danger' : 'border-border focus:border-brand'}`}
       />
       <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[13px] text-ink-mut">%</span>
     </div>
+    </label>
   )
 }
 
@@ -287,12 +304,10 @@ function LightBar({ t, onChange }: { t: ApiThreshold; onChange?: (side: Side, v:
         <span className="flex-1" style={{ background: health.good.fill }} />
       </div>
       </div>
-      {/* 兩個門檻常常很近（95／97）：注意的數字靠在刻度左邊、良好靠在右邊；離兩端太近就不畫 50／100 */}
-      <div className="relative mt-1 h-4 text-[11px] tabular-nums text-ink-mut">
-        {at(t.warning) > 14 && <span className="absolute left-0">{LIMIT.min}</span>}
-        <span className="absolute -translate-x-full pr-0.5 font-semibold text-ink-sub" style={{ left: `${at(t.warning)}%` }}>{t.warning}</span>
-        <span className="absolute pl-0.5 font-semibold text-ink-sub" style={{ left: `${at(t.good)}%` }}>{t.good}</span>
-        {at(t.good) < 80 && <span className="absolute right-0">{LIMIT.max}</span>}
+      {/* 2026-11-19 門檻數值已在兩側輸入框，色帶下只標兩端刻度 */}
+      <div className="mt-1 flex h-4 justify-between text-[11px] tabular-nums text-ink-mut">
+        <span>{LIMIT.min}%</span>
+        <span>{LIMIT.max}%</span>
       </div>
     </div>
   )

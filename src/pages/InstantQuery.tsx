@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState, type ReactNode } from 'react'
 import { Search } from 'lucide-react'
-import { Area, AreaChart, CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { Area, AreaChart, CartesianGrid, Line, LineChart, ReferenceArea, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { METER_LIST_ROWS, DCU_LIST_ROWS, type MeterListRow, type DcuListRow } from '@/data/dcuListPage'
 import { Th, SortHead, InfiniteFooter, useInfiniteRows, type SortDir } from '@/components/table/tableBits'
 import { status as statusTok } from '@/tokens'
@@ -148,7 +148,7 @@ function MeterResult({ m }: { m: MeterListRow }) {
         <Section title="最後LP時間" stamp={stamp} />
       </Card>
       <div className="grid min-h-[320px] flex-1 grid-cols-2 gap-3">
-        <SortTable title="連線紀錄" hint="近 24 小時" fill columns={['連線日期', '訊號強度']} sortable={[0]} rows={connRows(hours)} empty={`近 24 小時沒有連線紀錄（最後回報 ${stamp}）`} />
+        <SortTable title="連線紀錄" hint="近 24 小時" fill columns={['連線日期', '訊號強度']} sortable={[]} rows={connRows(hours)} empty={`近 24 小時沒有連線紀錄（最後回報 ${stamp}）`} />
         <ReadRateCard hours={hours} lastStamp={stamp} />
       </div>
     </>
@@ -180,8 +180,8 @@ function DcuResult({ d }: { d: DcuListRow }) {
         </Section>
       </Card>
       <div className="grid min-h-[320px] flex-1 grid-cols-2 gap-3">
-        <SortTable title="連線紀錄" hint="近 24 小時" fill columns={['連線日期', '訊號強度']} sortable={[0]} rows={connRows(hours)} empty="近 24 小時沒有連線紀錄" />
-        <SignalCard title="訊號強度趨勢" hint="近 24 小時・每小時一筆・dBm，越接近 0 越好" points={hours} empty="近 24 小時沒有連線紀錄" />
+        <SortTable title="連線紀錄" hint="近 24 小時" fill columns={['連線日期', '訊號強度']} sortable={[]} rows={connRows(hours)} empty="近 24 小時沒有連線紀錄" />
+        <SignalCard title="訊號強度趨勢" hint="近 24 小時・每小時一筆・越高越好（滑過看 dBm）" points={hours} empty="近 24 小時沒有連線紀錄" />
       </div>
     </>
   )
@@ -257,13 +257,27 @@ function meterHours(m: MeterListRow): HourPoint[] {
   })
 }
 
-/** DCU 近 24 小時：每小時一筆訊號強度；斷線的 DCU 最後 6 小時沒有回報 */
+/**
+ * DCU 近 24 小時：每小時一筆訊號強度；斷線的 DCU 最後 6 小時沒有回報。
+ * 2026-11-19 業主：原本用取餘數產生，鋸齒狀亂跳 → 改成「正常漲跌」：
+ * 以該 DCU 的基準值為中心隨機漫步（每小時 ±0～3 dB、會被拉回基準），疊一點日夜起伏（深夜干擾少、略好）。
+ */
 function dcuHours(d: DcuListRow): HourPoint[] {
   const s = seedOf(d.serial)
+  let r = s || 1
+  const rand = () => { r = (r * 1103515245 + 12345) >>> 0; return (r >>> 8) / 0x1000000 } // 0～1，依序號固定
+  const base = -(80 + (s % 14)) // -80 ～ -93
+  let cur = base + (rand() - 0.5) * 6
+  const sig = HOURS.map((h) => {
+    const hour = Number(h.label.slice(0, 2))
+    const diurnal = Math.cos(((hour - 3) / 24) * 2 * Math.PI) * 2.5 // 03 點最好、15 點最差
+    cur += (rand() - 0.5) * 5 + (base + diurnal - cur) * 0.3
+    return Math.round(Math.max(-112, Math.min(-62, cur)))
+  })
   return HOURS.map((h, i) => ({
     label: h.label,
     full: h.full,
-    v: d.online || i < 18 ? -(78 + ((s + i * 7) % 26)) : null,
+    v: d.online || i < 18 ? sig[i] : null,
     lp: null,
     midnight: null,
     alt: null,
@@ -273,7 +287,7 @@ function dcuHours(d: DcuListRow): HourPoint[] {
 
 /** 連線紀錄表：有連線的小時各一筆，新到舊 */
 function connRows(hours: HourPoint[]): string[][] {
-  return hours.filter((h) => h.v !== null).reverse().map((h) => [`${h.full}:00`, String(h.v)])
+  return hours.filter((h) => h.v !== null).reverse().map((h) => [`${h.full}:00`, `${h.v} dBm（${gradeOf(h.v!).label}）`])
 }
 
 /* ───────────────────────── 圖表 ───────────────────────── */
@@ -399,7 +413,18 @@ function RateTip({ active, payload }: { active?: boolean; payload?: Array<{ payl
   )
 }
 
-const WEAK_DBM = -110
+/**
+ * 訊號強度分級（2026-11-19 業主：負數不好讀）—— 圖上 Y 軸改標 強／中／弱 三帶，不直接標負數；
+ * 實際 dBm 留在滑過提示與連線紀錄表。數值越大（越接近 0）越好，所以圖往上＝變好。
+ */
+const SIG_FLOOR = -120
+const SIG_CEIL = -50
+const SIG_GRADES = [
+  { label: '強', min: -85, max: SIG_CEIL, fill: '#EEF7EE', color: '#2E7D32' },
+  { label: '中', min: -100, max: -85, fill: '#F7F7F2', color: '#6A7282' },
+  { label: '弱', min: SIG_FLOOR, max: -100, fill: '#FBEFEF', color: statusTok.danger.fg },
+] as const
+const gradeOf = (v: number) => SIG_GRADES.find((g) => v >= g.min) ?? SIG_GRADES[2]
 
 function SignalCard({ title, hint, points, empty }: { title: string; hint: string; points: HourPoint[]; empty: string }) {
   const has = points.some((p) => p.v !== null)
@@ -413,14 +438,45 @@ function SignalCard({ title, hint, points, empty }: { title: string; hint: strin
       {has ? (
         <div className="mt-2 min-h-[180px] flex-1">
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={points} margin={{ top: 8, right: 40, bottom: 0, left: 0 }}>
-              <CartesianGrid vertical={false} stroke="#EEF0F3" />
+            {/* 面積從底部往上長：像訊號格「越滿越好」，不用讀負數 */}
+            <AreaChart data={points} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
+              <defs>
+                <linearGradient id="sigFill" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={line} stopOpacity={0.28} />
+                  <stop offset="100%" stopColor={line} stopOpacity={0.04} />
+                </linearGradient>
+              </defs>
+              {SIG_GRADES.map((g) => (
+                <ReferenceArea key={g.label} y1={g.min} y2={g.max} fill={g.fill} fillOpacity={1} stroke="none" ifOverflow="hidden" />
+              ))}
+              {[-100, -85].map((y) => <ReferenceLine key={y} y={y} stroke="#E2E5EA" strokeDasharray="3 3" />)}
               <XAxis dataKey="label" tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: '#6A7282' }} interval={1} />
-              <YAxis domain={[-120, -40]} ticks={[-120, -100, -80, -60, -40]} tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: '#6A7282' }} width={40} />
-              <ReferenceLine y={WEAK_DBM} stroke={statusTok.danger.fg} strokeDasharray="3 3" label={{ value: '偏弱', position: 'right', fill: statusTok.danger.fg, fontSize: 11 }} />
+              <YAxis
+                domain={[SIG_FLOOR, SIG_CEIL]}
+                ticks={SIG_GRADES.map((g) => (g.min + g.max) / 2)}
+                tickFormatter={(v: number) => gradeOf(v).label}
+                tick={(props: { x: number; y: number; payload: { value: number } }) => {
+                  const g = gradeOf(props.payload.value)
+                  return <text x={props.x - 4} y={props.y} dy={4} textAnchor="end" fontSize={12} fontWeight={600} fill={g.color}>{g.label}</text>
+                }}
+                tickLine={false}
+                axisLine={false}
+                width={32}
+              />
               <Tooltip cursor={{ stroke: '#C9CDD4', strokeDasharray: '3 3' }} content={<SigTip />} />
-              <Line dataKey="v" stroke={line} strokeWidth={2} connectNulls={false} dot={{ r: 3.5, fill: '#fff', stroke: line, strokeWidth: 2 }} activeDot={{ r: 5 }} isAnimationActive={false} />
-            </LineChart>
+              <Area
+                dataKey="v"
+                type="monotone"
+                baseValue={SIG_FLOOR}
+                stroke={line}
+                strokeWidth={2}
+                fill="url(#sigFill)"
+                connectNulls={false}
+                dot={{ r: 3, fill: '#fff', stroke: line, strokeWidth: 2 }}
+                activeDot={{ r: 5 }}
+                isAnimationActive={false}
+              />
+            </AreaChart>
           </ResponsiveContainer>
         </div>
       ) : (
@@ -437,7 +493,7 @@ function SigTip({ active, payload }: { active?: boolean; payload?: Array<{ paylo
     <div className="rounded-lg border border-border bg-surface px-3 py-2 text-[12px] shadow-card">
       <div className="tabular-nums text-ink-sub">{p.full}</div>
       <div className="mt-0.5 font-semibold tabular-nums text-ink">
-        {p.v === null ? '無連線' : `${p.v} dBm`}{p.v !== null && p.v < WEAK_DBM && <span className="ml-1.5 font-normal" style={{ color: statusTok.danger.fg }}>偏弱</span>}
+        {p.v === null ? '無連線' : <>訊號{gradeOf(p.v).label}<span className="ml-1.5 font-normal text-ink-sub">{p.v} dBm</span></>}
       </div>
     </div>
   )

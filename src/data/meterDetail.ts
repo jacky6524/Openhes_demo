@@ -606,5 +606,13 @@ function drrValue(label: string, r: () => number): string {
 
 export function drrFields(meterNo: string): InfoField[] {
   const r = mulberry32(hash(meterNo) ^ 0x44_52_52_00)
-  return DRR_LABELS.map((label) => ({ label, value: drrValue(label, r) }))
+  const fields = DRR_LABELS.map((label) => ({ label, value: drrValue(label, r) }))
+  // 2026-11-19 三個時間置頂後很顯眼，順序要合理：資料時間 → HES接收（晚幾分鐘）→ 傳送至MDMS（再晚幾分鐘）
+  const d2 = (n: number) => String(n).padStart(2, '0')
+  const t0 = 60 + Math.floor(r() * 3600) // 01:00～02:00 之間（秒）
+  const hes = t0 + 60 + Math.floor(r() * 600)
+  const mdms = hes + 120 + Math.floor(r() * 900)
+  const fmt = (sec: number) => `2026/08/31 ${d2(1 + Math.floor(sec / 3600))}:${d2(Math.floor(sec / 60) % 60)}:${d2(sec % 60)}`
+  const at: Record<string, string> = { 資料時間: fmt(t0), HES接收時間: fmt(hes), 傳送至MDMS時間: fmt(mdms) }
+  return fields.map((f) => (at[f.label] ? { ...f, value: at[f.label] } : f))
 }

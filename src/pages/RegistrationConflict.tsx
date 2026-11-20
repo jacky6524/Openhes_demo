@@ -12,7 +12,8 @@ import { FIELD_BOX } from '@/components/shared/TargetSearch'
  *
  * 2026-11-11 業主意見＋設計稿（1111調整內容/1110修改）：
  *   - 移除「資料與回報不一致」這個大分類：衝突原因直接標「未匯入資料」或對不上的欄位（電號／MAC/IMEI／模組型號，可多個）
- *   - 上方改成「衝突數量統計」卡：未匯入資料／衝突總數／電號衝突／MAC/IMEI衝突／模組型號衝突；點卡片＝篩選
+ *   - 上方改成「衝突數量統計」卡：衝突總數／未匯入資料／電號衝突／MAC/IMEI衝突／模組型號衝突；點卡片＝篩選
+ *     （2026-11-19 業主：衝突總數排到最左）
  *   - 列表上方加搜尋列：表號、電號、MAC/IMEI、DCU編號
  *   - 移除欄位裡的打勾／叉叉圖示；對不上的欄位維持「灰字資料＋紅字回報」
  * 一筆回報一列；未匯入資料的列，電號／MAC·IMEI／模組型號直接顯示回報值。資料全為 mock。
@@ -120,7 +121,7 @@ export function RegistrationConflict() {
         onChange={(e) => setDraft({ ...draft, [k]: e.target.value })}
         onKeyDown={(e) => e.key === 'Enter' && setQuery(draft)}
         placeholder="請輸入"
-        className={`${FIELD_BOX} w-[220px]`}
+        className={`${FIELD_BOX} h-9 w-[220px] py-0`}
       />
     </Field>
   )
@@ -131,10 +132,11 @@ export function RegistrationConflict() {
 
       <Panel title="衝突數量統計">
         <div className="grid grid-cols-5 gap-3">
-          <Stat label={REASON.unimported.stat} dot={REASON.unimported.fg} value={COUNT.unimported} active={reason === 'unimported'} onClick={() => setReason(reason === 'unimported' ? null : 'unimported')} />
+          {/* 2026-11-19 業主：衝突總數排到最左 */}
           <Stat label="衝突總數" value={ROWS.length} active={reason === null} onClick={() => setReason(null)} />
+          <Stat label={REASON.unimported.stat} tone={REASON.unimported} value={COUNT.unimported} active={reason === 'unimported'} onClick={() => setReason(reason === 'unimported' ? null : 'unimported')} />
           {FIELDS.map((k) => (
-            <Stat key={k} label={REASON[k].stat} dot={REASON[k].fg} value={COUNT[k]} active={reason === k} onClick={() => setReason(reason === k ? null : k)} />
+            <Stat key={k} label={REASON[k].stat} tone={REASON[k]} value={COUNT[k]} active={reason === k} onClick={() => setReason(reason === k ? null : k)} />
           ))}
         </div>
       </Panel>
@@ -175,7 +177,7 @@ export function RegistrationConflict() {
                   <tr key={r.reportNo} className="border-b border-divider hover:bg-inset/40">
                     <td className="px-3 py-3 whitespace-nowrap text-ink">{r.reportNo}</td>
                     <td className="px-3 py-3">
-                      <span className="flex flex-wrap gap-1">{reasonsOf(r).map((k) => <ReasonPill key={k} reason={k} />)}</span>
+                      <ReasonSlots r={r} />
                     </td>
                     {FIELDS.map((k) => (
                       <td key={k} className="px-3 py-2 align-middle"><Compare r={r} k={k} /></td>
@@ -210,10 +212,29 @@ function Compare({ r, k }: { r: Conflict; k: FieldKey }) {
   )
 }
 
+/**
+ * 衝突原因標籤（2026-11-19 業主：多種原因時，同種要上下對齊）——
+ * 電號／MAC/IMEI／模組型號 各佔一個固定寬度的格子，沒有該原因就留空，所以每一列同種標籤都在同一個位置。
+ * 「未匯入資料」只會單獨出現，從第一格開始橫跨。
+ */
+const SLOT_COLS = '46px 82px 70px'
+function ReasonSlots({ r }: { r: Conflict }) {
+  const rs = reasonsOf(r)
+  return (
+    <span className="grid gap-1" style={{ gridTemplateColumns: SLOT_COLS }}>
+      {r.unimported ? (
+        <span className="col-span-3"><ReasonPill reason="unimported" /></span>
+      ) : (
+        FIELDS.map((k) => <span key={k}>{rs.includes(k) && <ReasonPill reason={k} />}</span>)
+      )}
+    </span>
+  )
+}
+
 function ReasonPill({ reason }: { reason: Reason }) {
   const t = REASON[reason]
   return (
-    <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-0.5 text-[13px] font-medium text-ink" style={{ background: t.bg }}>
+    <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-0.5 text-[12px] font-medium text-ink" style={{ background: t.bg }}>
       <span className="size-1.5 rounded-full" style={{ background: t.fg }} />{t.label}
     </span>
   )
@@ -231,8 +252,12 @@ function Panel({ title, children }: { title: string; children: React.ReactNode }
   )
 }
 
-/** 統計卡兼篩選鈕：選中時品牌色外框；小圓點與表格裡的衝突原因標籤同色 */
-function Stat({ label, value, dot, active, onClick }: { label: string; value: number; dot?: string; active: boolean; onClick: () => void }) {
+/**
+ * 統計卡兼篩選鈕。2026-11-19 依參考設計（1119更新參考/註冊衝突 (1).png）：
+ * 每張卡用該衝突原因的淡色底（與表格裡的原因標籤同色系），衝突總數為灰底；拿掉小圓點。
+ * 選中某個原因時加該色外框；衝突總數（＝全部）不加框。
+ */
+function Stat({ label, value, tone, active, onClick }: { label: string; value: number; tone?: { fg: string; bg: string }; active: boolean; onClick: () => void }) {
   return (
     <button
       type="button"
@@ -240,14 +265,17 @@ function Stat({ label, value, dot, active, onClick }: { label: string; value: nu
       aria-pressed={active}
       title={active ? '目前篩選條件' : `只看「${label}」`}
       className={[
-        'rounded-lg border px-5 py-3.5 text-left transition-colors',
-        active ? 'border-brand bg-surface ring-1 ring-brand' : 'border-transparent bg-inset hover:border-border',
+        'rounded-lg px-5 py-3.5 text-left transition-shadow',
+        tone ? '' : 'bg-inset',
+        active ? '' : 'hover:shadow-card',
       ].join(' ')}
+      style={{
+        background: tone?.bg,
+        // 衝突總數＝預設的「全部」狀態，不加框（同參考圖）；選了某個原因才框該卡
+        boxShadow: active && tone ? `inset 0 0 0 2px ${tone.fg}` : undefined,
+      }}
     >
-      <div className="flex items-center gap-1.5 text-[13px] text-ink-sub">
-        {dot && <span className="size-2 rounded-full" style={{ background: dot }} />}
-        {label}
-      </div>
+      <div className="text-[13px] text-ink-sub">{label}</div>
       <div className="mt-1 text-[30px] font-bold leading-tight tabular-nums text-ink">{value}</div>
     </button>
   )

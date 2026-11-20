@@ -560,10 +560,28 @@ function FieldGrid({ fields, labelWidth = 104 }: { fields: InfoField[]; labelWid
 /**
  * 需量復歸資料（Figma 3639:32240）—— 三欄屬性清單，約 84 個欄位。
  * 標籤比詳細資料長（例如「售電平日半尖峰需量(連續累計)」），因此標籤欄加寬。
+ * 2026-11-19 業主意見：時間要特別突顯／置頂 —— 資料時間、最近一次需量復歸日期、HES接收時間、
+ * 傳送至MDMS時間 四項抽出來放在最上方一排大字卡，下方清單不再重複列出。
  */
+const DRR_PINNED = ['資料時間', '最近一次需量復歸日期', 'HES接收時間', '傳送至MDMS時間']
+
 function DrrPanel({ meterNo }: { meterNo: string }) {
   const fields = useMemo(() => drrFields(meterNo), [meterNo])
-  return <FieldGrid fields={fields} labelWidth={168} />
+  const pinned = DRR_PINNED.map((l) => fields.find((f) => f.label === l)).filter((f): f is InfoField => !!f)
+  const rest = fields.filter((f) => !DRR_PINNED.includes(f.label))
+  return (
+    <>
+      <div className="grid shrink-0 grid-cols-2 gap-3 md:grid-cols-4">
+        {pinned.map((f) => (
+          <div key={f.label} className="rounded-xl border px-4 py-3" style={{ borderColor: BLUE, background: '#EEF4FF' }}>
+            <div className="text-[12px] font-semibold" style={{ color: BLUE }}>{f.label}</div>
+            <div className="mt-1 text-[17px] font-bold tabular-nums text-ink">{f.value}</div>
+          </div>
+        ))}
+      </div>
+      <FieldGrid fields={rest} labelWidth={168} />
+    </>
+  )
 }
 
 /**

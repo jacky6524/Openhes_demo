@@ -5,7 +5,7 @@ import {
   METER_LIST_ROWS, METER_CATEGORIES, MODULE_MODELS, METER_GROUPS,
   type MeterListRow,
 } from '@/data/dcuListPage'
-import { Th, StatusPill, EventBadge, ONLINE_LABELS, SortHead, StampLines, type SortDir } from '@/components/table/tableBits'
+import { Th, StatusPill, EventBadge, ONLINE_LABELS, SortHead, StampLines, ListTh, OneLine, TwoLine, LIST_TD, type ColAlign, type SortDir } from '@/components/table/tableBits'
 import { STICKY_TH, useInfiniteRows } from '@/components/shared/Tabs'
 import { MeterDetailModal } from '@/components/dcu/MeterDetailModal'
 import { MeterSettingsModal } from '@/components/dcu/MeterSettingsModal'
@@ -117,8 +117,9 @@ export function MeterList() {
     else { setSortKey(k); setSortDir('asc') }
     reset()
   }
-  const head = (k: SortKey, label: string) => (
-    <Th className={`${STICKY_TH} !whitespace-normal`}><SortHead label={label} active={sortKey === k} dir={sortDir} onClick={() => toggleSort(k)} /></Th>
+  /** 可排序表頭；對齊規則見 tableBits 的 ListTh（與 DCU清單一致） */
+  const head = (k: SortKey, label: string, align: ColAlign = 'left') => (
+    <ListTh label={label} align={align} sort={{ active: sortKey === k, dir: sortDir, onClick: () => toggleSort(k) }} />
   )
   /** 最後LP／MN 時間：非當日標紅（與其他電表清單同一條規則）；只到時分，日期用斜線（'YYYY/MM/DD HH:mm'，同正式版） */
   const stale = (sameDay: boolean) => (sameDay ? undefined : statusTok.danger.fg)
@@ -207,64 +208,48 @@ export function MeterList() {
         </div>
 
         {/* 表格 —— 自己是捲動容器、表頭 sticky；欄寬隨視窗伸縮，不出現左右捲軸 */}
-        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-4" onScroll={onScroll}>
-          <table className="w-full table-fixed text-[13px] border-collapse">
+        <div className="min-h-0 flex-1 overflow-auto px-4" onScroll={onScroll}>
+          <table className="w-full table-auto text-[13px] border-collapse">
             {/* 欄位與順序比照正式機（2026-11-11 API 欄位文件 §4.4）；正式機清單沒有獨立「狀態」欄 */}
-            <colgroup>
-              <col style={{ width: '6%' }} />{/* 區處及營業區 */}
-              <col style={{ width: '6%' }} />{/* 連線狀態 */}
-              <col style={{ width: '8%' }} />{/* 電號 */}
-              <col style={{ width: '8%' }} />{/* 表號 */}
-              <col style={{ width: '8%' }} />{/* 模組型號 */}
-              <col style={{ width: '9%' }} />{/* DCU編號 */}
-              <col style={{ width: '9%' }} />{/* DCU序號 */}
-              <col style={{ width: '9%' }} />{/* FAN MAC */}
-              <col style={{ width: '8%' }} />{/* 模組序號 */}
-              <col style={{ width: '11%' }} />{/* 地址 */}
-              {/* IP 固定寬：xxx.xxx.xxx.xxx 不換行約需 116px（儲存格左右留白縮為 8px）（2026-11-17 業主：IP 被換行） */}
-              <col style={{ width: '116px' }} />{/* IP */}
-              {/* 日期不換行（YYYY/MM/DD 約需 92px，留白 8px），窄螢幕下 6% 會溢出疊到隔壁欄 → 固定寬 */}
-              <col style={{ width: '92px' }} />{/* 最後LP */}
-              <col style={{ width: '92px' }} />{/* 最後MN */}
-              <col style={{ width: '64px' }} />{/* 操作 */}
-            </colgroup>
+            {/* 2026-11-19 業主：內容與標題都盡量不換行 —— 不給固定欄寬，表格用 auto 版面讓每欄依內容取寬；
+                寬度夠時全部一行，不夠時只有標題在指定位置（\n）換行、地址縮成兩行，再不夠才左右捲動 */}
             <thead>
               <tr className="text-ink-sub">
-                {head('office', '區處及營業區')}
-                <Th className={STICKY_TH}>連線狀態</Th>
+                {head('office', '區處及\n營業區')}
+                <ListTh label={'連線\n狀態'} align="center" />
                 {head('elecNo', '電號')}
                 {head('meterNo', '表號')}
-                {head('moduleModel', '模組型號')}
-                <Th className={STICKY_TH}>DCU編號</Th>
-                <Th className={STICKY_TH}>DCU序號</Th>
+                {head('moduleModel', '模組\n型號')}
+                <ListTh label="DCU編號" />
+                <ListTh label="DCU序號" />
                 {head('fanMac', 'FAN MAC')}
-                <Th className={STICKY_TH}>模組序號</Th>
-                {head('address', '地址')}
-                <Th className={STICKY_TH}>IP</Th>
-                <Th className={`${STICKY_TH} !whitespace-normal`}>最後LP時間</Th>
-                <Th className={`${STICKY_TH} !whitespace-normal`}>最後MN時間</Th>
-                <Th className={STICKY_TH} />
+                <ListTh label={'模組\n序號'} />
+                <ListTh label="地址" width={170} sort={{ active: sortKey === 'address', dir: sortDir, onClick: () => toggleSort('address') }} />
+                <ListTh label="IP" />
+                <ListTh label={'最後LP\n時間'} />
+                <ListTh label={'最後MN\n時間'} />
+                <ListTh />
               </tr>
             </thead>
             <tbody>
               {rows.map((m) => (
                 <tr key={m.meterNo} className="border-b border-divider align-middle hover:bg-inset/40">
-                  <td className="px-3 py-3 text-ink-sub">{m.office}</td>
-                  <td className="px-3 py-3"><StatusPill status={m.online ? 'online' : 'offline'} labels={ONLINE_LABELS} /></td>
-                  <td className="px-3 py-3 font-mono text-[14px] font-semibold text-ink break-all">{m.elecNo}</td>
-                  <td className="px-3 py-3 font-mono text-[14px] font-semibold text-ink break-all">{m.meterNo}</td>
-                  <td className="px-3 py-3 text-ink break-all">{m.moduleModel}</td>
+                  <td className={`${LIST_TD} text-ink-sub`}><OneLine value={m.office} /></td>
+                  <td className={`${LIST_TD} text-center`}><StatusPill status={m.online ? 'online' : 'offline'} labels={ONLINE_LABELS} /></td>
+                  <td className={`${LIST_TD} text-[13.5px] font-semibold tabular-nums text-ink`}><OneLine value={m.elecNo} /></td>
+                  <td className={`${LIST_TD} text-[13.5px] font-semibold tabular-nums text-ink`}><OneLine value={m.meterNo} /></td>
+                  <td className={`${LIST_TD} text-ink`}><OneLine value={m.moduleModel} /></td>
                   {/* 沒有掛 DCU 的電表：缺值一律「-」（正式機規則，不留白、不當成 0） */}
-                  <td className="px-3 py-3 font-mono text-ink-sub break-all">{m.dcuCode || <span className="font-sans text-ink-mut">-</span>}</td>
-                  <td className="px-3 py-3 font-mono text-ink-sub break-all">{m.dcuSerial || <span className="font-sans text-ink-mut">-</span>}</td>
-                  <td className="px-3 py-3 font-mono text-ink-sub break-all">{m.fanMac}</td>
+                  <td className={`${LIST_TD} tabular-nums text-ink-sub`}>{m.dcuCode ? <OneLine value={m.dcuCode} /> : <span className="font-sans text-ink-mut">-</span>}</td>
+                  <td className={`${LIST_TD} tabular-nums text-ink-sub`}>{m.dcuSerial ? <OneLine value={m.dcuSerial} /> : <span className="font-sans text-ink-mut">-</span>}</td>
+                  <td className={`${LIST_TD} tabular-nums text-ink-sub`}><OneLine value={m.fanMac} /></td>
                   {/* 序號不用等寬字：等寬字字身較矮，同為 13px 看起來仍小一號（業主 2026-11-04） */}
-                  <td className="px-3 py-3 tabular-nums text-ink-sub break-all">{m.moduleSerial}</td>
-                  <td className="px-3 py-3 text-[14px] leading-snug text-ink"><span className="line-clamp-2" title={m.address}>{m.address}</span></td>
-                  <td className="px-2 py-3 font-mono text-ink-sub whitespace-nowrap">{m.ip}</td>
-                  <td className="px-2 py-3 tabular-nums" style={{ color: stale(m.lastLpSameDay) }}>{m.lastLp ? <StampLines value={hm(m.lastLp)} /> : '--'}</td>
-                  <td className="px-2 py-3 tabular-nums" style={{ color: stale(m.lastMnSameDay) }}>{m.lastMn ? <StampLines value={hm(m.lastMn)} /> : '--'}</td>
-                  <td className="px-2 py-3">
+                  <td className={`${LIST_TD} tabular-nums text-ink-sub`}><OneLine value={m.moduleSerial} /></td>
+                  <td className={`${LIST_TD} text-[14px] leading-snug text-ink`}><span className="line-clamp-2 block min-w-[150px] whitespace-normal leading-snug" title={m.address}>{m.address}</span></td>
+                  <td className={`${LIST_TD} tabular-nums text-ink-sub`}><OneLine value={m.ip} /></td>
+                  <td className={`${LIST_TD} leading-snug tabular-nums`} style={{ color: stale(m.lastLpSameDay) }}>{m.lastLp ? <StampLines value={hm(m.lastLp)} /> : '--'}</td>
+                  <td className={`${LIST_TD} leading-snug tabular-nums`} style={{ color: stale(m.lastMnSameDay) }}>{m.lastMn ? <StampLines value={hm(m.lastMn)} /> : '--'}</td>
+                  <td className={LIST_TD}>
                     <div className="flex items-center justify-end gap-2">
                       <button onClick={() => setDetailMeter(m.meterNo)} title={m.eventCount ? `詳細資料（${m.eventCount} 筆事件）` : '詳細資料'} className="text-ink-mut hover:text-brand">
                         <EventBadge count={m.eventCount}><ClipboardList size={15} /></EventBadge>

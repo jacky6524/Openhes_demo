@@ -126,3 +126,46 @@ body {
 .drawer-right {
   animation: drawerRight 220ms ease-out both;
 }
+
+/* 頻道規劃：點選的組別 —— 動態框（黑色虛線框＋外光暈脈動） */
+.spectrum-pick {
+  outline: 2px dashed #111827;
+  outline-offset: 1px;
+  animation: spectrumPick 1.2s ease-in-out infinite;
+}
+@keyframes spectrumPick {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(17, 24, 39, 0.45); }
+  50% { box-shadow: 0 0 0 5px rgba(17, 24, 39, 0); }
+}
+
+/*
+ * 2026-11-19 業主：輸入框與左右按鈕的高度／中線要一致（「這個問題存在很久了」）。
+ * Chrome 量起來都是 36px，但 Mac Safari 的原生 <select> 與日期欄會忽略我們給的高度、用自己的原生高度，
+ * 跟旁邊的按鈕對不齊 → 一律關掉原生外觀、自己畫下拉箭頭，讓 h-9 在每個瀏覽器都生效。
+ */
+select {
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%236A7282' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.55rem center;
+  background-size: 14px 14px;
+  padding-right: 1.9rem;
+  line-height: 1.25;
+}
+input[type='date'],
+input[type='datetime-local'],
+input[type='time'] {
+  -webkit-appearance: none;
+  appearance: none;
+  min-height: 0;
+  line-height: 1.25;
+}
+/* Safari 日期欄內部文字預設會撐高、偏下 */
+input[type='date']::-webkit-date-and-time-value {
+  min-height: 0;
+  text-align: left;
+}
+input[type='date']::-webkit-datetime-edit {
+  padding: 0;
+}

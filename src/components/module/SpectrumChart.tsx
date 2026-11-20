@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from 'react'
 import { Maximize2, Minus, Plus, ScanSearch } from 'lucide-react'
 import {
-  BLOCK_MHZ, VENDORS, VENDOR_COLOR, SPECTRUM_MAX, SPECTRUM_MIN, rowKey, type CaseId, type ChannelRow, type Vendor,
+  BLOCK_MHZ, LANES, laneColor, SPECTRUM_MAX, SPECTRUM_MIN, rowKey, type ChannelRow, type Lane,
 } from '@/data/channelPlan'
 
 /**
@@ -11,27 +11,34 @@ import {
  *   · 主圖：滾輪＝以游標為中心縮放；按住拖曳＝平移；雙擊＝對焦已用頻段
  *   · 右上按鈕：對焦已用頻段／全頻段／放大／縮小
  * 刻度間距隨縮放自動調整（1 → 0.5 → 0.2 → 0.1 → 0.05 MHz）；色塊夠寬才標 HES 設定與頻率。
- * 一個廠商一列；同一廠商同一頻點有多組設定時合成一塊（例 O 與 sO 都在 841.3）。
+ * 一個 Lane 一列（DELTA 依案別分兩列）；同一列同一頻點有多組設定時合成一塊，標成 O/sO。
+ * 2026-11-19 業主意見：同廠商頻點不分色（主副頻道不再分深淺）；「組別」用點選時的動態框表示 ——
+ *   點色塊＝框出該組 HES 設定的所有頻點（色塊含多組時，再點一次換下一組，輪完取消）；點表格列也可以。
+ * 同日追加：廠商按顏色、頻點按文字（HES 後加 ¹／²＝頻點1／頻點2）；hover 色塊或表格列時，
+ *   同步用同一個動態框框出一致的頻點（同組 HES 設定的所有色塊），表格對應列也一起反白。
  */
+const SUP = { 1: '¹', 2: '²' } as const
 
 const MIN_SPAN = 0.4
 const FULL_SPAN = SPECTRUM_MAX - SPECTRUM_MIN
-const LANE_W = 88 // 左側案別欄寬（px）
+const LANE_W = 128 // 左側列名欄寬（px）
 
-interface Use { key: string; hes: string; caseId: CaseId; which: 1 | 2; ccm: number; suspect?: number }
-interface Block { vendor: Vendor; f: number; uses: Use[] }
+interface Use { key: string; hes: string; cases: string[]; which: 1 | 2; ch: number; suspect?: number }
+interface Block { lane: Lane; f: number; uses: Use[] }
+/** 色塊上的組別鍵（去重、保持順序） */
+const groupsOf = (b: Block) => [...new Set(b.uses.map((u) => u.key))]
 
 function buildBlocks(rows: ChannelRow[]): Block[] {
   const map = new Map<string, Block>()
-  const put = (r: ChannelRow, f: number, which: 1 | 2, ccm: number) => {
-    const k = `${r.vendor}@${f}`
-    if (!map.has(k)) map.set(k, { vendor: r.vendor, f, uses: [] })
+  const put = (r: ChannelRow, f: number, which: 1 | 2, ch: number) => {
+    const k = `${r.lane}@${f}`
+    if (!map.has(k)) map.set(k, { lane: r.lane, f, uses: [] })
     const suspect = r.suspect?.field === (which === 1 ? 'f1' : 'f2') ? r.suspect.expected : undefined
-    map.get(k)!.uses.push({ key: rowKey(r), hes: r.hes, caseId: r.caseId, which, ccm, suspect })
+    map.get(k)!.uses.push({ key: rowKey(r), hes: r.hes, cases: r.cases, which, ch, suspect })
   }
   for (const r of rows) {
-    put(r, r.f1, 1, r.ccm1)
-    if (r.f2 !== null && r.ccm2 !== null) put(r, r.f2, 2, r.ccm2)
+    put(r, r.f1, 1, r.ch1)
+    if (r.f2 !== null && r.ch2 !== null) put(r, r.f2, 2, r.ch2)
   }
   return [...map.values()]
 }
@@ -50,8 +57,24 @@ function tickStep(span: number) {
 }
 const fmtF = (f: number) => (Math.round(f * 100) / 100).toFixed(2)
 
-export function SpectrumChart({ rows, focus, highlight }: { rows: ChannelRow[]; focus: Vendor | null; highlight: string | null }) {
+export function SpectrumChart({ rows, focus, highlight, onHover, selected, onSelect }: {
+  rows: ChannelRow[]
+  focus: Lane | null
+  /** hover 中的組別（表格列或色塊），頻譜圖上以動態框框出 */
+  highlight: string[]
+  onHover: (keys: string[]) => void
+  /** 點選中的組別（rowKey），頻譜圖上框出該組所有頻點 */
+  selected: string | null
+  onSelect: (key: string | null) => void
+}) {
   const blocks = useMemo(() => buildBlocks(rows), [rows])
+  const selRow = selected ? rows.find((r) => rowKey(r) === selected) : undefined
+  /** 點色塊：不含目前組別 → 選第一組；含 → 換下一組，最後一組再點＝取消 */
+  const clickBlock = (b: Block) => {
+    const gs = groupsOf(b)
+    const i = selected ? gs.indexOf(selected) : -1
+    onSelect(i < 0 ? gs[0] : (gs[i + 1] ?? null))
+  }
   const usedRange = useMemo<[number, number]>(() => {
     const fs = blocks.map((b) => b.f)
     return fit(Math.min(...fs) - BLOCK_MHZ, Math.max(...fs) + BLOCK_MHZ)
@@ -111,15 +134,18 @@ export function SpectrumChart({ rows, focus, highlight }: { rows: ChannelRow[]; 
 
   // 主圖拖曳平移
   const drag = useRef<{ x: number; view: [number, number] } | null>(null)
+  const moved = useRef(false)
   const onPlotDown = (e: RPointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return
     e.currentTarget.setPointerCapture(e.pointerId)
     setTip(null)
     drag.current = { x: e.clientX, view }
+    moved.current = false
   }
   const onPlotMove = (e: RPointerEvent<HTMLDivElement>) => {
     const d = drag.current
     if (!d) return
+    if (Math.abs(e.clientX - d.x) > 3) moved.current = true
     const [l, h] = d.view
     const dm = -((e.clientX - d.x) / plotW) * (h - l)
     setView(fit(l + dm, h + dm))
@@ -147,6 +173,12 @@ export function SpectrumChart({ rows, focus, highlight }: { rows: ChannelRow[]; 
           <span className="text-[12px] tabular-nums text-ink-mut">
             檢視 {lo.toFixed(2)}～{hi.toFixed(2)} MHz（{span.toFixed(2)} MHz）· 共使用 {usedCount} 個頻點
           </span>
+          {selRow && (
+            <span className="ml-2 inline-flex items-center gap-1.5 rounded-full border border-brand/30 bg-brand-soft px-2.5 py-0.5 text-[12px] text-brand">
+              已框選 {selRow.lane} · HES {selRow.hes}：{fmtF(selRow.f1)}{selRow.f2 !== null && ` / ${fmtF(selRow.f2)}`} MHz
+              <button type="button" onClick={() => onSelect(null)} className="font-semibold hover:text-ink" title="取消框選">×</button>
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-1.5">
           <ToolBtn onClick={() => setView(usedRange)} title="對焦已用頻段（雙擊主圖也可以）"><ScanSearch size={14} />對焦已用頻段</ToolBtn>
@@ -160,9 +192,9 @@ export function SpectrumChart({ rows, focus, highlight }: { rows: ChannelRow[]; 
         <div className="flex">
           {/* 案別欄 */}
           <div className="shrink-0" style={{ width: LANE_W }}>
-            {VENDORS.map((c) => (
-              <div key={c} className="flex h-12 items-center gap-2 text-[13px] font-semibold text-ink" style={{ opacity: focus && focus !== c ? 0.3 : 1 }}>
-                <span className="size-2.5 rounded-sm" style={{ background: VENDOR_COLOR[c] }} />{c}
+            {LANES.map((c) => (
+              <div key={c} className="flex h-12 items-center gap-2 whitespace-nowrap text-[13px] font-semibold text-ink" style={{ opacity: focus && focus !== c ? 0.3 : 1 }}>
+                <span className="size-2.5 shrink-0 rounded-sm" style={{ background: laneColor(c) }} />{c}
               </div>
             ))}
           </div>
@@ -181,16 +213,24 @@ export function SpectrumChart({ rows, focus, highlight }: { rows: ChannelRow[]; 
             {ticks.map((t) => (
               <span key={t} className="absolute inset-y-0 w-px bg-border" style={{ left: `${pos(t)}%` }} />
             ))}
-            {VENDORS.map((c) => (
+            {LANES.map((c) => (
               <div key={c} className="relative h-12 border-b border-surface last:border-b-0" style={{ opacity: focus && focus !== c ? 0.3 : 1 }}>
-                {blocks.filter((b) => b.vendor === c).map((b) => {
+                {blocks.filter((b) => b.lane === c).map((b) => {
                   const left = pos(b.f - BLOCK_MHZ / 2)
                   if (left > 100 || left + (BLOCK_MHZ / span) * 100 < 0) return null
-                  const primary = b.uses.some((u) => u.which === 1)
                   const suspect = b.uses.some((u) => u.suspect !== undefined)
-                  const hit = highlight !== null && b.uses.some((u) => u.key === highlight)
-                  const label = b.uses.map((u) => u.hes).join('·')
-                  const showLabel = blockPx >= label.length * 7 + 8
+                  const picked = b.uses.some((u) => u.key === selected || highlight.includes(u.key))
+                  const hesList = [...new Set(b.uses.map((u) => u.hes))]
+                  // 頻點按文字：O¹＝O 的頻點1、R²＝R 的頻點2；同一塊都是同一個頻點時只標一次（O/sO¹）
+                  const whichs = new Set(b.uses.map((u) => u.which))
+                  const label = whichs.size === 1
+                    ? hesList.join('/') + SUP[b.uses[0].which]
+                    : [...new Set(b.uses.map((u) => u.hes + SUP[u.which]))].join('/')
+                  // 估字寬：粗體英數 11px 約 6px、10px 約 5.4px，上標約 3.5px；放不下 11px 就縮成 10px
+                  const sups = (label.match(/[¹²]/g) ?? []).length
+                  const est = (w: number) => (label.length - sups) * w + sups * 3.5 + 4
+                  const labelSize = blockPx >= est(6) ? 11 : blockPx >= est(5.4) ? 10 : 0
+                  const showLabel = labelSize > 0
                   const showFreq = blockPx >= 52
                   return (
                     <span
@@ -199,21 +239,24 @@ export function SpectrumChart({ rows, focus, highlight }: { rows: ChannelRow[]; 
                         const box = wrapRef.current?.getBoundingClientRect()
                         const me = e.currentTarget.getBoundingClientRect()
                         if (box) setTip({ b, x: me.left - box.left + me.width / 2, y: me.top - box.top })
+                        if (!drag.current) onHover(groupsOf(b))
                       }}
-                      onPointerLeave={() => setTip(null)}
-                      className="absolute inset-y-1 flex flex-col items-center justify-center overflow-hidden rounded-[3px] leading-tight text-white"
+                      onPointerLeave={() => { setTip(null); onHover([]) }}
+                      onClick={() => { if (!moved.current) clickBlock(b) }}
+                      className={`${picked ? 'spectrum-pick ' : ''}absolute inset-y-1 flex cursor-pointer flex-col items-center justify-center overflow-hidden rounded-[3px] leading-tight text-white`}
                       style={{
                         left: `${left}%`,
                         width: `max(${blockPx - 1}px, 2px)`,
-                        background: VENDOR_COLOR[c],
-                        opacity: primary ? 1 : 0.5,
-                        boxShadow: hit ? '0 0 0 2px #111827' : suspect ? 'inset 0 0 0 2px #F59E0B' : undefined,
+                        background: laneColor(c),
+                        // 點選中的色塊外框交給 .spectrum-pick（動畫要用 box-shadow，這裡不能蓋掉）
+                        boxShadow: picked ? undefined : suspect ? 'inset 0 0 0 2px #F59E0B' : undefined,
+                        zIndex: picked ? 2 : undefined,
                       }}
                     >
                       {showLabel ? (
-                        <span className="text-[11px] font-bold">{label}{suspect && ' !'}</span>
-                      ) : b.uses.length > 1 && blockPx >= 14 ? (
-                        <span className="text-[10px] font-bold">{b.uses.length}</span>
+                        <span className="whitespace-nowrap font-bold" style={{ fontSize: labelSize }}>{label}</span>
+                      ) : hesList.length > 1 && blockPx >= 14 ? (
+                        <span className="text-[10px] font-bold">{hesList.length}</span>
                       ) : null}
                       {showFreq && <span className="text-[10px] tabular-nums opacity-90">{fmtF(b.f)}</span>}
                     </span>
@@ -240,10 +283,10 @@ export function SpectrumChart({ rows, focus, highlight }: { rows: ChannelRow[]; 
           <Navigator blocks={blocks} view={view} onChange={(l, h) => setView(fit(l, h))} />
         </div>
 
-        <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-1 pl-[88px] text-[12px] text-ink-sub">
-          <span className="flex items-center gap-1.5"><span className="h-2.5 w-4 rounded-sm bg-ink-sub" />頻點1（CCM1）</span>
-          <span className="flex items-center gap-1.5"><span className="h-2.5 w-4 rounded-sm bg-ink-sub opacity-50" />頻點2（CCM2）</span>
-          <span className="flex items-center gap-1.5"><span className="h-2.5 w-4 rounded-sm" style={{ boxShadow: 'inset 0 0 0 2px #F59E0B' }} />頻點與 CCM 對不上（待確認）</span>
+        <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-1 pl-[128px] text-[12px] text-ink-sub">
+          <span>顏色＝廠商 · 文字 ¹／²＝頻點1／頻點2</span>
+          <span className="flex items-center gap-1.5"><span className="spectrum-pick h-2.5 w-4 rounded-sm" />滑過＝框出同一組 HES 設定的頻點，點選＝固定框選（色塊含多組時再點換下一組）</span>
+          <span className="flex items-center gap-1.5"><span className="h-2.5 w-4 rounded-sm" style={{ boxShadow: 'inset 0 0 0 2px #F59E0B' }} />頻點與 Channel 對不上（待確認）</span>
           <span className="text-ink-mut">滾輪縮放 · 拖曳平移 · 雙擊對焦 · 拖動下方框的左右把手拉伸範圍</span>
         </div>
 
@@ -253,15 +296,16 @@ export function SpectrumChart({ rows, focus, highlight }: { rows: ChannelRow[]; 
             style={{ left: tip.x, top: tip.y - 6 }}
           >
             <div className="flex items-center gap-1.5 font-semibold text-ink">
-              <span className="size-2 rounded-sm" style={{ background: VENDOR_COLOR[tip.b.vendor] }} />
-              {tip.b.vendor} · {fmtF(tip.b.f)} MHz
+              <span className="size-2 rounded-sm" style={{ background: laneColor(tip.b.lane) }} />
+              {tip.b.lane} · {fmtF(tip.b.f)} MHz
             </div>
             {tip.b.uses.map((u) => (
               <div key={`${u.key}-${u.which}`} className="mt-0.5 whitespace-nowrap tabular-nums text-ink-sub">
-                HES {u.hes}（{u.caseId}）· CCM{u.which} = {u.ccm}
-                {u.suspect !== undefined && <span className="ml-1 text-[#B45309]">（依 CCM 換算應為 {fmtF(u.suspect)}，待確認）</span>}
+                HES {u.hes}（{u.cases.join('/')}）· Channel{u.which} = {u.ch}
+                {u.suspect !== undefined && <span className="ml-1 text-[#B45309]">（依 Channel 換算應為 {fmtF(u.suspect)}，待確認）</span>}
               </div>
             ))}
+            <div className="mt-1 text-[11px] text-ink-mut">點一下框出這組頻點</div>
           </div>
         )}
       </div>
@@ -270,7 +314,7 @@ export function SpectrumChart({ rows, focus, highlight }: { rows: ChannelRow[]; 
 }
 
 /**
- * 總覽條：全頻段縮圖（每個案別一條細線標出頻點位置），框住目前檢視範圍。
+ * 總覽條：全頻段縮圖（每列一條細線標出頻點位置），框住目前檢視範圍。
  * 拖框身＝平移；拖左右把手＝拉伸／壓縮；點框外空白＝把框移到那裡。
  */
 function Navigator({ blocks, view, onChange }: { blocks: Block[]; view: [number, number]; onChange: (lo: number, hi: number) => void }) {
@@ -317,11 +361,11 @@ function Navigator({ blocks, view, onChange }: { blocks: Block[]; view: [number,
         onPointerCancel={() => { drag.current = null }}
       >
         {ticks.slice(1, -1).map((t) => <span key={t} className="absolute inset-y-0 w-px bg-border" style={{ left: `${pct(t)}%` }} />)}
-        {/* 每個廠商一條細線，畫出頻點位置 → 一眼看出集中在哪 */}
-        {VENDORS.map((c, i) => (
-          <div key={c} className="absolute inset-x-0" style={{ top: 4 + i * 8, height: 6 }}>
-            {blocks.filter((b) => b.vendor === c).map((b) => (
-              <span key={b.f} className="absolute inset-y-0 rounded-[1px]" style={{ left: `${pct(b.f - BLOCK_MHZ / 2)}%`, width: `${(BLOCK_MHZ / FULL_SPAN) * 100}%`, background: VENDOR_COLOR[c] }} />
+        {/* 每列一條細線，畫出頻點位置 → 一眼看出集中在哪 */}
+        {LANES.map((c, i) => (
+          <div key={c} className="absolute inset-x-0" style={{ top: 3 + i * 7, height: 5 }}>
+            {blocks.filter((b) => b.lane === c).map((b) => (
+              <span key={b.f} className="absolute inset-y-0 rounded-[1px]" style={{ left: `${pct(b.f - BLOCK_MHZ / 2)}%`, width: `${(BLOCK_MHZ / FULL_SPAN) * 100}%`, background: laneColor(c) }} />
             ))}
           </div>
         ))}

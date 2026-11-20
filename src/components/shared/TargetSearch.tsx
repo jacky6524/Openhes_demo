@@ -27,7 +27,7 @@ export function parseTargets(text: string): string[] {
  * Ctrl+Enter（⌘+Enter）直接搜尋；單按 Enter 是換行。
  */
 export function TargetSearchMulti({
-  mode, text, onMode, onText, onSubmit, groupInput,
+  mode, text, onMode, onText, onSubmit, groupInput, textareaClassName = 'h-12 w-[360px]',
 }: {
   mode: TargetMode
   text: string
@@ -35,6 +35,8 @@ export function TargetSearchMulti({
   onText: (v: string) => void
   onSubmit?: () => void
   groupInput: React.ReactNode
+  /** 輸入框尺寸（預設 360px 寬、約兩行；MDMS上拋右側操作區給滿寬加高） */
+  textareaClassName?: string
 }) {
   const label = TARGET_MODES.find((m) => m.key === mode)?.label ?? ''
   const count = parseTargets(text).length
@@ -54,7 +56,7 @@ export function TargetSearchMulti({
             onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); onSubmit?.() } }}
             placeholder={`請輸入${label}，可輸入一筆或貼上多筆，以換行分隔。`}
             rows={2}
-            className={`${FIELD_BOX} block h-12 min-h-9 w-[360px] resize-y py-1.5 leading-[1.4]`}
+            className={`${FIELD_BOX} block min-h-9 resize-y py-1.5 leading-[1.4] ${textareaClassName}`}
           />
           {count > 0 && (
             <span className="whitespace-nowrap pb-1 text-[12px] tabular-nums text-ink-mut">已輸入 {count} 筆</span>

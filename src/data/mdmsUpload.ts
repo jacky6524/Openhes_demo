@@ -67,3 +67,56 @@ export function buckets(type: MdmsType, from: number, to: number, scale: string)
   }
   return out.reverse()
 }
+
+/* ───────────── 2026-11-19 Dashboard（LP／MN／ALT 三色、整點查詢） ───────────── */
+
+/** Dashboard 只看 MeterReadings 三種；事件（EndDeviceEvents）只在右側「上拋操作」可選 */
+export type DashKey = 'LP' | 'MN' | 'ALT'
+export const DASH_KEYS: DashKey[] = ['LP', 'MN', 'ALT']
+
+/**
+ * 三種資料的識別色 —— 2026-11-19 業主：**與告警無關**，純粹區分類型（不再因達成率低轉紅）。
+ * 參考圖：LP 藍紫、MN 青、ALT 粉；刻意避開告警紅／黃／綠。tint＝卡片底色。
+ */
+export const DASH_COLOR: Record<DashKey, { line: string; tint: string; bar: string }> = {
+  LP: { line: '#5B5BD6', tint: '#F2F2FD', bar: '#C9C9F2' },
+  MN: { line: '#1A9FC4', tint: '#EAF6FA', bar: '#B5DFEC' },
+  ALT: { line: '#D9588F', tint: '#FCEFF5', bar: '#F1C3D7' },
+}
+/** 各類型在 dashboard 上的點距與說明（MN 為「當天午夜資料的累積上拋率」，每小時一點） */
+export const DASH_CADENCE: Record<DashKey, { stepMin: number; text: string }> = {
+  LP: { stepMin: 15, text: '每15分鐘更新' },
+  MN: { stepMin: 60, text: '每1小時更新（當日午夜資料累積上拋率）' },
+  ALT: { stepMin: 60, text: '每1小時更新' },
+}
+
+export interface DashPoint extends MdmsBucket {
+  missing: number // 缺值＝總數－已上拋
+}
+
+/**
+ * 區間內該類型的點，舊→新。LP／ALT 沿用 buckets()；
+ * MN 一天只有一批（午夜資料），dashboard 改畫「當天午夜資料到每個整點為止的累積上拋率」：
+ * 凌晨開始上拋、上午爬到 97～99%。mock。
+ */
+export function dashPoints(key: DashKey, from: number, to: number, scale: string): DashPoint[] {
+  const type = MDMS_TYPES.find((t) => t.key === key)!
+  let rows: MdmsBucket[]
+  if (key !== 'MN') {
+    rows = buckets(type, from, to, scale).reverse()
+  } else {
+    rows = []
+    const H = 3_600_000
+    for (let ts = Math.ceil(from / H) * H; ts <= to; ts += H) {
+      const day = Math.floor(ts / DAY) * DAY
+      const hd = hashStr(`MN|${day}|${scale}`)
+      const total = scale ? 10 + (hd % 90) : type.total + (hd % 3000)
+      const hours = (ts - day) / H
+      const noise = ((hashStr(`MN|${ts}|${scale}`) % 1000) / 1000 - 0.5) * 1.2
+      const pct = hours === 0 ? 0 : Math.min(99.6, 99.2 - 55 * Math.exp(-hours / 2.2) + noise)
+      const p = Math.max(0, Math.round(pct * 100) / 100)
+      rows.push({ ts, uploaded: Math.round((total * p) / 100), total, pct: p, inProgress: false })
+    }
+  }
+  return rows.map((r) => ({ ...r, missing: r.total - r.uploaded }))
+}

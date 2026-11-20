@@ -61,6 +61,7 @@ export interface DcuListRow {
   buCode: string // tpcBuCode（營業區，2 碼）
   office: string // 區處及營業區（上面三個組好的顯示字串）
   eventCount: number // 事件數：> 0 才在詳細資料圖示上顯示 badge
+  meterOnline: number // 電表連線數（2026-11-19 比照台達新增；≥ 白名單電表連線數、≤ 電表數）
   whitelistOnline: number // 白名單電表連線數
   channel: (typeof CHANNELS)[number] // 頻道組別
   comm: (typeof COMM_TYPES)[number] // 連線類型（4G-R／LTE／ADSL）
@@ -75,7 +76,7 @@ export interface DcuListRow {
 const STREETS = ['北新路三段', '寶元路一段', '中正路二段', '文化路一段', '民權路']
 
 /** 100 台 DCU —— 與設計稿的「共 100 筆資料」一致 */
-export const DCU_LIST_ROWS: DcuListRow[] = Array.from({ length: 100 }, (_, i) => {
+export const DCU_LIST_ROWS: DcuListRow[] = Array.from({ length: 100 }, (_, i): Omit<DcuListRow, 'meterOnline'> => {
   const serial = `AE1092D${pad(i + 1, 5)}`
   const r = mulberry32(hash(serial))
   const online = r() > 0.18
@@ -111,7 +112,11 @@ export const DCU_LIST_ROWS: DcuListRow[] = Array.from({ length: 100 }, (_, i) =>
     whitelistLock: hash(serial + ':lock') % 5 === 0,
     group: DCU_GROUPS[Math.floor(r() * DCU_GROUPS.length)],
   }
-})
+}).map((d) => ({
+  ...d,
+  // 獨立雜湊，不動上面的亂數序列：連線中的電表數介於 白名單電表連線數 與 電表數 之間
+  meterOnline: d.online ? d.whitelistOnline + (hash(d.serial + ':mon') % (d.meterCount - d.whitelistOnline + 1)) : 0,
+}))
 
 /* ---------------------------------------------------------- 拓樸圖 */
 

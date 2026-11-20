@@ -29,6 +29,7 @@ import { status, text as textTok, RATE_BAR } from '@/tokens'
  *
  * 2026-11-17 同步正式機截圖：
  *   · 副標只留範圍（拿掉「· 近 14 天」）；折線放進淺灰圓角底板，上方標題「近14日讀表趨勢」
+ *     （2026-11-19 業主：淺灰底板拿掉，折線直接放在卡片白底上）
  *   · X 軸為實際日期（今天往前 14 天），Y 軸貼近資料範圍（整數刻度），不再固定 0–100
  *   · 右欄進度條改為依讀表率填滿（原本只填未讀缺口），色用淡藍 RATE_BAR（業主要求避開告警色），數值一律黑字一位小數
  *   · 環形連線率一位小數
@@ -175,7 +176,7 @@ export function SharedMetricCard() {
         </div>
 
         {/* .trend-chart — 三線面積圖，14 天；淺灰底板＋標題（正式機版式） */}
-        <div className="min-h-0 min-w-0 rounded-xl px-2 pb-1.5 pt-2.5" style={{ background: '#F5F3F6' }}>
+        <div className="min-h-0 min-w-0 px-2 pb-1.5 pt-2.5">
           <div className="mb-1 text-center text-[13px] font-semibold text-ink-sub">近{DAYS}日讀表趨勢</div>
           {/* 圖例：對齊前端 echarts legend（top center、roundRect 10×7、9px #40373b） */}
           <div className="mb-1.5 flex items-center justify-center gap-4">

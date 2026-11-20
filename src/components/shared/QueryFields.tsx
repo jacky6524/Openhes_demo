@@ -22,10 +22,10 @@ export function Field({ label, hint, children }: { label: string; hint?: string;
 
 /** 群組下拉：選項＝裝置群組頁的群組（依 DCU群組／電表群組分組）；值為 `${kind}:${群組名}`，'' ＝未選 */
 export const groupKey = (k: GroupKind, name: string) => `${k}:${name}`
-export function GroupSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+export function GroupSelect({ value, onChange, className = 'w-[240px]' }: { value: string; onChange: (v: string) => void; className?: string }) {
   const groups = useDeviceGroups((s) => s.groups)
   return (
-    <select value={value} onChange={(e) => onChange(e.target.value)} aria-label="群組" className={`${FIELD_BOX} h-9 w-[240px]`}>
+    <select value={value} onChange={(e) => onChange(e.target.value)} aria-label="群組" className={`${FIELD_BOX} h-9 ${className}`}>
       <option value="">請選擇群組</option>
       {GROUP_KINDS.map(({ key, label }) =>
         groups[key].length > 0 && (
@@ -42,7 +42,9 @@ export function GroupSelect({ value, onChange }: { value: string; onChange: (v: 
    15 分一格，所以拆成 日期＋時間 兩個欄位自己組。
    2026-11-04 業主意見：時、分原本是兩個下拉，改成**一個下拉**直接選 00:00、00:15 … 23:45（共 96 個）。
    值的格式維持 'YYYY-MM-DDTHH:mm'（日期輸入框規定的格式），日期部分的顯示跟作業系統走。 */
-const TIMES = Array.from({ length: 96 }, (_, i) => `${String(Math.floor(i / 4)).padStart(2, '0')}:${String((i % 4) * 15).padStart(2, '0')}`)
+const timesOf = (step: number) =>
+  Array.from({ length: 1440 / step }, (_, i) => `${String(Math.floor((i * step) / 60)).padStart(2, '0')}:${String((i * step) % 60).padStart(2, '0')}`)
+const TIMES_BY_STEP: Record<number, string[]> = { 15: timesOf(15), 60: timesOf(60) }
 
 /** 'YYYY-MM-DDTHH:mm' 往前／後推 n 個月（遇到短月份取該月最後一天，例：01-31 → 02-28） */
 export function addMonths(v: string, n: number) {
@@ -54,10 +56,12 @@ export function addMonths(v: string, n: number) {
   return `${target.getFullYear()}-${p(target.getMonth() + 1)}-${p(Math.min(d, last))}T${time}`
 }
 
-export function DateTime15({ value, min, max, onChange }: { value: string; min?: string; max?: string; onChange: (v: string) => void }) {
+/** stepMin：時間下拉的間隔（預設 15 分；2026-11-19 MDMS上拋改整點＝60） */
+export function DateTime15({ value, min, max, stepMin = 15, onChange }: { value: string; min?: string; max?: string; stepMin?: 15 | 60; onChange: (v: string) => void }) {
+  const TIMES = TIMES_BY_STEP[stepMin]
   const [date = '', rawTime = ''] = value ? value.split('T') : []
-  // 外部給的值若不在 15 分格上（例如舊預設值），選單顯示時往前取整到最近的一格
-  const time = rawTime ? TIMES[Math.floor((Number(rawTime.slice(0, 2)) * 60 + Number(rawTime.slice(3, 5))) / 15)] ?? '00:00' : '00:00'
+  // 外部給的值若不在格上（例如舊預設值），選單顯示時往前取整到最近的一格
+  const time = rawTime ? TIMES[Math.floor((Number(rawTime.slice(0, 2)) * 60 + Number(rawTime.slice(3, 5))) / stepMin)] ?? '00:00' : '00:00'
   const inner = 'bg-transparent text-[13px] tabular-nums text-ink focus:outline-none disabled:cursor-not-allowed disabled:text-ink-mut'
   const put = (d: string, t: string) => onChange(d ? `${d}T${t}` : '')
   return (
@@ -71,7 +75,14 @@ export function DateTime15({ value, min, max, onChange }: { value: string; min?:
 }
 
 /** 起訖區間。起訖顛倒、或超過 maxMonths 上限時，會把另一端拉回來（改起點動終點、改終點動起點） */
-export function RangeInput({ from, to, maxMonths, onChange }: { from: string; to: string; maxMonths?: number; onChange: (from: string, to: string) => void }) {
+export function RangeInput({ from, to, maxMonths, stepMin = 15, className = '', onChange }: {
+  from: string
+  to: string
+  maxMonths?: number
+  stepMin?: 15 | 60
+  className?: string
+  onChange: (from: string, to: string) => void
+}) {
   const setFrom = (f: string) => {
     let t = to
     if (f && t && t < f) t = f
@@ -85,10 +96,10 @@ export function RangeInput({ from, to, maxMonths, onChange }: { from: string; to
     onChange(f, t)
   }
   return (
-    <div className={`${FIELD_BOX} flex h-9 items-center gap-2 py-0`}>
-      <DateTime15 value={from} onChange={setFrom} />
-      <ArrowRight size={14} className="text-ink-mut" />
-      <DateTime15 value={to} onChange={setTo} />
+    <div className={`${FIELD_BOX} flex h-9 items-center gap-2 py-0 ${className}`}>
+      <DateTime15 value={from} stepMin={stepMin} onChange={setFrom} />
+      <ArrowRight size={14} className="shrink-0 text-ink-mut" />
+      <DateTime15 value={to} stepMin={stepMin} onChange={setTo} />
     </div>
   )
 }

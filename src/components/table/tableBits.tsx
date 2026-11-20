@@ -51,7 +51,7 @@ export function StatusPill({ status, labels = ['連線', '斷線'] }: { status: 
   const online = status === 'online'
   return (
     <span
-      className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[12px] font-medium"
+      className="inline-flex items-center gap-1.5 whitespace-nowrap px-2 py-0.5 rounded-md text-[12px] font-medium"
       style={{ background: online ? statusTok.normal.bg : statusTok.danger.bg, color: online ? GREEN : RED }}
     >
       <span className="h-1.5 w-1.5 rounded-full" style={{ background: online ? GREEN : RED }} />
@@ -81,7 +81,7 @@ export function EventBadge({ count, children }: { count?: number | null; childre
 export function EnabledState({ enabled }: { enabled: boolean }) {
   if (enabled) return <span className="text-ink-sub">啟用</span>
   return (
-    <span className="inline-flex items-center rounded-md px-2 py-0.5 text-[12px] font-medium" style={{ background: '#EFEFF1', color: '#6B5E62' }}>
+    <span className="inline-flex items-center whitespace-nowrap rounded-md px-2 py-0.5 text-[12px] font-medium" style={{ background: '#EFEFF1', color: '#6B5E62' }}>
       停用
     </span>
   )
@@ -393,4 +393,57 @@ export function pageWindow(page: number, total: number): (number | '…')[] {
     out.push('…', total)
   }
   return out
+}
+
+/* ───────────── 清單表格的對齊規則（2026-11-19 業主：電表清單與 DCU清單的置中／對齊／換行要一致） ─────────────
+ *   · 文字、編號、地址、日期 → 靠左
+ *   · 數量（電表數、連線數）→ 靠右（位數對齊）
+ *   · 狀態標籤、Y／N、單字母代碼（頻道組別）→ 置中
+ *   · 表頭與該欄內容同一個對齊方式；表頭換行位置用 \n 指定（例「區處及\n營業區」），瀏覽器不會自己斷成一字一行
+ *   · 內容：編號類一行不換行、放不下用「…」（滑過看全文）；地址最多兩行；時間戳 日期／時間 兩行
+ */
+export type ColAlign = 'left' | 'center' | 'right'
+export const ALIGN_TEXT: Record<ColAlign, string> = { left: 'text-left', center: 'text-center', right: 'text-right' }
+const ALIGN_JUSTIFY: Record<ColAlign, string> = { left: 'justify-start', center: 'justify-center', right: 'justify-end' }
+/** 清單儲存格共用留白（兩張清單一致） */
+export const LIST_TD = 'px-2 py-3 align-middle whitespace-nowrap'
+
+export function ListTh({ label, align = 'left', sort, width }: {
+  label?: string
+  align?: ColAlign
+  /** 建議寬度（auto 版面下當作偏好寬度）：給地址這種可縮的欄，讓空間先分給其他欄的標題 */
+  width?: number
+  sort?: { active: boolean; dir: SortDir; onClick: () => void }
+}) {
+  // 2026-11-19 業主：標題也盡量不換行 —— \n 只是「允許斷在這裡」：寬度夠就一行，不夠才在這個位置換行
+  const parts = (label ?? '').split('\n')
+  const text = (
+    <span className="leading-snug">
+      {parts.map((t, i) => (
+        <span key={i} className="inline-block whitespace-nowrap">{t}{i < parts.length - 1 && <wbr />}</span>
+      ))}
+    </span>
+  )
+  return (
+    <th className={`sticky top-0 z-10 border-b border-border bg-inset px-2 py-2.5 font-medium whitespace-normal ${ALIGN_TEXT[align]}`} style={width ? { width } : undefined}>
+      <div className={`flex items-center ${ALIGN_JUSTIFY[align]}`}>
+        {sort ? (
+          <button onClick={sort.onClick} className={`inline-flex items-center gap-1 hover:text-ink ${sort.active ? 'font-semibold text-ink' : ''}`}>
+            {text}
+            {sort.active ? (sort.dir === 'asc' ? <ArrowUp size={13} className="shrink-0" /> : <ArrowDown size={13} className="shrink-0" />) : <ChevronsUpDown size={13} className="shrink-0 text-ink-mut" />}
+          </button>
+        ) : text}
+      </div>
+    </th>
+  )
+}
+
+/** 編號類儲存格內容：一行、不截斷（欄寬由內容決定，表格用 auto 版面） */
+export function OneLine({ value, className = '' }: { value: string; className?: string }) {
+  return <span className={`whitespace-nowrap ${className}`}>{value}</span>
+}
+
+/** 一般儲存格內容：最多兩行；先在空白、連字號處斷行，不得已才斷在字中間（不截斷成看不到）；超過兩行才「…」，滑過看全文 */
+export function TwoLine({ value, className = '' }: { value: string; className?: string }) {
+  return <span className={`line-clamp-2 leading-snug [overflow-wrap:anywhere] ${className}`} title={value}>{value}</span>
 }
