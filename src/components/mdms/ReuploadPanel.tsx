@@ -9,7 +9,7 @@ import { MDMS_TYPES, buckets, parseLocal, type MdmsKey } from '@/data/mdmsUpload
 /**
  * MDMS上拋 · 右側「上拋操作」板塊（2026-11-19 業主意見，取代 11/11 的單行 ReuploadBar）。
  *
- * 參考圖 1119更新參考/MDMS上拋 (4).png：表號／電號／**群組**（新增）→ 上拋電表資料時間（整點）→ 資料類型 → 清除條件／執行上拋。
+ * 參考圖 1119更新參考/MDMS上拋 (4).png：表號／電號／**群組**（新增）→ 資料類型 → 上拋電表資料時間（整點）→ 清除條件／執行上拋。
  *   · 對象留空＝全部電表；表號／電號可多筆（換行分隔）；群組＝裝置群組頁的群組
  *   · 資料類型預設跟著左側折線圖的頁籤（ALL 時預設 LP），也可以自己改；可選事件
  *   · 資料時間預設跟著左側 dashboard 的搜尋區間
@@ -100,6 +100,12 @@ export function ReuploadPanel({ typeKey, from: from0, to: to0 }: { typeKey: Mdms
       />
       {mode !== 'group' && <p className="-mt-2 text-[12px] text-ink-mut">留空＝全部電表</p>}
 
+      <Field label="選擇資料類型">
+        <select value={type} onChange={(e) => { setType(e.target.value as MdmsKey); touched() }} className={`${FIELD_BOX} h-9 w-full py-0`}>
+          {MDMS_TYPES.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+        </select>
+      </Field>
+
       {/* 板塊窄，起訖分兩行（同 RangeInput 的規則：顛倒或超過 1 個月時拉回另一端） */}
       <Field label="上拋電表資料時間" hint="以整點為單位，單次上限 1 個月">
         <div className="flex flex-col gap-1.5">
@@ -110,12 +116,6 @@ export function ReuploadPanel({ typeKey, from: from0, to: to0 }: { typeKey: Mdms
             </div>
           ))}
         </div>
-      </Field>
-
-      <Field label="選擇資料類型">
-        <select value={type} onChange={(e) => { setType(e.target.value as MdmsKey); touched() }} className={`${FIELD_BOX} h-9 w-full py-0`}>
-          {MDMS_TYPES.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
-        </select>
       </Field>
 
       <div className="flex gap-2">

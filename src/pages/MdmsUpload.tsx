@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { Download } from 'lucide-react'
 import { Bar, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { PageTitle } from '@/components/shared/PageTitle'
 import { PillTabs } from '@/components/shared/PillTabs'
@@ -6,7 +7,7 @@ import { TargetSearchMulti, parseTargets, type TargetMode } from '@/components/s
 import { Field, GroupSelect, QueryButtons, RangeInput } from '@/components/shared/QueryFields'
 import { ReuploadPanel } from '@/components/mdms/ReuploadPanel'
 import {
-  DASH_KEYS, DASH_COLOR, DASH_CADENCE, MDMS_TYPES, dashPoints, fmtStamp, parseLocal,
+  DASH_KEYS, DASH_COLOR, MDMS_TYPES, dashPoints, fmtStamp, parseLocal,
   type DashKey, type DashPoint,
 } from '@/data/mdmsUpload'
 
@@ -42,6 +43,51 @@ const TABS: { key: Tab; label: string }[] = [{ key: 'ALL', label: 'ALL' }, ...DA
 const fmtN = (n: number) => n.toLocaleString('en-US')
 const labelOf = (k: DashKey) => MDMS_TYPES.find((t) => t.key === k)!.label
 
+function generateMdmsXml(applied: Applied, series: Record<DashKey, DashPoint[]>) {
+  const now = new Date().toISOString()
+  const targetLabel = applied.mode === 'group' ? (applied.group || '全部') : (applied.text ? parseTargets(applied.text).join(',') : '全部')
+  const modeLabel = applied.mode === 'meterNo' ? '表號' : applied.mode === 'elecNo' ? '電號' : '群組'
+
+  const escapeXml = (s: string) =>
+    s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;')
+
+  let xml = `<?xml version="1.0" encoding="UTF-8"?>\n`
+  xml += `<MeterReadingsUploadReport xmlns="http://www.taipower.com.tw/hes/mdms/v1" generatedAt="${now}">\n`
+  xml += `  <Header>\n`
+  xml += `    <Source>OpenHES</Source>\n`
+  xml += `    <TargetMode>${modeLabel}</TargetMode>\n`
+  xml += `    <Target>${escapeXml(targetLabel)}</Target>\n`
+  xml += `    <DataStartTime>${applied.from.replace('T', ' ')}:00</DataStartTime>\n`
+  xml += `    <DataEndTime>${applied.to.replace('T', ' ')}:00</DataEndTime>\n`
+  xml += `  </Header>\n`
+  xml += `  <Summary>\n`
+  for (const k of DASH_KEYS) {
+    const list = series[k]
+    const latest = list[list.length - 1]
+    if (latest) {
+      xml += `    <Category key="${k}" name="${escapeXml(labelOf(k))}">\n`
+      xml += `      <LatestTime>${fmtStamp(latest.ts)}</LatestTime>\n`
+      xml += `      <UploadRate>${latest.pct.toFixed(2)}%</UploadRate>\n`
+      xml += `      <Uploaded>${latest.uploaded}</Uploaded>\n`
+      xml += `      <Total>${latest.total}</Total>\n`
+      xml += `      <Missing>${latest.missing}</Missing>\n`
+      xml += `    </Category>\n`
+    }
+  }
+  xml += `  </Summary>\n`
+  xml += `  <TimeSeries>\n`
+  for (const k of DASH_KEYS) {
+    xml += `    <Series key="${k}" name="${escapeXml(labelOf(k))}">\n`
+    for (const p of series[k]) {
+      xml += `      <Point time="${fmtStamp(p.ts)}" total="${p.total}" uploaded="${p.uploaded}" missing="${p.missing}" rate="${p.pct.toFixed(2)}" />\n`
+    }
+    xml += `    </Series>\n`
+  }
+  xml += `  </TimeSeries>\n`
+  xml += `</MeterReadingsUploadReport>\n`
+  return xml
+}
+
 export function MdmsUpload() {
   const [draft, setDraft] = useState<Applied>(DEFAULT)
   const [applied, setApplied] = useState<Applied>(DEFAULT)
@@ -60,6 +106,17 @@ export function MdmsUpload() {
     return Object.fromEntries(DASH_KEYS.map((k) => [k, dashPoints(k, from, to, scale)])) as Record<DashKey, DashPoint[]>
   }, [applied])
 
+  const downloadXml = () => {
+    const xml = generateMdmsXml(applied, series)
+    const blob = new Blob([xml], { type: 'application/xml;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `mdms-upload-${applied.from.replace(/[:T]/g, '')}_${applied.to.replace(/[:T]/g, '')}.xml`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   return (
     <div className="flex h-full min-h-[720px] min-w-[1280px] flex-col gap-3 p-4">
       <PageTitle title="MDMS上拋" />
@@ -67,7 +124,21 @@ export function MdmsUpload() {
       <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_400px] gap-4">
         {/* ── 左：Dashboard ── */}
         <section className="flex min-h-0 flex-col gap-4 rounded-card border border-border bg-surface p-5 shadow-card">
-          <PanelTitle>MDMS查詢</PanelTitle>
+          <PanelTitle
+            extra={
+              <button
+                type="button"
+                onClick={downloadXml}
+                title="下載 MDMS 查詢結果 XML"
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-[13px] font-semibold text-ink-sub hover:border-brand hover:text-brand"
+              >
+                <Download size={14} />
+                下載 XML
+              </button>
+            }
+          >
+            MDMS查詢
+          </PanelTitle>
 
           <div className="flex flex-col gap-3">
             <TargetSearchMulti
@@ -104,9 +175,11 @@ export function MdmsUpload() {
 
 export function PanelTitle({ children, extra }: { children: React.ReactNode; extra?: React.ReactNode }) {
   return (
-    <div className="flex items-center gap-2">
-      <span className="h-4 w-[3px] rounded-full bg-danger" />
-      <h2 className="text-[16px] font-semibold text-ink">{children}</h2>
+    <div className="flex items-center justify-between">
+      <div className="flex items-center gap-2">
+        <span className="h-4 w-[3px] rounded-full bg-danger" />
+        <h2 className="text-[16px] font-semibold text-ink">{children}</h2>
+      </div>
       {extra}
     </div>
   )
@@ -127,8 +200,7 @@ function RateCard({ k, b, active, onClick }: { k: DashKey; b?: DashPoint; active
       <div className="flex items-center justify-between gap-2">
         <span className="text-[14px] font-semibold text-ink">{labelOf(k)}</span>
         {b && (
-          <span className="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-[12px] tabular-nums text-ink-mut">
-            {b.inProgress && <span className="rounded-full bg-surface px-1.5 py-px text-[11px] font-semibold" style={{ color: c.line }}>上拋中</span>}
+          <span className="shrink-0 whitespace-nowrap text-[12px] tabular-nums text-ink-mut">
             {fmtStamp(b.ts).slice(5)}
           </span>
         )}
@@ -195,16 +267,12 @@ function TrendPanel({ series, tab, onTab }: { series: Record<DashKey, DashPoint[
     return hours.filter((_, i) => i % every === 0).map((r) => r.label)
   }, [rows])
 
-  const cadence = tab === 'ALL' ? 'LP 每15分鐘・MN／ALT 每1小時更新' : DASH_CADENCE[tab].text
   const one = tab !== 'ALL'
 
   return (
     <div className="flex min-h-0 flex-1 flex-col rounded-card border border-border p-4">
       <div className="flex items-center justify-between">
-        <div className="flex items-baseline gap-2">
-          <h3 className="text-[15px] font-semibold text-ink">趨勢分析</h3>
-          <span className="text-[12px] text-ink-mut">{cadence} · 不含進行中時段{cut && ` · 只顯示最後 ${CHART_HOURS} 小時`}</span>
-        </div>
+        <h3 className="text-[15px] font-semibold text-ink">趨勢分析</h3>
         <PillTabs tabs={TABS} value={tab} onChange={onTab} />
       </div>
 
