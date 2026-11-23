@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, Bot, Copy, Download, FileSpreadsheet, RotateCw, Trash2, User } from 'lucide-react'
+import { AlertTriangle, BarChart3, Bot, Check, Copy, Download, RotateCw, Trash2, User } from 'lucide-react'
 import { Th, InfiniteFooter, useInfiniteRows } from '@/components/table/tableBits'
 import { PageTitle } from '@/components/shared/PageTitle'
 import { PillTabs } from '@/components/shared/PillTabs'
-import { GroupSelect } from '@/components/shared/QueryFields'
+import { SimpleModal, BTN_GHOST, BTN_PRIMARY } from '@/components/shared/SimpleModal'
+import { GroupSelect, MultiSelect } from '@/components/shared/QueryFields'
 import { CASES, caseFullName } from '@/store/useCaseFilter'
 import { status as statusTok } from '@/tokens'
 
@@ -41,6 +42,7 @@ const TYPE_META: Record<ReportType, { desc: string; scope: boolean; range: boole
 const OFFICES = ['北市區處', '北縣區處', '北南區處', '北西區處', '桃園區處', '新桃區處', '中市區處', '台南區處', '高市區處'] as const
 const COMM_MODES = ['RF', 'PLC', 'Cellular'] as const
 const METER_CLASSES = ['高壓', '低壓', '表燈'] as const
+const CASE_OPTIONS = CASES.map((c) => ({ value: c.id, label: caseFullName(c) }))
 const DATA_TYPES = ['LP', 'ALT', 'MN', 'EVENT', 'DRR'] as const
 type DataType = (typeof DATA_TYPES)[number]
 /** 每顆電表每天幾筆（預估用） */
@@ -213,6 +215,8 @@ export function StatsReport() {
   const [typeFilter, setTypeFilter] = useState<string>('')
   const [sourceFilter, setSourceFilter] = useState<string>('')
   const [q, setQ] = useState('')
+  const [errorModalJob, setErrorModalJob] = useState<Job | null>(null)
+  const [copied, setCopied] = useState(false)
   const topRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const set = <K extends keyof Form>(k: K, v: Form[K]) => { setForm((f) => ({ ...f, [k]: v })); setNotice('') }
@@ -247,11 +251,6 @@ export function StatsReport() {
     setNotice(`已送出「${form.type}」，產生完成後可在下方清單下載`)
     scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
   }
-  const reuse = (j: Job) => {
-    setForm({ ...j.form, note: j.form.note && j.source === 'manual' ? j.form.note : '' })
-    setNotice(`已帶入 ${j.form.type} 的條件，可修改後再送出`)
-    topRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }
   const retry = (j: Job) => setJobs((all) => all.map((x) => (x.id === j.id ? { ...x, state: 'queued', progress: 0, error: '', createdAt: NOW, finishedAt: null } : x)))
 
   const counts = {
@@ -265,157 +264,161 @@ export function StatsReport() {
     (tab === 'all' || (tab === 'active' ? isActive(j.state) : j.state === tab)) &&
     (!typeFilter || j.form.type === typeFilter) &&
     (!sourceFilter || j.source === sourceFilter) &&
-    (!needle || j.id.includes(needle) || j.form.note.toLowerCase().includes(needle) || summarize(j.form).toLowerCase().includes(needle)),
+    (!needle || j.id.includes(needle) || j.form.note.toLowerCase().includes(needle) || summarize(j.form).toLowerCase().includes(needle) || j.error.toLowerCase().includes(needle)),
   )
   const { visible, sentinelRef, hasMore } = useInfiniteRows(rows.length, [tab, typeFilter, sourceFilter, q, jobs.length], 15)
 
   return (
     <div ref={topRef} className="flex h-full min-h-[760px] min-w-[1280px] flex-col gap-3 p-4">
-      <PageTitle title="統計報表" />
+      <PageTitle title="統計報表" icon={<BarChart3 size={20} className="text-brand" />} />
 
       {/* ── 產生報表 ── */}
       <section className="shrink-0 rounded-card border border-border bg-surface p-5 shadow-card">
         <SectionTitle title="產生報表" />
-        <div className="mt-4 flex gap-5">
-          <div className="flex min-w-0 flex-1 flex-col gap-3">
-            <div className="flex flex-wrap items-end gap-3">
-              <Labeled label="報表類型">
-                <select value={form.type} onChange={(e) => setForm((f) => ({ ...emptyForm(e.target.value as ReportType), cases: f.cases, office: f.office, format: f.format, encoding: f.encoding, note: f.note }))} className={`${CTL} w-[200px]`}>
-                  {REPORT_TYPES.map((t) => <option key={t}>{t}</option>)}
-                </select>
-              </Labeled>
-              <p className="mb-2 min-w-0 flex-1 text-[12.5px] text-ink-mut">{meta.desc}</p>
-            </div>
 
-            {/* 範圍：案別（複選膠囊，空＝全部）／區處／群組 */}
+        {/* ── 篩選條件 ── */}
+        <div className="mt-4 flex flex-col gap-3">
+          <div className="flex flex-wrap items-end gap-3">
+            <Labeled label="報表類型">
+              <select
+                value={form.type}
+                onChange={(e) => setForm((f) => ({ ...emptyForm(e.target.value as ReportType), cases: f.cases, office: f.office, format: f.format, encoding: f.encoding, note: f.note }))}
+                className={`${CTL} w-[190px] font-medium`}
+              >
+                {REPORT_TYPES.map((t) => <option key={t}>{t}</option>)}
+              </select>
+            </Labeled>
+
             {(meta.scope || form.type === '台電DR執行清單') && (
-              <Labeled label="案別" hint="不選＝全部案別">
-                <div className="flex flex-wrap gap-1.5">
-                  {CASES.map((c) => {
-                    const on = form.cases.includes(c.id)
-                    return (
-                      <button
-                        key={c.id}
-                        type="button"
-                        onClick={() => set('cases', on ? form.cases.filter((x) => x !== c.id) : [...form.cases, c.id])}
-                        className={`h-8 rounded-full border px-3 text-[12.5px] font-medium transition-colors ${on ? 'border-brand bg-brand-soft text-brand' : 'border-border text-ink-sub hover:border-ink-mut'}`}
-                      >
-                        {caseFullName(c)}
-                      </button>
-                    )
-                  })}
-                </div>
+              <Labeled label="案別" hint="可複選">
+                <MultiSelect
+                  options={CASE_OPTIONS}
+                  value={form.cases}
+                  onChange={(cases) => set('cases', cases)}
+                  placeholder="全部案別"
+                  width={200}
+                />
               </Labeled>
             )}
 
-            <div className="flex flex-wrap items-end gap-3">
-              {meta.scope && (
-                <>
-                  <Labeled label="區處">
-                    <select value={form.office} onChange={(e) => set('office', e.target.value)} className={`${CTL} w-[140px]`}>
-                      <option value="">全部</option>
-                      {OFFICES.map((o) => <option key={o}>{o}</option>)}
-                    </select>
-                  </Labeled>
-                  <Labeled label="群組" hint="選填">
-                    <GroupSelect value={form.group} onChange={(v) => set('group', v)} className="w-[180px]" />
-                  </Labeled>
-                </>
-              )}
-              {meta.range && (
-                <Labeled label="資料時間">
-                  <div className={`${CTL} flex items-center gap-2`}>
-                    <input type="date" value={form.from} max={form.to} onChange={(e) => set('from', e.target.value)} className="bg-transparent tabular-nums focus:outline-none" />
-                    <span className="text-ink-mut">→</span>
-                    <input type="date" value={form.to} min={form.from} onChange={(e) => set('to', e.target.value)} className="bg-transparent tabular-nums focus:outline-none" />
-                    <span className="text-[12px] text-ink-mut">{days(form)} 天</span>
-                  </div>
+            {meta.scope && (
+              <>
+                <Labeled label="區處">
+                  <select value={form.office} onChange={(e) => set('office', e.target.value)} className={`${CTL} w-[130px]`}>
+                    <option value="">全部</option>
+                    {OFFICES.map((o) => <option key={o}>{o}</option>)}
+                  </select>
                 </Labeled>
-              )}
-              {meta.extra === 'meterAttr' && (
-                <>
-                  <SelectField label="通訊方式" value={form.commMode} options={COMM_MODES} onChange={(v) => set('commMode', v)} />
-                  <SelectField label="電表類別" value={form.meterClass} options={METER_CLASSES} onChange={(v) => set('meterClass', v)} />
-                  <SelectField label="計費日" value={form.billingDay} options={Array.from({ length: 28 }, (_, i) => String(i + 1))} onChange={(v) => set('billingDay', v)} width={96} />
-                </>
-              )}
-              {meta.extra === 'dr' && (
-                <>
-                  <Labeled label="開始日期">
-                    <input type="date" value={form.drStart} onChange={(e) => set('drStart', e.target.value)} className={`${CTL} w-[150px] tabular-nums`} />
-                  </Labeled>
-                  <SelectField label="天數" value={form.drDays} options={['1', '2', '3', '5', '7']} onChange={(v) => set('drDays', v || '1')} width={88} noAll />
-                </>
-              )}
-            </div>
+                <Labeled label="群組" hint="選填">
+                  <GroupSelect value={form.group} onChange={(v) => set('group', v)} className="w-[170px]" />
+                </Labeled>
+              </>
+            )}
 
-            {meta.extra === 'dataTypes' && (
-              <Labeled label="資料類型" hint="可複選；LP 每顆電表每天 96 筆，資料量最大">
-                <div className="flex h-9 items-center gap-4">
-                  {DATA_TYPES.map((t) => (
-                    <label key={t} className="flex cursor-pointer items-center gap-1.5 text-[13px] text-ink">
-                      <input type="checkbox" checked={form.dataTypes.includes(t)} onChange={() => set('dataTypes', form.dataTypes.includes(t) ? form.dataTypes.filter((x) => x !== t) : DATA_TYPES.filter((x) => x === t || form.dataTypes.includes(x)))} className="size-4 cursor-pointer accent-danger" />
-                      {t}
-                    </label>
-                  ))}
-                  {form.dataTypes.length === 0 && <span className="text-[12px] text-danger">請至少選一種</span>}
+            {meta.range && (
+              <Labeled label="資料時間">
+                <div className={`${CTL} flex items-center gap-2`}>
+                  <input type="date" value={form.from} max={form.to} onChange={(e) => set('from', e.target.value)} className="bg-transparent tabular-nums focus:outline-none" />
+                  <span className="text-ink-mut">→</span>
+                  <input type="date" value={form.to} min={form.from} onChange={(e) => set('to', e.target.value)} className="bg-transparent tabular-nums focus:outline-none" />
+                  <span className="text-[12px] text-ink-mut font-medium">{days(form)} 天</span>
                 </div>
               </Labeled>
             )}
 
-            <div className="flex flex-wrap items-end gap-3 border-t border-divider pt-3">
-              <Labeled label="檔案格式">
-                <div className="flex h-9 items-center gap-4">
-                  {(['xlsx', 'csv'] as const).map((fm) => (
-                    <label key={fm} className="flex cursor-pointer items-center gap-1.5 text-[13px] text-ink">
-                      <input type="radio" name="fmt" checked={form.format === fm} onChange={() => set('format', fm)} className="size-4 cursor-pointer accent-danger" />
-                      {fm === 'xlsx' ? 'Excel（.xlsx）' : 'CSV'}
-                    </label>
-                  ))}
-                  {form.format === 'csv' && (
-                    <select value={form.encoding} onChange={(e) => set('encoding', e.target.value as Form['encoding'])} className={`${CTL} w-[110px]`} title="舊版 Excel 開中文 CSV 需 Big5">
-                      <option>UTF-8</option>
-                      <option>Big5</option>
-                    </select>
-                  )}
-                </div>
-              </Labeled>
-              <Labeled label="備註" hint="選填，方便在清單裡找">
-                <input value={form.note} onChange={(e) => set('note', e.target.value)} placeholder="例：月報對帳" className={`${CTL} w-[240px]`} />
-              </Labeled>
-            </div>
+            {meta.extra === 'meterAttr' && (
+              <>
+                <SelectField label="通訊方式" value={form.commMode} options={COMM_MODES} onChange={(v) => set('commMode', v)} width={110} />
+                <SelectField label="電表類別" value={form.meterClass} options={METER_CLASSES} onChange={(v) => set('meterClass', v)} width={110} />
+                <SelectField label="計費日" value={form.billingDay} options={Array.from({ length: 28 }, (_, i) => String(i + 1))} onChange={(v) => set('billingDay', v)} width={90} />
+              </>
+            )}
+
+            {meta.extra === 'dr' && (
+              <>
+                <Labeled label="開始日期">
+                  <input type="date" value={form.drStart} onChange={(e) => set('drStart', e.target.value)} className={`${CTL} w-[140px] tabular-nums`} />
+                </Labeled>
+                <SelectField label="天數" value={form.drDays} options={['1', '2', '3', '5', '7']} onChange={(v) => set('drDays', v || '1')} width={80} noAll />
+              </>
+            )}
           </div>
 
-          {/* 預估＋送出 */}
-          <aside className="flex w-[320px] shrink-0 flex-col gap-3 rounded-xl bg-inset p-4">
-            <div className="text-[13px] font-semibold text-ink">送出前預估</div>
-            <dl className="grid grid-cols-2 gap-y-2 text-[13px]">
-              <dt className="text-ink-sub">{form.type === 'DCU狀態報表' ? 'DCU 數' : '電表數'}</dt><dd className="text-right font-semibold tabular-nums text-ink">約 {fmtN(est.meters)}</dd>
-              <dt className="text-ink-sub">資料列數</dt><dd className="text-right font-semibold tabular-nums text-ink">約 {fmtN(est.rows)}</dd>
-              <dt className="text-ink-sub">檔案大小</dt><dd className="text-right font-semibold tabular-nums text-ink">約 {fmtSize(est.mb)}</dd>
-            </dl>
-            {over ? (
-              <div className="flex gap-2 rounded-lg px-3 py-2 text-[12.5px] leading-relaxed" style={{ background: statusTok.warning.bg, color: '#8A5A00' }}>
-                <AlertTriangle size={15} className="mt-0.5 shrink-0" />
-                <span>
-                  超過 Excel 單一工作表上限 {fmtN(EXCEL_ROWS)} 列，將自動分成 <b>{est.files}</b> 個檔案並壓縮成 ZIP。
-                  也可以<button type="button" onClick={() => set('format', 'csv')} className="mx-0.5 font-semibold underline">改用 CSV</button>（不受列數限制）或縮小範圍。
-                </span>
+          {meta.extra === 'dataTypes' && (
+            <Labeled label="資料類型" hint="可複選；LP 每顆電表每天 96 筆，資料量最大">
+              <div className="flex h-9 items-center gap-4">
+                {DATA_TYPES.map((t) => (
+                  <label key={t} className="flex cursor-pointer items-center gap-1.5 text-[13px] text-ink">
+                    <input type="checkbox" checked={form.dataTypes.includes(t)} onChange={() => set('dataTypes', form.dataTypes.includes(t) ? form.dataTypes.filter((x) => x !== t) : DATA_TYPES.filter((x) => x === t || form.dataTypes.includes(x)))} className="size-4 cursor-pointer accent-danger" />
+                    {t}
+                  </label>
+                ))}
+                {form.dataTypes.length === 0 && <span className="text-[12px] text-danger">請至少選一種</span>}
               </div>
-            ) : (
-              <p className="text-[12px] leading-relaxed text-ink-mut">
-                {form.format === 'xlsx' ? `在 Excel 上限 ${fmtN(EXCEL_ROWS)} 列以內，單一檔案。` : 'CSV 不受列數限制，但用 Excel 開啟仍只顯示前 1,048,576 列。'}
-              </p>
+            </Labeled>
+          )}
+
+          <div className="flex flex-wrap items-end gap-3">
+            <Labeled label="檔案格式">
+              <div className="flex h-9 w-[190px] items-center gap-4">
+                {(['xlsx', 'csv'] as const).map((fm) => (
+                  <label key={fm} className="flex cursor-pointer items-center gap-1.5 text-[13px] text-ink whitespace-nowrap">
+                    <input type="radio" name="fmt" checked={form.format === fm} onChange={() => set('format', fm)} className="size-4 cursor-pointer accent-danger" />
+                    {fm === 'xlsx' ? 'Excel（.xlsx）' : 'CSV'}
+                  </label>
+                ))}
+              </div>
+            </Labeled>
+            {form.format === 'csv' && (
+              <Labeled label="編碼">
+                <select value={form.encoding} onChange={(e) => set('encoding', e.target.value as Form['encoding'])} className={`${CTL} w-[90px]`} title="舊版 Excel 開中文 CSV 需 Big5">
+                  <option>UTF-8</option>
+                  <option>Big5</option>
+                </select>
+              </Labeled>
             )}
+            <Labeled label="備註" hint="選填，方便在清單裡找">
+              <input value={form.note} onChange={(e) => set('note', e.target.value)} placeholder="例：月報對帳、第4季抽查" className={`${CTL} w-[260px]`} />
+            </Labeled>
             <button
               onClick={submit}
               disabled={invalid}
-              className="mt-auto inline-flex h-10 items-center justify-center gap-1.5 rounded-lg bg-ink text-[14px] font-semibold text-white hover:opacity-90 disabled:opacity-40"
+              className="inline-flex h-9 items-center justify-center rounded-lg bg-ink px-4 text-[13px] font-semibold text-white shadow hover:opacity-90 disabled:opacity-40 transition-opacity"
             >
-              <FileSpreadsheet size={16} />送出產生
+              產生報表
             </button>
-            {notice && <p className="text-[12px] font-semibold" style={{ color: statusTok.normal.fg }}>{notice}</p>}
-          </aside>
+          </div>
+        </div>
+
+        {/* ── 下方：送出前預估區塊 ── */}
+        <div className="mt-3.5 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-border/70 bg-inset/50 px-4 py-2.5">
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-1.5 text-[13px]">
+            <div className="flex items-center gap-2 font-semibold text-ink">
+              <span className="size-2 rounded-full bg-brand" />
+              <span>送出前預估</span>
+            </div>
+            <div className="flex items-center gap-4 text-ink-sub">
+              <span>{form.type === 'DCU狀態報表' ? 'DCU 數' : '電表數'}：<b className="tabular-nums font-semibold text-ink">約 {fmtN(est.meters)}</b></span>
+              <span className="text-border">|</span>
+              <span>資料列數：<b className="tabular-nums font-semibold text-ink">約 {fmtN(est.rows)}</b></span>
+              <span className="text-border">|</span>
+              <span>檔案大小：<b className="tabular-nums font-semibold text-ink">約 {fmtSize(est.mb)}</b></span>
+            </div>
+            {over ? (
+              <div className="flex items-center gap-1.5 text-[12.5px] font-medium" style={{ color: '#B45309' }}>
+                <AlertTriangle size={15} className="shrink-0" />
+                <span>
+                  超過 Excel 上限，將自動分成 <b>{est.files}</b> 個檔案（ZIP），亦可<button type="button" onClick={() => set('format', 'csv')} className="ml-1 font-semibold underline">改用 CSV</button>
+                </span>
+              </div>
+            ) : (
+              <span className="text-[12px] text-ink-mut">
+                {form.format === 'xlsx' ? '（在 Excel 上限 1,048,576 列以內，單一檔案。）' : '（CSV 格式不受列數限制）'}
+              </span>
+            )}
+          </div>
+
+          {notice && <span className="text-[12.5px] font-semibold" style={{ color: statusTok.normal.fg }}>{notice}</span>}
         </div>
       </section>
 
@@ -425,6 +428,16 @@ export function StatsReport() {
           <SectionTitle title="報表任務" />
           <span className="text-[12px] text-ink-mut">檔案保留 {RETAIN_DAYS} 天 · 自動排程每天 04:00～06:00 依案別產生</span>
           <span className="flex-1" />
+          <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className={`${CTL} w-[160px]`}>
+            <option value="">全部報表類型</option>
+            {REPORT_TYPES.map((t) => <option key={t}>{t}</option>)}
+          </select>
+          <select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)} className={`${CTL} w-[120px]`}>
+            <option value="">全部來源</option>
+            <option value="manual">手動</option>
+            <option value="auto">自動排程</option>
+          </select>
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜尋 ID／備註／條件／失敗原因" className={`${CTL} w-[220px]`} />
           <PillTabs
             tabs={[
               { key: 'all', label: `全部 ${counts.all}` },
@@ -435,32 +448,22 @@ export function StatsReport() {
             value={tab}
             onChange={setTab}
           />
-          <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className={`${CTL} w-[160px]`}>
-            <option value="">全部報表類型</option>
-            {REPORT_TYPES.map((t) => <option key={t}>{t}</option>)}
-          </select>
-          <select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)} className={`${CTL} w-[120px]`}>
-            <option value="">全部來源</option>
-            <option value="manual">手動</option>
-            <option value="auto">自動排程</option>
-          </select>
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜尋 ID／備註／條件" className={`${CTL} w-[200px]`} />
         </div>
 
         <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto">
-          <table className="w-full min-w-[1240px] table-fixed border-collapse text-[13px]">
-            {/* 2026-11-19 業主：列高維持原本設計（單行 py-3）—— 條件摘要獨立一欄、超長截斷，耗時／失敗原因放滑過提示 */}
+          <table className="w-full min-w-[1280px] table-fixed border-collapse text-[13px]">
             <colgroup>
-              <col style={{ width: '13%' }} />
               <col style={{ width: '11%' }} />
               <col style={{ width: '10%' }} />
-              <col style={{ width: '19%' }} />
-              <col style={{ width: '8%' }} />
-              <col style={{ width: '8%' }} />
-              <col style={{ width: '11%' }} />
+              <col style={{ width: '9%' }} />
+              <col style={{ width: '16%' }} />
               <col style={{ width: '7%' }} />
+              <col style={{ width: '8%' }} />
+              <col style={{ width: '8%' }} />
+              <col style={{ width: '15%' }} />
               <col style={{ width: '6%' }} />
-              <col style={{ width: '128px' }} />
+              <col style={{ width: '5%' }} />
+              <col style={{ width: '96px' }} />
             </colgroup>
             <thead>
               <tr className="text-ink-sub">
@@ -471,15 +474,24 @@ export function StatsReport() {
                 <Th className={STICKY_TH}>來源</Th>
                 <Th className={STICKY_TH}>建立時間</Th>
                 <Th className={STICKY_TH}>狀態</Th>
+                <Th className={STICKY_TH}>失敗原因</Th>
                 <Th className={STICKY_TH}>大小</Th>
                 <Th className={STICKY_TH}>保留至</Th>
                 <Th className={STICKY_TH} />
               </tr>
             </thead>
             <tbody>
-              {rows.slice(0, visible).map((j) => <JobRow key={j.id} j={j} onReuse={() => reuse(j)} onRetry={() => retry(j)} onDelete={() => setJobs((all) => all.filter((x) => x.id !== j.id))} />)}
+              {rows.slice(0, visible).map((j) => (
+                <JobRow
+                  key={j.id}
+                  j={j}
+                  onRetry={() => retry(j)}
+                  onDelete={() => setJobs((all) => all.filter((x) => x.id !== j.id))}
+                  onShowError={(job) => setErrorModalJob(job)}
+                />
+              ))}
               {rows.length === 0 && (
-                <tr><td colSpan={10} className="px-3 py-10 text-center text-ink-mut">沒有符合條件的報表</td></tr>
+                <tr><td colSpan={11} className="px-3 py-10 text-center text-ink-mut">沒有符合條件的報表</td></tr>
               )}
             </tbody>
           </table>
@@ -487,11 +499,95 @@ export function StatsReport() {
         </div>
         <InfiniteFooter loaded={Math.min(visible, rows.length)} total={rows.length} hasMore={hasMore} onTop={() => scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })} />
       </section>
+
+      {errorModalJob && (
+        <SimpleModal
+          title="報表產生失敗原因"
+          onClose={() => {
+            setErrorModalJob(null)
+            setCopied(false)
+          }}
+          width={520}
+          actions={
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  if (errorModalJob.error) {
+                    navigator.clipboard.writeText(errorModalJob.error)
+                    setCopied(true)
+                    setTimeout(() => setCopied(false), 2000)
+                  }
+                }}
+                className={`${BTN_GHOST} flex items-center gap-1.5`}
+              >
+                {copied ? <Check size={14} className="text-success" /> : <Copy size={14} />}
+                <span>{copied ? '已複製' : '複製原因'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  retry(errorModalJob)
+                  setErrorModalJob(null)
+                }}
+                className={`${BTN_PRIMARY} flex items-center gap-1.5`}
+              >
+                <RotateCw size={14} />
+                <span>重新產生</span>
+              </button>
+            </div>
+          }
+        >
+          <div className="space-y-4 text-[13px]">
+            <div className="grid grid-cols-2 gap-2 rounded-xl bg-inset/50 p-3 text-[12px]">
+              <div>
+                <span className="text-ink-mut">任務 ID：</span>
+                <span className="font-mono text-ink ml-1">{errorModalJob.id}</span>
+              </div>
+              <div>
+                <span className="text-ink-mut">報表類型：</span>
+                <span className="font-medium text-ink ml-1">{errorModalJob.form.type}</span>
+              </div>
+              <div>
+                <span className="text-ink-mut">建立時間：</span>
+                <span className="text-ink ml-1">{stamp(errorModalJob.createdAt)}</span>
+              </div>
+              <div>
+                <span className="text-ink-mut">來源：</span>
+                <span className="text-ink ml-1">{errorModalJob.source === 'auto' ? '自動排程' : `${errorModalJob.owner} 手動送出`}</span>
+              </div>
+            </div>
+
+            <div>
+              <label className="text-[12px] font-semibold text-ink-sub block mb-1.5">完整失敗原因</label>
+              <div className="rounded-xl border border-danger/25 bg-danger/5 p-3.5 font-mono text-[13px] leading-relaxed text-danger select-all whitespace-pre-wrap break-words">
+                {errorModalJob.error || '未知錯誤'}
+              </div>
+            </div>
+
+            {errorModalJob.form.note && (
+              <div className="text-[12px] text-ink-mut">
+                <span className="font-medium">備註：</span>{errorModalJob.form.note}
+              </div>
+            )}
+          </div>
+        </SimpleModal>
+      )}
     </div>
   )
 }
 
-function JobRow({ j, onReuse, onRetry, onDelete }: { j: Job; onReuse: () => void; onRetry: () => void; onDelete: () => void }) {
+function JobRow({
+  j,
+  onRetry,
+  onDelete,
+  onShowError,
+}: {
+  j: Job
+  onRetry: () => void
+  onDelete: () => void
+  onShowError: (j: Job) => void
+}) {
   const m = STATE_META[j.state]
   const expires = j.createdAt + RETAIN_DAYS * DAY
   const leftDays = Math.ceil((expires - NOW) / DAY)
@@ -520,6 +616,20 @@ function JobRow({ j, onReuse, onRetry, onDelete }: { j: Job; onReuse: () => void
           {j.state === 'running' && <span className="text-[12px] tabular-nums text-ink-mut">{j.progress}%</span>}
         </span>
       </td>
+      <td className={`${td} truncate`}>
+        {j.state === 'error' && j.error ? (
+          <button
+            type="button"
+            onClick={() => onShowError(j)}
+            className="group flex max-w-full items-center gap-1.5 text-left text-danger hover:underline focus:outline-none"
+            title={`${j.error}（點擊查看完整原因）`}
+          >
+            <span className="truncate font-medium">{j.error}</span>
+          </button>
+        ) : (
+          <span className="text-ink-mut">—</span>
+        )}
+      </td>
       <td className={`${td} tabular-nums text-ink`} title={zip ? `${j.est.files} 個檔案（ZIP）` : undefined}>
         {j.state === 'done' ? fmtSize(j.est.mb) : <span className="text-ink-mut">約 {fmtSize(j.est.mb)}</span>}
         {zip && <span className="ml-1 text-[12px] text-ink-mut">ZIP</span>}
@@ -533,7 +643,6 @@ function JobRow({ j, onReuse, onRetry, onDelete }: { j: Job; onReuse: () => void
         <div className="flex items-center justify-end gap-1">
           {j.state === 'done' && <IconBtn title={zip ? `下載 ZIP（${j.est.files} 檔）` : '下載'} onClick={() => {}}><Download size={15} /></IconBtn>}
           {j.state === 'error' && <IconBtn title={`重試（${j.error}）`} onClick={onRetry}><RotateCw size={15} /></IconBtn>}
-          <IconBtn title="用此條件再產生（帶回上方表單）" onClick={onReuse}><Copy size={15} /></IconBtn>
           {!isActive(j.state) && <IconBtn title="刪除" onClick={onDelete} danger><Trash2 size={15} /></IconBtn>}
         </div>
       </td>
@@ -559,10 +668,10 @@ function Labeled({ label, hint, children }: { label: string; hint?: string; chil
     </div>
   )
 }
-function SelectField({ label, value, options, onChange, width = 120, noAll }: { label: string; value: string; options: readonly string[]; onChange: (v: string) => void; width?: number; noAll?: boolean }) {
+function SelectField({ label, value, options, onChange, width, noAll }: { label: string; value: string; options: readonly string[]; onChange: (v: string) => void; width?: number; noAll?: boolean }) {
   return (
     <Labeled label={label}>
-      <select value={value} onChange={(e) => onChange(e.target.value)} className={CTL} style={{ width }}>
+      <select value={value} onChange={(e) => onChange(e.target.value)} className={`${CTL} ${width ? '' : 'w-full'}`} style={width ? { width } : undefined}>
         {!noAll && <option value="">不限</option>}
         {options.map((o) => <option key={o}>{o}</option>)}
       </select>
