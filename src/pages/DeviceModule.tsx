@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { ClipboardList } from 'lucide-react'
 import { Th, FilterHead, MenuItem, InfiniteFooter, useInfiniteRows } from '@/components/table/tableBits'
 import { PageTitle } from '@/components/shared/PageTitle'
 import { PillTabs } from '@/components/shared/PillTabs'
@@ -74,7 +75,7 @@ export function DeviceModule() {
   const [tab, setTab] = useState<TabKey>('fan')
   return (
     <div className="flex flex-col gap-3 p-4 min-w-[1280px]">
-      <PageTitle title="模組型號" />
+      <PageTitle title="模組型號" icon={<ClipboardList size={20} className="text-brand" />} />
       <PillTabs tabs={TABS} value={tab} onChange={setTab} />
       {/* key：換頁籤就重置廠商篩選 */}
       <CommTables key={tab} rows={ROWS[tab]} />

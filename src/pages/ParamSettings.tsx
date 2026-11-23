@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
-import { RotateCcw, SlidersHorizontal, CircleCheck } from 'lucide-react'
+import { RotateCcw, Globe, CircleCheck } from 'lucide-react'
+import { PageTitle } from '@/components/shared/PageTitle'
 import { Th } from '@/components/table/tableBits'
 import { health } from '@/tokens'
 import {
@@ -66,8 +67,7 @@ export function ParamSettings() {
     <div className="flex h-full min-w-[1180px] flex-col">
       {/* 頁面標題列（同權限管理其他頁） */}
       <div className="flex h-14 shrink-0 items-center gap-2 px-6">
-        <SlidersHorizontal size={20} className="text-brand" />
-        <h1 className="text-[16px] font-semibold text-ink">參數調整</h1>
+        <PageTitle title="參數調整" icon={<Globe size={20} className="text-brand" />} />
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col px-6 pb-6 pt-3">

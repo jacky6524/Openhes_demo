@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Download } from 'lucide-react'
+import { Download, Files } from 'lucide-react'
 import { Bar, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { PageTitle } from '@/components/shared/PageTitle'
 import { PillTabs } from '@/components/shared/PillTabs'
@@ -119,7 +119,7 @@ export function MdmsUpload() {
 
   return (
     <div className="flex h-full min-h-[720px] min-w-[1280px] flex-col gap-3 p-4">
-      <PageTitle title="MDMS上拋" />
+      <PageTitle title="MDMS上拋" icon={<Files size={20} className="text-brand" />} />
 
       <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_400px] gap-4">
         {/* ── 左：Dashboard ── */}

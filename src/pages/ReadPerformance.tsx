@@ -1,6 +1,8 @@
 import { useMemo, useRef, useState } from 'react'
 import { Search, CalendarDays } from 'lucide-react'
 import { InfiniteFooter, useInfiniteRows } from '@/components/table/tableBits'
+import { PageTitle } from '@/components/shared/PageTitle'
+import { SquareChartIcon } from '@/components/shared/SquareChartIcon'
 
 /**
  * 統計分析 · 讀表效能（Figma 4255:33533，內層 Content 4255:33539）。
@@ -82,6 +84,7 @@ export function ReadPerformance() {
 
   return (
     <div className="flex flex-col gap-3 p-4 min-w-[1280px]">
+      <PageTitle title="讀表效能" icon={<SquareChartIcon size={20} className="text-brand" />} />
       <div className="flex flex-wrap items-end gap-2">
         <label className="flex flex-col gap-1">
           <span className="px-2 text-[12px] text-ink-sub">搜尋裝置</span>

@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
-import { Check, RotateCw, X } from 'lucide-react'
+import { Check, Files, RotateCw, X } from 'lucide-react'
 import { Th, SortHead, StampLines, InfiniteFooter, useInfiniteRows, RED, type SortDir } from '@/components/table/tableBits'
 import { fmtDate } from '@/lib/format'
 import { SimpleModal, BTN_PRIMARY } from '@/components/shared/SimpleModal'
@@ -105,7 +105,7 @@ export function InstantRead() {
 
   return (
     <div className="flex h-full min-h-[680px] min-w-[1280px] flex-col gap-3 p-4">
-      <PageTitle title="即時讀表" />
+      <PageTitle title="即時讀表" icon={<Files size={20} className="text-brand" />} />
 
       <div className="flex flex-col gap-2">
         <TargetSearchMulti

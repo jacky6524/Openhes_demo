@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
-import { Pencil, Trash2, ShieldCheck } from 'lucide-react'
+import { Pencil, Trash2, Globe } from 'lucide-react'
+import { PageTitle } from '@/components/shared/PageTitle'
 import { usePerm } from '@/store/usePerm'
 import type { Account } from '@/data/permissions'
 import {
@@ -56,8 +57,7 @@ export function AccountAdmin() {
     <div className="flex h-full min-w-[1080px] flex-col">
       {/* 頁面標題列（2026-09-23 依新版 Figma：標題與「新增帳號」在卡片外、頁面最上方） */}
       <div className="flex h-14 shrink-0 items-center gap-2 px-6">
-        <ShieldCheck size={20} className="text-brand" />
-        <h1 className="text-[16px] font-semibold text-ink">帳號管理</h1>
+        <PageTitle title="帳號管理" icon={<Globe size={20} className="text-brand" />} />
         <span className="text-[12.5px] tabular-nums text-ink-mut">共 {rows.length} 個帳號</span>
         <span className="flex-1" />
         <button

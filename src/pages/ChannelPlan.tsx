@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { ClipboardList } from 'lucide-react'
 import { Th, FilterHead, MenuItem, InfiniteFooter, useInfiniteRows } from '@/components/table/tableBits'
 import { PageTitle } from '@/components/shared/PageTitle'
 import { SpectrumChart } from '@/components/module/SpectrumChart'
@@ -30,7 +31,7 @@ export function ChannelPlan() {
 
   return (
     <div className="flex h-full min-w-[1280px] flex-col gap-3 p-4">
-      <PageTitle title="頻道規劃" />
+      <PageTitle title="頻道規劃" icon={<ClipboardList size={20} className="text-brand" />} />
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-card border border-border bg-surface shadow-card">
         <div ref={scrollRef} className="min-h-[220px] flex-1 overflow-auto">

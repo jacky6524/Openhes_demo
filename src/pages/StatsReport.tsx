@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, BarChart3, Bot, Check, Copy, Download, RotateCw, Trash2, User } from 'lucide-react'
+import { AlertTriangle, Bot, Check, Copy, Download, RotateCw, Trash2, User } from 'lucide-react'
+import { SquareChartIcon } from '@/components/shared/SquareChartIcon'
 import { Th, InfiniteFooter, useInfiniteRows } from '@/components/table/tableBits'
 import { PageTitle } from '@/components/shared/PageTitle'
 import { PillTabs } from '@/components/shared/PillTabs'
@@ -270,7 +271,7 @@ export function StatsReport() {
 
   return (
     <div ref={topRef} className="flex h-full min-h-[760px] min-w-[1280px] flex-col gap-3 p-4">
-      <PageTitle title="統計報表" icon={<BarChart3 size={20} className="text-brand" />} />
+      <PageTitle title="統計報表" icon={<SquareChartIcon size={20} className="text-brand" />} />
 
       {/* ── 產生報表 ── */}
       <section className="shrink-0 rounded-card border border-border bg-surface p-5 shadow-card">

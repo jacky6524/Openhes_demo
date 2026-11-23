@@ -1,15 +1,15 @@
 import {
-  LayoutDashboard,
-  Radar,
-  Cpu,
-  BookOpenCheck,
-  BarChart3,
+  House,
+  Zap,
+  ClipboardPen,
+  Files,
+  ClipboardList,
+  Globe,
   Construction,
-  PackageOpen,
-  ShieldCheck,
   ChevronDown,
 } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
+import { SquareChartIcon } from '@/components/shared/SquareChartIcon'
 import { useNav, type View } from '@/store/useNav'
 
 /** a leaf nav item optionally bound to a view */
@@ -19,17 +19,17 @@ interface Leaf {
 }
 interface NavItem {
   label: string
-  icon: ReactNode
   view?: View // direct-navigation item
   children?: Leaf[] // expandable group
+  icon: ReactNode
 }
 
 const NAV: NavItem[] = [
-  { label: '系統總覽', icon: <LayoutDashboard size={18} />, view: 'overview' },
-  { label: 'DCU總覽', icon: <Radar size={18} />, view: 'warroom' },
+  { label: '系統總覽', icon: <House size={18} />, view: 'overview' },
+  { label: 'DCU總覽', icon: <Zap size={18} />, view: 'warroom' },
   {
     label: '裝置管理',
-    icon: <Cpu size={18} />,
+    icon: <ClipboardPen size={18} />,
     // 2026-09-07 依業主指定的項目與順序；與正式前端 openhes-front 的 pages 對應：
     // dcu-list / meter-list / instant-query / registration-conflict / device-groups / device-record
     // 2026-09-17 依業主意見移除「裝置列表」（地圖＋DCU 列表那頁）——
@@ -48,7 +48,7 @@ const NAV: NavItem[] = [
   },
   {
     label: '讀表管理',
-    icon: <BookOpenCheck size={18} />,
+    icon: <Files size={18} />,
     // 設計稿「即時讀表」「MDMS上拋」
     children: [
       { label: '即時讀表', view: 'instantRead' },
@@ -57,7 +57,7 @@ const NAV: NavItem[] = [
   },
   {
     label: '統計分析',
-    icon: <BarChart3 size={18} />,
+    icon: <SquareChartIcon size={18} />,
     // Figma 4255:33532「統計分析」：長條（熱力）圖畫面＝讀表效能，報表任務清單＝統計報表
     children: [
       { label: '統計報表', view: 'statsReport' },
@@ -65,7 +65,7 @@ const NAV: NavItem[] = [
   },
   {
     label: '裝置模組',
-    icon: <PackageOpen size={18} />,
+    icon: <ClipboardList size={18} />,
     // 設計稿「裝置模組-1／-2／-3」；2026-11-04 業主意見：FAN／DCU 併成一頁用頁籤切換。
     // 這頁叫「模組型號」，不叫「裝置列表」—— 裝置管理底下已有「裝置列表」（裝置狀態＋地圖），避免撞名。
     children: [
@@ -75,7 +75,7 @@ const NAV: NavItem[] = [
   },
   {
     label: '權限管理',
-    icon: <ShieldCheck size={18} />,
+    icon: <Globe size={18} />,
     // Figma 3892:24129「權限管理」整段
     children: [
       { label: '帳號管理', view: 'permAccount' },
@@ -138,12 +138,12 @@ export function Sidebar({ collapsed = false }: { collapsed?: boolean }) {
                     : 'text-ink-sub hover:bg-inset hover:text-ink',
                 ].join(' ')}
               >
-                <span className={active ? 'text-brand' : 'text-ink-mut'}>{item.icon}</span>
+                <span className={active ? 'text-brand' : 'text-ink-sub'}>{item.icon}</span>
                 {!collapsed && <span className="whitespace-nowrap flex-1 text-left">{item.label}</span>}
                 {!collapsed && item.children && (
                   <ChevronDown
                     size={15}
-                    className={`text-ink-mut transition-transform ${isOpen ? 'rotate-180' : ''}`}
+                    className={`text-ink-sub transition-transform ${isOpen ? 'rotate-180' : ''}`}
                   />
                 )}
               </button>

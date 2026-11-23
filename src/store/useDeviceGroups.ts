@@ -17,7 +17,7 @@ export interface DeviceGroup { name: string; ids: string[]; creator: string }
  */
 export const GROUP_KINDS: Array<{ key: GroupKind; label: string; short: string; idLabel: string; color: string; soft: string }> = [
   { key: 'meter', label: '電表群組', short: '電表', idLabel: '表號', color: '#2563EB', soft: '#EAF1FE' },
-  { key: 'dcu', label: 'DCU群組', short: 'DCU', idLabel: '序號', color: '#7C3AED', soft: '#F3EEFE' },
+  { key: 'dcu', label: 'DCU群組', short: 'DCU', idLabel: '序號', color: '#EA580C', soft: '#FFF0E6' },
 ]
 export const kindOf = (k: GroupKind) => GROUP_KINDS.find((x) => x.key === k)!
 

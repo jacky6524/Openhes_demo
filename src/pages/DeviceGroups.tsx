@@ -105,37 +105,43 @@ export function DeviceGroups() {
   const [c1, c2, c3] = COLS[kind]
 
   return (
-    <div className="flex flex-col gap-3 p-4 min-w-[1280px]">
-      <PageTitle title="裝置群組" />
+    <div className="flex h-full min-h-0 flex-col gap-3 p-4 min-w-[1280px]">
+      <div className="shrink-0">
+        <PageTitle title="裝置群組" />
+      </div>
 
-      <div className="flex gap-4 items-stretch">
+      <div className="flex flex-1 min-h-0 gap-4 items-stretch">
         {/* 左：群組列表（樹狀） */}
-        <aside className="flex h-[calc(100vh-170px)] min-h-[420px] w-[320px] shrink-0 flex-col rounded-card border border-border bg-surface shadow-card">
-          <div className="flex items-center justify-between border-b border-divider px-4 py-3">
+        <aside className="flex h-full min-h-0 w-[320px] shrink-0 flex-col rounded-card border border-border bg-surface shadow-card">
+          <div className="flex shrink-0 items-center justify-between border-b border-divider px-4 py-3">
             <h3 className="text-[15px] font-semibold text-ink">群組列表</h3>
             <button onClick={() => setModal({ type: 'create' })} className="rounded-md bg-brand-soft-hover px-3 py-1.5 text-[13px] font-semibold text-danger hover:opacity-80">
               建立群組
             </button>
           </div>
-          <div className="p-3">
+          <div className="shrink-0 p-3">
             <div className="relative">
               <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-mut" />
-              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="關鍵字搜尋" className={`${BOX} w-full border-transparent bg-inset pl-9`} />
+              <input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="關鍵字搜尋"
+                className="w-full rounded-md border border-border/70 bg-inset px-3 py-2 pl-9 text-[13px] text-ink placeholder:text-ink-mut focus:border-brand focus:bg-surface focus:outline-none transition-colors"
+              />
             </div>
           </div>
           <div className="min-h-0 flex-1 overflow-auto px-3 pb-3">
-            {KINDS.map(({ key, label, color }, i) => {
+            {KINDS.map(({ key, label }, i) => {
               const shown = groups[key].filter((g) => g.name.toLowerCase().includes(needle))
               return (
                 <div key={key} className={i > 0 ? 'mt-2 border-t border-divider pt-2' : ''}>
                   <button
                     onClick={() => setOpen((o) => ({ ...o, [key]: !o[key] }))}
-                    className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-[15px] font-bold hover:bg-inset"
-                    style={{ color }}
+                    className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-[15px] font-bold text-ink hover:bg-inset"
                   >
-                    {open[key] ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                    {label}
-                    <span className="text-[13px] font-semibold opacity-70">({groups[key].length})</span>
+                    <span className="text-ink-sub">{open[key] ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</span>
+                    <span>{label}</span>
+                    <span className="text-[13px] font-semibold text-ink-mut">({groups[key].length})</span>
                   </button>
                   {open[key] && (
                     <ul className="flex flex-col gap-0.5">
@@ -173,10 +179,10 @@ export function DeviceGroups() {
         </aside>
 
         {/* 右：裝置表 */}
-        <section className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-card border border-border bg-surface shadow-card">
+        <section className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-card border border-border bg-surface shadow-card">
           {group ? (
             <>
-              <div className="flex items-center justify-between gap-3 px-4 py-3">
+              <div className="flex shrink-0 items-center justify-between gap-3 px-4 py-3 border-b border-divider">
                 <div className="flex items-center gap-3">
                   <h3 className="flex items-center gap-2 text-[15px] font-semibold text-ink"><KindTag kind={kind} size="md" />{group.name}</h3>
                   <span className="text-[12px] text-ink-sub">
@@ -199,7 +205,7 @@ export function DeviceGroups() {
                 </div>
               </div>
 
-              <div ref={scrollRef} className="min-h-[200px] flex-1 overflow-auto">
+              <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto">
                 <table className="w-full text-[13px] border-collapse">
                   <thead>
                     <tr className="text-ink-sub">

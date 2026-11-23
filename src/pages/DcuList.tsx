@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { FileText, ClipboardList, Settings, Network, Ban } from 'lucide-react'
+import { PageTitle } from '@/components/shared/PageTitle'
 import { SearchButtons, NotSearched } from '@/components/shared/ListSearch'
 import {
   DCU_LIST_ROWS, CHANNELS, COMM_TYPES, DCU_MODELS, DCU_GROUPS,
@@ -123,51 +124,25 @@ export function DcuList() {
 
 
   return (
-    <div className="flex h-full flex-col p-4">
-      <div className="flex min-h-0 flex-1 flex-col rounded-card bg-surface border border-border shadow-card">
-        {/* 標題列 */}
-        <div className="flex shrink-0 items-center justify-between gap-4 px-4 py-3 border-b border-border">
-          <div className="flex items-center gap-2">
-            <FileText size={17} className="text-brand" />
-            <h2 className="text-[15px] font-semibold text-ink">DCU清單</h2>
-            {applied && (
-              <span className="ml-2 text-[12px] text-ink-mut tabular-nums">
-                共 {filtered.length} 筆{visible < filtered.length && `（已載入 ${visible}）`}
-              </span>
-            )}
-          </div>
-          <button className="rounded-lg border border-border px-4 py-1.5 text-[13px] text-ink-sub hover:bg-inset">
-            匯出
-          </button>
+    <div className="flex h-full flex-col gap-3 p-4">
+      {/* 標題列 */}
+      <div className="flex shrink-0 items-center justify-between">
+        <div className="flex items-center gap-3">
+          <PageTitle title="DCU清單" />
+          {applied && (
+            <span className="text-[12.5px] text-ink-mut tabular-nums">
+              共 {filtered.length} 筆{visible < filtered.length && `（已載入 ${visible}）`}
+            </span>
+          )}
         </div>
+        <button className="rounded-lg border border-border bg-surface px-4 py-1.5 text-[13px] text-ink-sub hover:bg-inset shadow-sm">
+          匯出
+        </button>
+      </div>
 
-        {/* 搜尋列（最上層）—— 2026-09-23 業主意見：搜尋在上、篩選在下 */}
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-card bg-surface border border-border shadow-card">
+        {/* 第一排：篩選條件 */}
         <div className="flex shrink-0 flex-wrap items-end gap-3 px-4 pt-3 pb-2">
-          <FilterField label="搜尋">
-            <div className="flex items-center gap-2">
-              <select
-                value={draft.field}
-                onChange={(e) => set('field', e.target.value as SearchField)}
-                className={`${BOX} w-[110px]`}
-              >
-                {SEARCH_FIELDS.map((f) => (
-                  <option key={f.key} value={f.key}>{f.label}</option>
-                ))}
-              </select>
-              <input
-                value={draft.text}
-                onChange={(e) => set('text', e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && search()}
-                placeholder="請輸入關鍵字（可留空）"
-                className={`${BOX} w-[240px]`}
-              />
-            </div>
-          </FilterField>
-          <SearchButtons onSearch={search} onReset={reset} />
-        </div>
-
-        {/* 篩選列 —— 與搜尋欄一起在按下「搜尋」時套用 */}
-        <div className="flex shrink-0 flex-wrap items-end gap-3 px-4 pt-1 pb-3 border-b border-border">
           <FilterField label="營業區">
             <input
               value={draft.office}
@@ -196,6 +171,31 @@ export function DcuList() {
           <FilterField label="DCU群組">
             <Select value={draft.group} onChange={(v) => set('group', v)} options={DCU_GROUPS} />
           </FilterField>
+        </div>
+
+        {/* 第二排：搜尋列與按鈕 —— 依使用者需求：按鈕移至第二排搜尋列旁 */}
+        <div className="flex shrink-0 flex-wrap items-end gap-3 px-4 pt-1 pb-3 border-b border-border">
+          <FilterField label="搜尋">
+            <div className="flex items-center gap-2">
+              <select
+                value={draft.field}
+                onChange={(e) => set('field', e.target.value as SearchField)}
+                className={`${BOX} w-[110px]`}
+              >
+                {SEARCH_FIELDS.map((f) => (
+                  <option key={f.key} value={f.key}>{f.label}</option>
+                ))}
+              </select>
+              <input
+                value={draft.text}
+                onChange={(e) => set('text', e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && search()}
+                placeholder="請輸入關鍵字（可留空）"
+                className={`${BOX} w-[240px]`}
+              />
+            </div>
+          </FilterField>
+          <SearchButtons onSearch={search} onReset={reset} />
         </div>
 
         {/* 表格 —— 自己是捲動容器、表頭 sticky；欄寬隨視窗伸縮，不出現左右捲軸 */}

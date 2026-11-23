@@ -5,22 +5,33 @@ import { Search } from 'lucide-react'
  * 2026-09-23 依業主意見：兩頁進來預設不載入清單，要按「搜尋」才查詢。
  */
 
-/** 搜尋／重設 */
-export function SearchButtons({ onSearch, onReset }: { onSearch: () => void; onReset: () => void }) {
+/** 清除條件／搜尋 按鈕組 */
+export function SearchButtons({
+  onSearch,
+  onReset,
+  searchLabel = '搜尋',
+  resetLabel = '清除條件',
+}: {
+  onSearch: () => void
+  onReset: () => void
+  searchLabel?: string
+  resetLabel?: string
+}) {
   return (
     <div className="flex items-center gap-2">
       <button
-        onClick={onSearch}
-        className="inline-flex h-9 items-center gap-1.5 rounded-md bg-brand px-4 text-[13px] font-medium text-white hover:bg-brand-deep"
-      >
-        <Search size={14} />搜尋
-      </button>
-      {/* 兩顆按鈕與輸入框／下拉同為 36px 高（h-9），並排時上下緣對齊 */}
-      <button
+        type="button"
         onClick={onReset}
-        className="h-9 rounded-md border border-border bg-surface px-4 text-[13px] text-ink-sub hover:border-brand hover:text-brand"
+        className="inline-flex h-9 items-center justify-center rounded-lg border border-[#E5E7EB] bg-white px-3.5 text-[13px] font-medium text-ink hover:bg-inset transition-colors"
       >
-        重設
+        {resetLabel}
+      </button>
+      <button
+        type="button"
+        onClick={onSearch}
+        className="inline-flex h-9 items-center justify-center rounded-lg bg-[#1F2939] px-4 text-[13px] font-semibold text-white shadow-sm hover:opacity-90 transition-opacity"
+      >
+        {searchLabel}
       </button>
     </div>
   )

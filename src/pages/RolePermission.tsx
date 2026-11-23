@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Check, Pencil, Search, ShieldCheck, Trash2 } from 'lucide-react'
+import { Check, Globe, Pencil, Search, Trash2 } from 'lucide-react'
+import { PageTitle } from '@/components/shared/PageTitle'
 import { usePerm } from '@/store/usePerm'
 import { ALL_CASE_IDS, ALL_REGION_CODES, REGIONS, permGroups, permKey, type Role } from '@/data/permissions'
 import { CASES, caseFullName } from '@/store/useCaseFilter'
@@ -106,8 +107,7 @@ export function RolePermission() {
     <div className="flex h-full min-w-[1180px] flex-col">
       {/* 頁面標題列 */}
       <div className="flex h-14 shrink-0 items-center gap-2 px-6">
-        <ShieldCheck size={20} className="text-brand" />
-        <h1 className="text-[16px] font-semibold text-ink">角色權限管理</h1>
+        <PageTitle title="角色權限管理" icon={<Globe size={20} className="text-brand" />} />
       </div>
 
       <div className="flex min-h-0 flex-1 gap-4 px-6 pb-6 pt-3">
