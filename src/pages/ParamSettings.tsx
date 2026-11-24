@@ -142,10 +142,10 @@ export function ParamSettings() {
                         ) : (
                           <LightBar t={t} onChange={(side, v) => set(m.key, side, String(v))} />
                         )}
-                        <div className="mt-2 flex flex-wrap items-center gap-x-6 gap-y-1">
+                        <div className="mt-2 flex flex-wrap items-center justify-center gap-x-6 gap-y-1">
                           <PctInput label="注意" color={health.warning.stroke} value={draft[m.key].warning} invalid={!!err} onChange={(v) => set(m.key, 'warning', v)} />
                           <PctInput label="良好" color={health.good.stroke} value={draft[m.key].good} invalid={!!err} onChange={(v) => set(m.key, 'good', v)} />
-                          {err && <span className="text-[12px]" style={{ color: health.alert.stroke }}>{err}</span>}
+                          {err && <span className="w-full text-center text-[12px]" style={{ color: health.alert.stroke }}>{err}</span>}
                         </div>
                       </td>
                       <td className="px-3 py-6 text-ink-sub">{m.usedBy}</td>
