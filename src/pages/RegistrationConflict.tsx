@@ -65,12 +65,13 @@ const mismatch = (r: Conflict, k: FieldKey) => !r.unimported && r.data[k] !== r.
 const reasonsOf = (r: Conflict): Reason[] => (r.unimported ? ['unimported'] : FIELDS.filter((k) => mismatch(r, k)))
 
 /** 衝突原因標籤：名稱與顏色（統計卡的小圓點用同一色，對得回表格裡的標籤） */
-const REASON: Record<Reason, { label: string; stat: string; fg: string; bg: string }> = {
-  unimported: { label: '未匯入資料', stat: '未匯入資料', ...statusTok.danger },
-  elecNo: { label: '電號', stat: '電號衝突', ...statusTok.warning },
-  mac: { label: 'MAC/IMEI', stat: 'MAC/IMEI衝突', ...statusTok.info },
-  model: { label: '模組型號', stat: '模組型號衝突', fg: '#06B6D4', bg: '#ECFEFF' },
+const REASON: Record<Reason, { label: string; stat: string; fg: string; bg: string; cardBg: string }> = {
+  unimported: { label: '未匯入資料', stat: '未匯入資料', fg: '#E11D48', bg: '#FEE2E2', cardBg: '#FEE2E2' },
+  elecNo: { label: '電號', stat: '電號衝突', fg: '#D97706', bg: '#FEF3C7', cardBg: '#FEF3C7' },
+  mac: { label: 'MAC/IMEI', stat: 'MAC/IMEI衝突', fg: '#2563EB', bg: '#DBEAFE', cardBg: '#DBEAFE' },
+  model: { label: '模組型號', stat: '模組型號衝突', fg: '#0891B2', bg: '#CFFAFE', cardBg: '#CFFAFE' },
 }
+const TOTAL_TONE = { label: '全部', stat: '衝突總數', fg: '#475569', bg: '#F1F5F9', cardBg: '#F1F5F9' }
 const REASON_KEYS = Object.keys(REASON) as Reason[]
 
 const COUNT: Record<Reason, number> = {
@@ -131,9 +132,9 @@ export function RegistrationConflict() {
       <PageTitle title="註冊衝突" />
 
       <Panel title="衝突數量統計">
-        <div className="grid grid-cols-5 gap-3">
+        <div className="grid grid-cols-5 gap-3.5">
           {/* 2026-11-19 業主：衝突總數排到最左 */}
-          <Stat label="衝突總數" value={ROWS.length} active={reason === null} onClick={() => setReason(null)} />
+          <Stat label="衝突總數" value={ROWS.length} tone={TOTAL_TONE} active={reason === null} onClick={() => setReason(null)} />
           <Stat label={REASON.unimported.stat} tone={REASON.unimported} value={COUNT.unimported} active={reason === 'unimported'} onClick={() => setReason(reason === 'unimported' ? null : 'unimported')} />
           {FIELDS.map((k) => (
             <Stat key={k} label={REASON[k].stat} tone={REASON[k]} value={COUNT[k]} active={reason === k} onClick={() => setReason(reason === k ? null : k)} />
@@ -201,12 +202,12 @@ export function RegistrationConflict() {
   )
 }
 
-/** 單一欄位：對得上（或未匯入）＝單一值；對不上＝灰字資料／紅字回報兩行（不再加勾叉圖示） */
+/** 單一欄位：對得上（或未匯入）＝單一值；對不上＝灰字HES／紅字回報兩行（不再加勾叉圖示） */
 function Compare({ r, k }: { r: Conflict; k: FieldKey }) {
   if (!mismatch(r, k)) return <span className="tabular-nums text-ink">{r.reported[k]}</span>
   return (
     <span className="flex flex-col leading-[1.35] tabular-nums">
-      <span className="text-ink-mut">{r.data[k]} (資料)</span>
+      <span className="text-ink-mut">{r.data[k]} (HES)</span>
       <span style={{ color: RED }}>{r.reported[k]} (回報)</span>
     </span>
   )
@@ -253,30 +254,52 @@ function Panel({ title, children }: { title: string; children: React.ReactNode }
 }
 
 /**
- * 統計卡兼篩選鈕。2026-11-19 依參考設計（1119更新參考/註冊衝突 (1).png）：
- * 每張卡用該衝突原因的淡色底（與表格裡的原因標籤同色系），衝突總數為灰底；拿掉小圓點。
- * 選中某個原因時加該色外框；衝突總數（＝全部）不加框。
+ * 統計卡兼篩選鈕。參考 MDMS 查詢卡片 style：
+ * 採用圓角卡片 (rounded-card)、飽滿柔和的背景底色 (cardBg)，與表格內衝突原因標籤顏色相互呼應。
+ * 數字使用該衝突原因之代表色 (fg)，選中時加 2px 內凹外框，懸浮時微浮起帶陰影。
  */
-function Stat({ label, value, tone, active, onClick }: { label: string; value: number; tone?: { fg: string; bg: string }; active: boolean; onClick: () => void }) {
+function Stat({
+  label,
+  value,
+  tone,
+  active,
+  onClick,
+}: {
+  label: string
+  value: number
+  tone?: { fg: string; bg: string; cardBg: string }
+  active: boolean
+  onClick: () => void
+}) {
+  const fg = tone?.fg ?? '#475569'
+  const bg = tone?.cardBg ?? '#F1F5F9'
   return (
     <button
       type="button"
       onClick={onClick}
       aria-pressed={active}
-      title={active ? '目前篩選條件' : `只看「${label}」`}
+      title={active ? '目前篩選條件（再點一次取消）' : `篩選「${label}」`}
       className={[
-        'rounded-lg px-5 py-3.5 text-left transition-shadow',
-        tone ? '' : 'bg-inset',
-        active ? '' : 'hover:shadow-card',
+        'rounded-card px-5 py-4 text-left transition-all duration-150',
+        active ? 'shadow-card -translate-y-0.5' : 'hover:shadow-card hover:-translate-y-0.5',
       ].join(' ')}
       style={{
-        background: tone?.bg,
-        // 衝突總數＝預設的「全部」狀態，不加框（同參考圖）；選了某個原因才框該卡
-        boxShadow: active && tone ? `inset 0 0 0 2px ${tone.fg}` : undefined,
+        background: bg,
+        boxShadow: active ? `inset 0 0 0 2px ${fg}` : undefined,
       }}
     >
-      <div className="text-[13px] text-ink-sub">{label}</div>
-      <div className="mt-1 text-[30px] font-bold leading-tight tabular-nums text-ink">{value}</div>
+      <div className="flex items-center gap-2">
+        {tone && (
+          <span className="size-2 shrink-0 rounded-full" style={{ background: fg }} />
+        )}
+        <span className="text-[13.5px] font-semibold text-ink">{label}</span>
+      </div>
+      <div
+        className="mt-2 text-[32px] font-bold leading-tight tabular-nums"
+        style={{ color: fg }}
+      >
+        {value}
+      </div>
     </button>
   )
 }
