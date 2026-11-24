@@ -123,13 +123,14 @@ export function QueryButtons({ onClear, onSearch }: { onClear: () => void; onSea
  * 外觀同一般下拉；點開是勾選清單＋「全選」，點外面收起。已選 1 項顯示名稱，多項顯示「名稱、名稱…」或「已選 N 項」。
  */
 export function MultiSelect<T extends string>({
-  options, value, onChange, placeholder = '請選擇', width = 240,
+  options, value, onChange, placeholder = '請選擇', width, className,
 }: {
   options: ReadonlyArray<{ value: T; label: string }>
   value: T[]
   onChange: (v: T[]) => void
   placeholder?: string
-  width?: number
+  width?: number | string
+  className?: string
 }) {
   const [open, setOpen] = useState(false)
   const boxRef = useRef<HTMLDivElement>(null)
@@ -142,12 +143,22 @@ export function MultiSelect<T extends string>({
 
   // 依選項原本的順序輸出，不依勾選先後
   const toggle = (v: T) => onChange(options.map((o) => o.value).filter((x) => (x === v ? !value.includes(x) : value.includes(x))))
-  const all = value.length === options.length
+  const all = options.length > 0 && value.length === options.length
   const labels = options.filter((o) => value.includes(o.value)).map((o) => o.label)
-  const text = labels.length === 0 ? placeholder : labels.length <= 2 ? labels.join('、') : `已選 ${labels.length} 項`
+  const text = labels.length === 0
+    ? placeholder
+    : all
+      ? `全部（${options.length} 項）`
+      : labels.length <= 2
+        ? labels.join('、')
+        : `已選 ${labels.length} 項`
 
   return (
-    <div ref={boxRef} className="relative" style={{ width }}>
+    <div
+      ref={boxRef}
+      className={`relative ${className ?? ''}`}
+      style={width !== undefined ? { width } : (!className ? { width: 240 } : undefined)}
+    >
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}

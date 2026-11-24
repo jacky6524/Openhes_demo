@@ -99,8 +99,8 @@ export function MdmsUpload() {
 
         {/* ── 右：上拋操作 ＋ 下載XML ── */}
         <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto pr-0.5">
-          <ReuploadPanel typeKey={tab === 'ALL' ? 'LP' : tab} from={applied.from} to={applied.to} />
-          <XmlDownloadPanel typeKey={tab === 'ALL' ? 'LP' : tab} from={applied.from} to={applied.to} />
+          <ReuploadPanel typeKey={tab} from={applied.from} to={applied.to} />
+          <XmlDownloadPanel typeKey={tab} from={applied.from} to={applied.to} />
         </div>
       </div>
     </div>

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { CircleCheck } from 'lucide-react'
-import { Field, GroupSelect, RangeInput } from '@/components/shared/QueryFields'
-import { TargetSearchMulti, parseTargets, TARGET_MODES, FIELD_BOX, type TargetMode } from '@/components/shared/TargetSearch'
+import { Field, GroupSelect, MultiSelect, RangeInput } from '@/components/shared/QueryFields'
+import { TargetSearchMulti, parseTargets, TARGET_MODES, type TargetMode } from '@/components/shared/TargetSearch'
 import { status as statusTok } from '@/tokens'
 import { hashStr } from '@/data/readTasks'
 import { MDMS_TYPES, buckets, parseLocal, type MdmsKey } from '@/data/mdmsUpload'
@@ -11,7 +11,7 @@ import { MDMS_TYPES, buckets, parseLocal, type MdmsKey } from '@/data/mdmsUpload
  *
  * 參考圖 1119更新參考/MDMS上拋 (4).png：表號／電號／**群組**（新增）→ 資料類型 → 上拋電表資料時間（整點）→ 清除條件／執行上拋。
  *   · 對象留空＝全部電表；表號／電號可多筆（換行分隔）；群組＝裝置群組頁的群組
- *   · 資料類型預設跟著左側折線圖的頁籤（ALL 時預設 LP），也可以自己改；可選事件
+ *   · 資料類型支援複選下拉，預設跟著左側折線圖的頁籤（ALL 時預設負載、午夜、定時品質）；可複選事件
  *   · 資料時間預設跟著左側 dashboard 的搜尋區間
  *   · 執行要二次確認：按「執行上拋」先算出未上拋筆數並變成「確認上拋 N 筆」，再按才送出
  * 資料全為 mock：未上拋筆數＝區間內各已完成時段 總數－已上拋 的合計；送出只顯示結果訊息。
@@ -21,8 +21,9 @@ const fmtN = (n: number) => n.toLocaleString('en-US')
 
 interface Found { slots: number; pending: number; who: string }
 
-export function ReuploadPanel({ typeKey, from: from0, to: to0 }: { typeKey: MdmsKey; from: string; to: string }) {
-  const [type, setType] = useState<MdmsKey>(typeKey)
+export function ReuploadPanel({ typeKey, from: from0, to: to0 }: { typeKey: MdmsKey | 'ALL'; from: string; to: string }) {
+  const initTypes = typeKey === 'ALL' ? (['LP', 'MN', 'ALT'] as MdmsKey[]) : [typeKey]
+  const [types, setTypes] = useState<MdmsKey[]>(initTypes)
   const [mode, setMode] = useState<TargetMode>('meterNo')
   const [text, setText] = useState('')
   const [group, setGroup] = useState('')
@@ -31,21 +32,31 @@ export function ReuploadPanel({ typeKey, from: from0, to: to0 }: { typeKey: Mdms
   const [done, setDone] = useState('')
 
   // 左側切頁籤 → 資料類型跟著換；左側重新搜尋 → 區間跟著換
-  useEffect(() => { setType(typeKey); setFound(null) }, [typeKey])
+  useEffect(() => {
+    setTypes(typeKey === 'ALL' ? ['LP', 'MN', 'ALT'] : [typeKey])
+    setFound(null)
+  }, [typeKey])
   useEffect(() => { setRange({ from: from0, to: to0 }); setFound(null) }, [from0, to0])
 
-  const typeDef = useMemo(() => MDMS_TYPES.find((t) => t.key === type)!, [type])
+  const selectedDefs = useMemo(() => MDMS_TYPES.filter((t) => types.includes(t.key)), [types])
   const touched = () => { setFound(null); setDone('') }
 
   const clear = () => {
-    setMode('meterNo'); setText(''); setGroup(''); setType(typeKey); setRange({ from: from0, to: to0 }); touched()
+    setMode('meterNo')
+    setText('')
+    setGroup('')
+    setTypes(typeKey === 'ALL' ? ['LP', 'MN', 'ALT'] : [typeKey])
+    setRange({ from: from0, to: to0 })
+    touched()
   }
 
   /** 第一下：算未上拋筆數、進入確認；第二下：送出 */
   const run = () => {
+    if (types.length === 0) return
+    const typesLabel = selectedDefs.map((t) => t.label).join('、')
     if (found) {
       if (!found.pending) return
-      setDone(`已送出重新上拋：${typeDef.label}・${found.who}，${fmtN(found.pending)} 筆。上拋完成後，左側卡片與趨勢會更新。`)
+      setDone(`已送出重新上拋：${typesLabel}・${found.who}，${fmtN(found.pending)} 筆。上拋完成後，左側卡片與趨勢會更新。`)
       setFound(null)
       return
     }
@@ -54,24 +65,33 @@ export function ReuploadPanel({ typeKey, from: from0, to: to0 }: { typeKey: Mdms
     const [f, t] = a <= b ? [a, b] : [b, a]
     const list = mode === 'group' ? (group ? [group] : []) : parseTargets(text)
     const scale = list.length ? `${mode}:${list.join(',')}` : ''
-    const rows = buckets(typeDef, f, t, scale).filter((r) => !r.inProgress)
-    const missRate = rows.length ? rows.reduce((s, r) => s + (1 - r.uploaded / r.total), 0) / rows.length : 0
+
     // 對象數：表號／電號＝輸入筆數；群組（mock）＝依群組名給一個電表數
     const count = mode === 'group' ? (group ? 20 + (hashStr(group) % 180) : 0) : list.length
-    const pending = count
-      ? Math.round(count * rows.length * missRate)
-      : rows.reduce((s, r) => s + (r.total - r.uploaded), 0)
+
+    let totalPending = 0
+    let maxSlots = 0
+    for (const td of selectedDefs) {
+      const rows = buckets(td, f, t, scale).filter((r) => !r.inProgress)
+      maxSlots = Math.max(maxSlots, rows.length)
+      const missRate = rows.length ? rows.reduce((s, r) => s + (1 - r.uploaded / r.total), 0) / rows.length : 0
+      const pending = count
+        ? Math.round(count * rows.length * missRate)
+        : rows.reduce((s, r) => s + (r.total - r.uploaded), 0)
+      totalPending += pending
+    }
+
     const modeLabel = TARGET_MODES.find((m) => m.key === mode)!.label
     const who = !count ? '全部電表' : mode === 'group' ? `群組「${group.split(':')[1]}」（${count} 顆電表）` : `${count} 個${modeLabel}`
-    setFound({ slots: rows.length, pending, who })
+    setFound({ slots: maxSlots, pending: totalPending, who })
     setDone('')
   }
 
   const confirming = !!found && found.pending > 0
 
   return (
-    <section className="flex flex-1 min-h-0 flex-col justify-between rounded-card border border-border bg-surface p-5 shadow-card">
-      <div className="flex flex-col gap-3">
+    <section className="flex flex-1 min-h-fit flex-col justify-between rounded-card border border-border bg-surface p-4 shadow-card">
+      <div className="flex flex-col gap-2.5">
         <div className="flex items-center gap-2">
           <span className="h-4 w-[3px] rounded-full bg-danger" />
           <h2 className="text-[16px] font-semibold text-ink">上拋操作</h2>
@@ -83,14 +103,18 @@ export function ReuploadPanel({ typeKey, from: from0, to: to0 }: { typeKey: Mdms
           onMode={(m) => { setMode(m); touched() }}
           onText={(v) => { setText(v); touched() }}
           groupInput={<GroupSelect value={group} onChange={(v) => { setGroup(v); touched() }} className="w-full" />}
-          textareaClassName="h-20 w-full min-w-0 flex-1"
+          textareaClassName="h-16 w-full min-w-0 flex-1"
         />
         {mode !== 'group' && <p className="-mt-1.5 text-[12px] text-ink-mut">留空＝全部電表</p>}
 
-        <Field label="選擇資料類型">
-          <select value={type} onChange={(e) => { setType(e.target.value as MdmsKey); touched() }} className={`${FIELD_BOX} h-9 w-full py-0`}>
-            {MDMS_TYPES.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
-          </select>
+        <Field label="選擇資料類型" hint="可複選">
+          <MultiSelect
+            options={MDMS_TYPES.map((t) => ({ value: t.key, label: t.label }))}
+            value={types}
+            onChange={(v) => { setTypes(v); touched() }}
+            placeholder="請選擇資料類型"
+            className="w-full"
+          />
         </Field>
 
         <Field label="上拋電表資料時間" hint="以整點為單位，單次上限 1 個月">
@@ -112,8 +136,8 @@ export function ReuploadPanel({ typeKey, from: from0, to: to0 }: { typeKey: Mdms
           </button>
           <button
             onClick={run}
-            disabled={!!found && !found.pending}
-            className={`inline-flex h-9 flex-1 items-center justify-center rounded-lg text-[13px] font-semibold text-white disabled:opacity-40 ${confirming ? 'bg-danger hover:opacity-90' : 'bg-ink hover:opacity-90'}`}
+            disabled={types.length === 0 || (!!found && !found.pending)}
+            className={`inline-flex h-9 flex-1 items-center justify-center rounded-lg text-[13px] font-semibold text-white disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed ${confirming ? 'bg-danger hover:opacity-90' : 'bg-ink hover:opacity-90'}`}
           >
             {confirming ? `確認上拋 ${fmtN(found!.pending)} 筆` : '執行上拋'}
           </button>
@@ -121,23 +145,27 @@ export function ReuploadPanel({ typeKey, from: from0, to: to0 }: { typeKey: Mdms
 
         {/* 結果：算完筆數（等確認）或送出後 */}
         {found && (
-          <div className="rounded-lg bg-inset px-3 py-2 text-[12.5px] leading-relaxed text-ink-sub">
-            {typeDef.label}・{found.who}
-            {found.slots > 0 && `・共 ${found.slots} 個已完成時段`}
-            <br />
+          <div className="rounded-lg bg-inset px-2.5 py-1.5 text-[12px] leading-relaxed text-ink-sub break-words">
+            <div className="font-semibold text-ink">
+              {selectedDefs.map((t) => t.label).join('、')}・{found.who}
+              {found.slots > 0 && `・共 ${found.slots} 個已完成時段`}
+            </div>
             {found.slots === 0 ? (
-              <b className="text-ink">這個區間沒有已完成的時段，請調整資料時間</b>
+              <span className="font-semibold text-ink">這個區間沒有已完成的時段，請調整資料時間</span>
             ) : found.pending ? (
-              <>未上拋 <b className="tabular-nums" style={{ color: statusTok.danger.fg }}>{fmtN(found.pending)}</b> 筆，再按一次確認送出。
-                <button onClick={() => setFound(null)} className="ml-2 text-ink-mut underline hover:text-ink">取消</button></>
+              <div className="mt-0.5">
+                未上拋 <b className="tabular-nums font-bold" style={{ color: statusTok.danger.fg }}>{fmtN(found.pending)}</b> 筆，再按一次確認送出。
+                <button onClick={() => setFound(null)} className="ml-2 text-ink-mut underline hover:text-ink">取消</button>
+              </div>
             ) : (
-              <b style={{ color: statusTok.normal.fg }}>全部已上拋，不需重新上拋</b>
+              <span className="font-semibold" style={{ color: statusTok.normal.fg }}>全部已上拋，不需重新上拋</span>
             )}
           </div>
         )}
         {done && (
-          <div className="flex gap-1.5 text-[12.5px] font-semibold leading-relaxed" style={{ color: statusTok.normal.fg }}>
-            <CircleCheck size={16} className="mt-0.5 shrink-0" />{done}
+          <div className="flex items-start gap-1.5 rounded-lg bg-success-soft/60 px-2.5 py-1.5 text-[12px] font-medium leading-relaxed break-words" style={{ color: statusTok.normal.fg }}>
+            <CircleCheck size={15} className="mt-0.5 shrink-0" />
+            <span className="flex-1">{done}</span>
           </div>
         )}
       </div>
