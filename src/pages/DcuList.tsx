@@ -37,7 +37,7 @@ import type { DcuRow } from '@/data/dcuList'
  *     頻道組別、連線類型（原「通訊方式」，改回台達用語）、地址、IP、模式、白名單、操作。
  *     台達的勾選欄不加（10-16 起批次修改模式已搬進齒輪）；白名單維持 Y／N、連線狀態維持文字標籤。
  */
-type SortKey = 'serial' | 'code' | 'online' | 'enabled' | 'meterCount' | 'meterOnline' | 'address' | 'office' | 'whitelistOnline' | 'channel' | 'comm' | 'ip' | 'mode'
+type SortKey = 'serial' | 'code' | 'online' | 'enabled' | 'meterCount' | 'meterOnline' | 'address' | 'office' | 'whitelistOnline' | 'channel' | 'comm' | 'ip' | 'mode' | 'whitelisted'
 
 /** 欄位搜尋的可選欄位（設計稿的「搜尋」下拉） */
 const SEARCH_FIELDS = [
@@ -207,12 +207,12 @@ export function DcuList() {
             <thead>
               <tr className="text-ink-sub">
                 {head('office', '區處及\n營業區')}
+                {head('enabled', '狀態', 'center')}
+                {head('online', '連線\n狀態', 'center')}
                 {/* 2026-11-19 業主：數字只有一兩位，欄不用那麼寬 → 標題直接疊成多行、欄寬縮到最小（width=1＝取最小寬） */}
                 {head('meterCount', '電表數', 'right', 1)}
                 {head('meterOnline', '電表\n連線數', 'right', 1)}
                 {head('whitelistOnline', '白名單\n電表\n連線數', 'right', 1)}
-                {head('online', '連線\n狀態', 'center')}
-                {head('enabled', '狀態', 'center')}
                 {head('code', 'DCU編號')}
                 {head('serial', 'DCU序號')}
                 {head('channel', '頻道\n組別', 'center')}
@@ -220,7 +220,7 @@ export function DcuList() {
                 <ListTh label="地址" width={170} sort={{ active: sortKey === 'address', dir: sortDir, onClick: () => toggleSort('address') }} />
                 {head('ip', 'IP')}
                 {head('mode', '模式')}
-                <ListTh label="白名單" align="center" />
+                {head('whitelisted', '白名單', 'center')}
                 <ListTh />
               </tr>
             </thead>
@@ -228,13 +228,13 @@ export function DcuList() {
               {rows.map((d) => (
                 <tr key={d.serial} className="border-b border-divider align-middle hover:bg-inset/40">
                   <td className={`${LIST_TD} text-ink-sub`}><OneLine value={d.office} /></td>
+                  {/* 停用＝灰底標籤、啟用＝純文字（無底框）；整欄置中（業主 2026-11-11） */}
+                  <td className={`${LIST_TD} text-center`}><EnabledState enabled={d.enabled} /></td>
+                  <td className={`${LIST_TD} text-center`}><StatusPill status={d.online ? 'online' : 'offline'} labels={ONLINE_LABELS} /></td>
                   <td className={`${LIST_TD} text-right tabular-nums text-ink`}>{d.meterCount}</td>
                   <td className={`${LIST_TD} text-right tabular-nums text-ink`}>{d.meterOnline}</td>
                   {/* 正式機：whiteList=true 時才是「白名單電表連線數」；未加入白名單顯示「-」 */}
                   <td className={`${LIST_TD} text-right tabular-nums text-ink`}>{d.whitelisted ? d.whitelistOnline : <span className="text-ink-mut">-</span>}</td>
-                  <td className={`${LIST_TD} text-center`}><StatusPill status={d.online ? 'online' : 'offline'} labels={ONLINE_LABELS} /></td>
-                  {/* 停用＝灰底標籤、啟用＝純文字（無底框）；整欄置中（業主 2026-11-11） */}
-                  <td className={`${LIST_TD} text-center`}><EnabledState enabled={d.enabled} /></td>
                   <td className={`${LIST_TD} text-[13.5px] font-semibold tabular-nums text-ink`}>{d.code ? <OneLine value={d.code} /> : <span className="font-sans font-normal text-ink-mut">-</span>}</td>
                   <td className={`${LIST_TD} text-[13.5px] font-semibold tabular-nums text-ink`}><OneLine value={d.serial} /></td>
                   <td className={`${LIST_TD} text-center text-ink-sub`}>{d.channel}</td>
@@ -243,8 +243,8 @@ export function DcuList() {
                   <td className={`${LIST_TD} tabular-nums text-ink-sub`}><OneLine value={d.ip} /></td>
                   {/* 非預設模式用主色標出，一眼看得出哪些 DCU 被調整過 */}
                   <td className={`${LIST_TD} leading-snug ${d.mode === '正常模式' ? 'text-ink-sub' : 'font-medium text-brand'}`}>{d.mode}</td>
-                  {/* 2026-11-19 業主：已加入／未加入 → Y／N */}
-                  <td className={`${LIST_TD} text-center ${d.whitelisted ? 'font-semibold text-ink' : 'text-ink-mut'}`}>{d.whitelisted ? 'Y' : 'N'}</td>
+                  {/* 2026-11-19 業主：已加入／未加入 → Y／N（Y不用粗體） */}
+                  <td className={`${LIST_TD} text-center ${d.whitelisted ? 'text-ink' : 'text-ink-mut'}`}>{d.whitelisted ? 'Y' : 'N'}</td>
                   <td className={LIST_TD}>
                     <div className="flex items-center justify-end gap-2">
                       <button onClick={() => setDetailSerial(d.serial)} title={d.eventCount ? `詳細資料（${d.eventCount} 筆事件）` : '詳細資料'} className="text-ink-mut hover:text-brand">

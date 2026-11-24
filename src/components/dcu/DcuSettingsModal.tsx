@@ -28,7 +28,7 @@ import { DCU_MODES, DCU_MODE_DESC } from '@/data/dcuListPage'
  */
 const TABS = [
   { key: 'modify', label: '修改裝置', icon: Pencil, inactive: true },
-  { key: 'remote', label: '遠端設定', icon: Cog, inactive: true },
+  { key: 'remote', label: '遠端設定', icon: Cog, inactive: false },
   { key: 'online', label: '線上操作', icon: Monitor, inactive: true },
 ] as const
 type TabKey = (typeof TABS)[number]['key']
@@ -65,11 +65,16 @@ export function DcuSettingsModal({ dcu, onClose, mode = '正常模式' }: { dcu:
             <button onClick={onClose} className="rounded-lg border border-border px-4 py-1.5 text-[13px] text-ink-sub hover:bg-inset">
               取消
             </button>
-            {/* 所有頁籤都暫不啟用，沒有可儲存的內容 → 送出停用，游標顯示禁止符號 */}
+            {/* 遠端設定開放可編輯與送出儲存 */}
             <button
-              disabled
-              title="暫不啟用，無法儲存"
-              className="rounded-lg bg-brand px-4 py-1.5 text-[13px] font-medium text-white opacity-40 cursor-not-allowed"
+              onClick={() => {
+                if (tab === 'remote') onClose()
+              }}
+              disabled={tab !== 'remote'}
+              title={tab === 'remote' ? '送出並儲存設定' : '暫不啟用，無法儲存'}
+              className={`rounded-lg bg-brand px-4 py-1.5 text-[13px] font-medium text-white transition-opacity ${
+                tab === 'remote' ? 'hover:bg-brand-deep cursor-pointer' : 'opacity-40 cursor-not-allowed'
+              }`}
             >
               送出
             </button>
@@ -100,10 +105,12 @@ export function DcuSettingsModal({ dcu, onClose, mode = '正常模式' }: { dcu:
 
         {/* body */}
         <div className="flex-1 min-h-0 overflow-y-auto p-5">
-          {TABS.find((t) => t.key === tab)?.inactive ? (
+          {tab === 'remote' ? (
+            <RemotePanel dcu={dcu} mode={mode} />
+          ) : TABS.find((t) => t.key === tab)?.inactive ? (
             <div className="flex flex-col gap-4">
               <FeatureNotice text={INACTIVE_NOTICE[tab]}>
-                {tab === 'modify' ? <ModifyPanel dcu={dcu} onDeleted={onClose} /> : tab === 'remote' ? <RemotePanel dcu={dcu} mode={mode} /> : <OnlinePanel dcu={dcu} />}
+                {tab === 'modify' ? <ModifyPanel dcu={dcu} onDeleted={onClose} /> : <OnlinePanel dcu={dcu} />}
               </FeatureNotice>
             </div>
           ) : tab === 'online' ? (
@@ -221,22 +228,53 @@ function RemotePanel({ dcu, mode }: { dcu: DcuRow; mode: string }) {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3">
         <Field label="頻道組別" kind="select" options={CHANNEL_GROUPS} />
-        <label className="flex flex-col gap-1">
+        {/* 2026-11-24 業主意見：白名單鎖定高度與頻道組別完全一致（h-[38px]） */}
+        <div className="flex flex-col gap-1">
           <span className="text-[12px] text-ink-sub">白名單鎖定</span>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={locked}
+          <div
             onClick={() => setLocked((v) => !v)}
-            title={locked ? '已鎖定：只允許白名單內的電表連線（點一下解鎖）' : '未鎖定：不限制連線電表（點一下鎖定）'}
-            className={`inline-flex h-9 items-center gap-2 self-start rounded-lg border px-3 text-[13px] font-semibold transition-colors ${
-              locked ? 'border-ink bg-ink text-white' : 'border-border bg-surface text-ink-sub hover:border-ink-mut'
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && setLocked((v) => !v)}
+            title={locked ? '已鎖定：點一下解除鎖定' : '未鎖定：點一下鎖定'}
+            className={`flex h-[38px] items-center justify-between rounded-lg border px-3 transition-all cursor-pointer select-none ${
+              locked
+                ? 'border-brand/40 bg-brand-soft/25 hover:border-brand/60'
+                : 'border-border bg-inset/50 hover:border-ink-mut'
             }`}
           >
-            {locked ? <Lock size={15} /> : <LockOpen size={15} />}
-            {locked ? '已鎖定' : '未鎖定'}
-          </button>
-        </label>
+            <div className="flex items-center gap-2">
+              <div
+                className={`flex size-5 shrink-0 items-center justify-center rounded transition-colors ${
+                  locked ? 'bg-brand text-white' : 'bg-slate-200 text-ink-sub'
+                }`}
+              >
+                {locked ? <Lock size={12} /> : <LockOpen size={12} />}
+              </div>
+              <div className="flex items-baseline gap-1.5">
+                <span className={`text-[13px] font-semibold ${locked ? 'text-brand' : 'text-ink'}`}>
+                  {locked ? '已鎖定' : '解除鎖定'}
+                </span>
+                <span className="text-[11.5px] text-ink-mut">
+                  {locked ? '・僅允許白名單電表連線' : '・允許名單外電表連入'}
+                </span>
+              </div>
+            </div>
+
+            {/* 滑動式 Toggle 開關 */}
+            <div
+              role="switch"
+              aria-checked={locked}
+              className="relative h-5 w-9 shrink-0 rounded-full transition-colors pointer-events-none"
+              style={{ background: locked ? '#2F6BED' : '#D1D5DB' }}
+            >
+              <span
+                className="absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all duration-200"
+                style={{ left: locked ? 18 : 2 }}
+              />
+            </div>
+          </div>
+        </div>
         <Field label="時間校正設定" placeholder="Input" />
         {/* 2026-11-04 業主意見：修改模式由單選鈕改為下拉；原本 hover 才看得到的模式說明改常駐在下拉下方 */}
         <label className="flex flex-col gap-1">
@@ -244,7 +282,7 @@ function RemotePanel({ dcu, mode }: { dcu: DcuRow; mode: string }) {
           <select
             value={picked}
             onChange={(e) => setPicked(e.target.value)}
-            className="rounded-lg border border-border bg-inset/50 px-3 py-2 text-[13px] text-ink focus:outline-none focus:border-brand"
+            className="h-[38px] rounded-lg border border-border bg-inset/50 px-3 text-[13px] text-ink focus:outline-none focus:border-brand"
           >
             {MODE_ORDER.map((m) => <option key={m} value={m}>{m}</option>)}
           </select>
@@ -281,7 +319,7 @@ function Field({
   /** select 的選項；有給時預設選第一個，沒給時只有佔位字 */
   options?: string[]
 }) {
-  const box = 'rounded-lg border border-border bg-inset/50 px-3 py-2 text-[13px] text-ink focus:outline-none focus:border-brand'
+  const box = 'h-[38px] rounded-lg border border-border bg-inset/50 px-3 text-[13px] text-ink focus:outline-none focus:border-brand'
   let control: ReactNode
   if (kind === 'select') {
     control = (

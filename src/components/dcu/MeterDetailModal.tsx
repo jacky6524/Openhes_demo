@@ -573,8 +573,8 @@ function DrrPanel({ meterNo }: { meterNo: string }) {
     <>
       <div className="grid shrink-0 grid-cols-2 gap-3 md:grid-cols-4">
         {pinned.map((f) => (
-          <div key={f.label} className="rounded-xl border px-4 py-3" style={{ borderColor: BLUE, background: '#EEF4FF' }}>
-            <div className="text-[12px] font-semibold" style={{ color: BLUE }}>{f.label}</div>
+          <div key={f.label} className="rounded-xl bg-inset px-4 py-3">
+            <div className="text-[12px] text-ink-mut">{f.label}</div>
             <div className="mt-1 text-[17px] font-bold tabular-nums text-ink">{f.value}</div>
           </div>
         ))}

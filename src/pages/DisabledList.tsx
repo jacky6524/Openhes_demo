@@ -1,5 +1,8 @@
 import { useMemo, useRef, useState, type ReactNode } from 'react'
-import { Th, SearchHead, StatusPill, EnabledState, StampLines, InfiniteFooter, useInfiniteRows } from '@/components/table/tableBits'
+import {
+  Th, SearchHead, StatusPill, EnabledState, StampLines, InfiniteFooter, useInfiniteRows,
+  ONLINE_LABELS, OneLine,
+} from '@/components/table/tableBits'
 import { PillTabs } from '@/components/shared/PillTabs'
 import { PageTitle } from '@/components/shared/PageTitle'
 import { SimpleModal, BTN_GHOST, BTN_PRIMARY } from '@/components/shared/SimpleModal'
@@ -33,6 +36,8 @@ interface Col<R> {
   search?: (r: R) => string
   /** 表頭與內容水平置中（狀態欄，2026-11-11 業主意見） */
   center?: boolean
+  /** 數量欄位水平靠右對齊（電表數、連線數） */
+  right?: boolean
   cell: (r: R) => ReactNode
 }
 
@@ -65,9 +70,107 @@ const METER_COLS: Col<MeterListRow>[] = [
   { key: 'lastMn', label: '最後MN時間', width: '6%', cell: (m) => <span className="tabular-nums" style={{ color: stale(m.lastMnSameDay) }}><StampLines value={m.lastMn.slice(0, 16)} /></span> },
 ]
 
+/**
+ * DCU 停用清單欄位：比照 DCU清單（DcuList.tsx）所有欄位
+ * （區處及營業區、電表數、電表連線數、白名單電表連線數、連線狀態、狀態、DCU編號、DCU序號、頻道組別、連線類型、地址、IP、模式、白名單）
+ */
 const DCU_COLS: Col<DcuListRow>[] = [
-  { key: 'serial', label: '裝置序號', search: (d) => d.serial, cell: (d) => <span className="tabular-nums text-ink">{d.serial}</span> },
-  { key: 'code', label: 'DCU 編號', search: (d) => d.code, cell: (d) => <span className="tabular-nums text-ink">{d.code}</span> },
+  {
+    key: 'office',
+    label: '區處及營業區',
+    search: (d) => d.office,
+    cell: (d) => <OneLine value={d.office} className="text-ink-sub" />,
+  },
+  {
+    key: 'state',
+    label: '狀態',
+    center: true,
+    cell: () => <EnabledState enabled={false} />,
+  },
+  {
+    key: 'online',
+    label: '連線狀態',
+    center: true,
+    cell: (d) => <StatusPill status={d.online ? 'online' : 'offline'} labels={ONLINE_LABELS} />,
+  },
+  {
+    key: 'meterCount',
+    label: '電表數',
+    right: true,
+    cell: (d) => <span className="tabular-nums text-ink">{d.meterCount}</span>,
+  },
+  {
+    key: 'meterOnline',
+    label: '電表連線數',
+    right: true,
+    cell: (d) => <span className="tabular-nums text-ink">{d.meterOnline}</span>,
+  },
+  {
+    key: 'whitelistOnline',
+    label: '白名單電表連線數',
+    right: true,
+    cell: (d) => (
+      <span className="tabular-nums text-ink">
+        {d.whitelisted ? d.whitelistOnline : <span className="text-ink-mut">-</span>}
+      </span>
+    ),
+  },
+  {
+    key: 'code',
+    label: 'DCU編號',
+    search: (d) => d.code,
+    cell: (d) => (
+      d.code ? <OneLine value={d.code} className="text-[13.5px] font-semibold tabular-nums text-ink" /> : <span className="font-sans font-normal text-ink-mut">-</span>
+    ),
+  },
+  {
+    key: 'serial',
+    label: 'DCU序號',
+    search: (d) => d.serial,
+    cell: (d) => <OneLine value={d.serial} className="text-[13.5px] font-semibold tabular-nums text-ink" />,
+  },
+  {
+    key: 'channel',
+    label: '頻道組別',
+    center: true,
+    cell: (d) => <span className="text-ink-sub">{d.channel}</span>,
+  },
+  {
+    key: 'comm',
+    label: '連線類型',
+    cell: (d) => <OneLine value={d.comm} className="text-ink-sub" />,
+  },
+  {
+    key: 'address',
+    label: '地址',
+    search: (d) => d.address,
+    cell: (d) => (
+      <span className="line-clamp-2 block min-w-[150px] whitespace-normal leading-snug text-[14px] text-ink" title={d.address}>
+        {d.address}
+      </span>
+    ),
+  },
+  {
+    key: 'ip',
+    label: 'IP',
+    search: (d) => d.ip,
+    cell: (d) => <OneLine value={d.ip} className="tabular-nums text-ink-sub font-mono" />,
+  },
+  {
+    key: 'mode',
+    label: '模式',
+    cell: (d) => (
+      <span className={`leading-snug ${d.mode === '正常模式' ? 'text-ink-sub' : 'font-medium text-brand'}`}>
+        {d.mode}
+      </span>
+    ),
+  },
+  {
+    key: 'whitelisted',
+    label: '白名單',
+    center: true,
+    cell: (d) => <span className={d.whitelisted ? 'text-ink' : 'text-ink-mut'}>{d.whitelisted ? 'Y' : 'N'}</span>,
+  },
 ]
 
 export function DisabledList() {
@@ -171,7 +274,12 @@ function DisabledTable<R extends { enabled: boolean }>({
                 <Check checked={allChecked} indeterminate={!allChecked && someChecked} onChange={toggleAll} />
               </Th>
               {cols.map((c) => (
-                <Th key={c.key} className={`sticky top-0 z-10 bg-inset !whitespace-normal ${c.center ? '!text-center' : ''}`}>
+                <Th
+                  key={c.key}
+                  className={`sticky top-0 z-10 bg-inset ${fixed ? '!whitespace-normal' : 'whitespace-nowrap'} ${
+                    c.center ? '!text-center' : c.right ? '!text-right' : ''
+                  }`}
+                >
                   {c.search ? (
                     <SearchHead
                       label={c.label}
@@ -193,7 +301,16 @@ function DisabledTable<R extends { enabled: boolean }>({
                   <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
                     <Check checked={checked.has(id)} onChange={() => toggle(id)} />
                   </td>
-                  {cols.map((c) => <td key={c.key} className={`px-3 py-3 ${c.center ? 'text-center' : ''}`}>{c.cell(r)}</td>)}
+                  {cols.map((c) => (
+                    <td
+                      key={c.key}
+                      className={`px-3 py-3 ${fixed ? '' : 'whitespace-nowrap'} ${
+                        c.center ? 'text-center' : c.right ? 'text-right' : ''
+                      }`}
+                    >
+                      {c.cell(r)}
+                    </td>
+                  ))}
                 </tr>
               )
             })}
