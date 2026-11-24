@@ -64,14 +64,14 @@ const ROWS: Conflict[] = Array.from({ length: 45 }, (_, i) => {
 const mismatch = (r: Conflict, k: FieldKey) => !r.unimported && r.data[k] !== r.reported[k]
 const reasonsOf = (r: Conflict): Reason[] => (r.unimported ? ['unimported'] : FIELDS.filter((k) => mismatch(r, k)))
 
-/** 衝突原因標籤：名稱與顏色（統計卡的小圓點用同一色，對得回表格裡的標籤） */
+/** 衝突原因標籤：名稱與顏色（統計卡與表格 tag 統一使用相同的柔和淡雅 50 階底色） */
 const REASON: Record<Reason, { label: string; stat: string; fg: string; bg: string; cardBg: string }> = {
-  unimported: { label: '未匯入資料', stat: '未匯入資料', fg: '#E11D48', bg: '#FEE2E2', cardBg: '#FEE2E2' },
-  elecNo: { label: '電號', stat: '電號衝突', fg: '#D97706', bg: '#FEF3C7', cardBg: '#FEF3C7' },
-  mac: { label: 'MAC/IMEI', stat: 'MAC/IMEI衝突', fg: '#2563EB', bg: '#DBEAFE', cardBg: '#DBEAFE' },
-  model: { label: '模組型號', stat: '模組型號衝突', fg: '#0891B2', bg: '#CFFAFE', cardBg: '#CFFAFE' },
+  unimported: { label: '未匯入資料', stat: '未匯入資料', fg: '#E11D48', bg: '#FFF1F2', cardBg: '#FFF1F2' },
+  elecNo: { label: '電號', stat: '電號衝突', fg: '#D97706', bg: '#FFFBEB', cardBg: '#FFFBEB' },
+  mac: { label: 'MAC/IMEI', stat: 'MAC/IMEI衝突', fg: '#2563EB', bg: '#EFF6FF', cardBg: '#EFF6FF' },
+  model: { label: '模組型號', stat: '模組型號衝突', fg: '#0891B2', bg: '#ECFEFF', cardBg: '#ECFEFF' },
 }
-const TOTAL_TONE = { label: '全部', stat: '衝突總數', fg: '#475569', bg: '#F1F5F9', cardBg: '#F1F5F9' }
+const TOTAL_TONE = { label: '全部', stat: '衝突總數', fg: '#475569', bg: '#F8FAFC', cardBg: '#F8FAFC' }
 const REASON_KEYS = Object.keys(REASON) as Reason[]
 
 const COUNT: Record<Reason, number> = {
@@ -272,7 +272,7 @@ function Stat({
   onClick: () => void
 }) {
   const fg = tone?.fg ?? '#475569'
-  const bg = tone?.cardBg ?? '#F1F5F9'
+  const bg = tone?.cardBg ?? '#F8FAFC'
   return (
     <button
       type="button"

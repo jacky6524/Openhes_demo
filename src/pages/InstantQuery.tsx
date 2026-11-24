@@ -149,7 +149,7 @@ function MeterResult({ m }: { m: MeterListRow }) {
       </Card>
       <div className="grid min-h-[320px] flex-1 grid-cols-2 gap-3">
         <SortTable title="連線紀錄" hint="近 24 小時" fill columns={['連線日期', '訊號強度']} sortable={[]} rows={connRows(hours)} empty={`近 24 小時沒有連線紀錄（最後回報 ${stamp}）`} />
-        <ReadRateCard hours={hours} lastStamp={stamp} />
+        <ReadRateCard hours={hours} lastStamp={stamp} meterNo={m.meterNo} />
       </div>
     </>
   )
@@ -181,7 +181,7 @@ function DcuResult({ d }: { d: DcuListRow }) {
       </Card>
       <div className="grid min-h-[320px] flex-1 grid-cols-2 gap-3">
         <SortTable title="連線紀錄" hint="近 24 小時" fill columns={['連線日期', '訊號強度']} sortable={[]} rows={connRows(hours)} empty="近 24 小時沒有連線紀錄" />
-        <SignalCard title="訊號強度趨勢" hint="近 24 小時・每小時一筆・越高越好（滑過看 dBm）" points={hours} empty="近 24 小時沒有連線紀錄" />
+        <SignalCard title="訊號強度趨勢" hint="近 24 小時・每小時一筆・數值越大訊號越好" points={hours} empty="近 24 小時沒有連線紀錄" />
       </div>
     </>
   )
@@ -292,18 +292,67 @@ function connRows(hours: HourPoint[]): string[][] {
 
 /* ───────────────────────── 圖表 ───────────────────────── */
 
-/** 與系統總覽 SharedMetricCard 同色票 */
+/** 圖表時序折線系列（24 小時連續讀表率，對齊 MDMS 色彩：LP 藍紫、ALT 粉紅） */
+const CHART_SERIES = [
+  { key: 'lp', label: 'LP 讀表率', short: 'LP', color: '#5B5BD6', note: '每 15 分 1 筆，每小時應收 4 筆' },
+  { key: 'alt', label: 'ALT 讀表率', short: 'ALT', color: '#D9588F', note: '每小時應收 1 筆' },
+] as const
+
+type ChartKey = 'lp' | 'alt'
+
+/** 所有讀表類型（含每日結算型的 MN） */
 const RATE_SERIES = [
-  { key: 'lp', label: 'LP 讀表率', short: 'LP', color: '#5E5CE6', note: '每 15 分 1 筆，每小時應收 4 筆' },
-  { key: 'midnight', label: 'MN 午夜讀表率', short: 'MN', color: '#64D2FF', note: '每日 1 筆，00 點那一小時應收' },
-  { key: 'alt', label: 'ALT 讀表率', short: 'ALT', color: '#FF858D', note: '每小時應收 1 筆' },
+  ...CHART_SERIES,
+  { key: 'midnight', label: 'MN 午夜讀表', short: 'MN', color: '#0284C7', note: '每日 1 筆，00 點固定凍結讀值' },
 ] as const
 
 const fmtPct = (n: number | null) => (n === null ? '--' : `${n % 1 ? n.toFixed(1) : n}%`)
 
-function ReadRateCard({ hours, lastStamp }: { hours: HourPoint[]; lastStamp: string }) {
+interface MidnightRecord {
+  id: string
+  time: string
+  type: '定時凍結' | '自動補抄' | '手動讀取'
+  status: '成功' | '缺漏'
+  rate: string
+}
+
+function getMidnightRecords(meterNo?: string): MidnightRecord[] {
+  const seed = meterNo ? seedOf(meterNo) : 7
+  // 某些表有補抄情境（示範可能有多於一筆資料）：
+  if (seed % 3 === 0) {
+    return [
+      { id: '1', time: '2025/01/01 00:00', type: '定時凍結', status: '缺漏', rate: '0%' },
+      { id: '2', time: '2025/01/01 03:22', type: '自動補抄', status: '成功', rate: '100%' },
+    ]
+  }
+  // 一般正常 1 筆：
+  return [
+    { id: '1', time: '2025/01/01 00:00', type: '定時凍結', status: '成功', rate: '100%' },
+  ]
+}
+
+function ReadRateCard({
+  hours,
+  lastStamp,
+  meterNo,
+}: {
+  hours: HourPoint[]
+  lastStamp: string
+  meterNo?: string
+}) {
+  const [focus, setFocus] = useState<ChartKey | null>(null)
   /** 近 24 小時完全沒有連線（斷線很久的表）：讀表率全是 0，線會貼在底部看不出來 → 疊一層說明 */
   const silent = hours.every((h) => h.v === null)
+
+  const mnRecords = useMemo(() => {
+    if (silent) {
+      return [
+        { id: '1', time: '2025/01/01 00:00', type: '定時凍結' as const, status: '缺漏' as const, rate: '0%' },
+      ]
+    }
+    return getMidnightRecords(meterNo)
+  }, [meterNo, silent])
+
   // 24 小時合計：實收 / 應收
   const total = useMemo(
     () =>
@@ -318,81 +367,225 @@ function ReadRateCard({ hours, lastStamp }: { hours: HourPoint[]; lastStamp: str
       }),
     [hours],
   )
+
+  const lpTotal = total.find((t) => t.key === 'lp')!
+  const altTotal = total.find((t) => t.key === 'alt')!
+
   return (
-    <div className="flex min-h-0 flex-col rounded-card border border-border bg-surface p-4 shadow-card">
+    <div className="flex min-h-0 flex-1 flex-col rounded-card border border-border bg-surface p-4 shadow-card">
       <div className="flex items-baseline justify-between gap-3">
-        <SectionTitle title="讀表 × 連線概況" />
-        <span className="text-[12px] text-ink-mut">近 24 小時・每小時讀表率＝實收 ÷ 應收</span>
+        <div className="flex items-center gap-2">
+          <SectionTitle title="讀表 × 連線概況" />
+          {focus !== null && (
+            <button
+              type="button"
+              onClick={() => setFocus(null)}
+              className="rounded bg-inset px-2 py-0.5 text-[11px] font-medium text-ink-sub hover:bg-divider hover:text-ink transition-colors cursor-pointer"
+            >
+              顯示全部
+            </button>
+          )}
+        </div>
+        <span className="text-[12px] text-ink-mut">
+          {focus !== null
+            ? `目前顯示：${CHART_SERIES.find((r) => r.key === focus)?.label}`
+            : '近 24 小時・每小時讀表率＝實收 ÷ 應收'}
+        </span>
       </div>
-      {/* 24 小時合計（兼圖例）：hover 看應收規則 */}
-      <div className="mt-3 grid grid-cols-3 gap-2">
-        {total.map((t) => (
-          <div key={t.key} className="rounded-lg bg-inset px-3 py-2" title={t.note}>
-            <div className="flex items-center gap-1.5 text-[12px] text-ink-sub">
-              <span className="h-[7px] w-2.5 rounded-[2px]" style={{ background: t.color }} />
-              {t.label}
-            </div>
-            <div className="mt-0.5 flex items-baseline gap-2 tabular-nums">
-              <b className="text-[20px] font-bold text-ink">{fmtPct(t.rate)}</b>
-              <span className="text-[12px] text-ink-sub">{t.got} / {t.exp} 筆</span>
-            </div>
+
+      {/* 左右分區：左側【LP / ALT 時序折線區塊】，右側【MN 午夜資料條列區塊】 */}
+      <div className="mt-3 flex flex-1 min-h-[220px] gap-4">
+        {/* ─── 左側：LP / ALT 兩張切換卡 + 24小時折線圖 ─── */}
+        <div className="flex flex-1 min-w-0 flex-col">
+          {/* 上方 2 張時序折線開關卡（參考 MDMS style：淡紫/淡粉低飽和底色、移除標題 icon） */}
+          <div className="grid grid-cols-2 gap-2">
+            {/* LP 讀表率 */}
+            <button
+              type="button"
+              onClick={() => setFocus((prev) => (prev === 'lp' ? null : 'lp'))}
+              className={[
+                'rounded-lg px-3 py-2 text-left transition-all duration-150 relative cursor-pointer border',
+                focus === 'lp'
+                  ? 'shadow-card -translate-y-0.5'
+                  : focus !== null
+                  ? 'opacity-40 hover:opacity-80'
+                  : 'hover:shadow-card hover:-translate-y-0.5',
+              ].join(' ')}
+              style={{
+                background: focus === 'lp' ? '#EAEAFB' : '#F2F2FD',
+                borderColor: focus === 'lp' ? '#5B5BD6' : 'rgba(91, 91, 214, 0.22)',
+                boxShadow: focus === 'lp' ? 'inset 0 0 0 1.5px #5B5BD6' : undefined,
+              }}
+              title={focus === 'lp' ? '目前顯示中（再點一次看全部）' : '每 15 分 1 筆，每小時應收 4 筆（點擊切換折線）'}
+            >
+              <div className="text-[12.5px] font-semibold text-ink">LP 讀表率</div>
+              <div className="mt-0.5 flex items-baseline gap-2 tabular-nums">
+                <b className="text-[20px] font-bold" style={{ color: '#5B5BD6' }}>{fmtPct(lpTotal.rate)}</b>
+                <span className="text-[12px] text-ink-sub">{lpTotal.got} / {lpTotal.exp} 筆</span>
+              </div>
+            </button>
+
+            {/* ALT 讀表率 */}
+            <button
+              type="button"
+              onClick={() => setFocus((prev) => (prev === 'alt' ? null : 'alt'))}
+              className={[
+                'rounded-lg px-3 py-2 text-left transition-all duration-150 relative cursor-pointer border',
+                focus === 'alt'
+                  ? 'shadow-card -translate-y-0.5'
+                  : focus !== null
+                  ? 'opacity-40 hover:opacity-80'
+                  : 'hover:shadow-card hover:-translate-y-0.5',
+              ].join(' ')}
+              style={{
+                background: focus === 'alt' ? '#FBE8F0' : '#FCEFF5',
+                borderColor: focus === 'alt' ? '#D9588F' : 'rgba(217, 88, 143, 0.22)',
+                boxShadow: focus === 'alt' ? 'inset 0 0 0 1.5px #D9588F' : undefined,
+              }}
+              title={focus === 'alt' ? '目前顯示中（再點一次看全部）' : '每小時應收 1 筆（點擊切換折線）'}
+            >
+              <div className="text-[12.5px] font-semibold text-ink">ALT 讀表率</div>
+              <div className="mt-0.5 flex items-baseline gap-2 tabular-nums">
+                <b className="text-[20px] font-bold" style={{ color: '#D9588F' }}>{fmtPct(altTotal.rate)}</b>
+                <span className="text-[12px] text-ink-sub">{altTotal.got} / {altTotal.exp} 筆</span>
+              </div>
+            </button>
           </div>
-        ))}
-      </div>
-      <div className="relative mt-2 min-h-[180px] flex-1">
-        {silent && (
-          <div className="absolute inset-0 z-10 grid place-items-center">
-            <div className="rounded-lg border border-border bg-surface/95 px-4 py-3 text-center text-[13px] shadow-card">
-              <div className="font-semibold" style={{ color: statusTok.danger.fg }}>近 24 小時沒有任何回報</div>
-              <div className="mt-0.5 text-ink-sub">最後回報 {lastStamp}，此期間讀表率皆為 0%</div>
-            </div>
+
+          {/* 下方 24 小時時序折線圖 */}
+          <div className="relative mt-2 min-h-[160px] flex-1">
+            {silent && (
+              <div className="absolute inset-0 z-10 grid place-items-center">
+                <div className="rounded-lg border border-border bg-surface/95 px-4 py-3 text-center text-[13px] shadow-card">
+                  <div className="font-semibold" style={{ color: statusTok.danger.fg }}>近 24 小時沒有任何回報</div>
+                  <div className="mt-0.5 text-ink-sub">最後回報 {lastStamp}，此期間讀表率皆為 0%</div>
+                </div>
+              </div>
+            )}
+
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={hours} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+                <defs>
+                  {CHART_SERIES.map((r) => (
+                    <linearGradient key={r.key} id={`iq-grad-${r.key}`} x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor={r.color} stopOpacity={0.16} />
+                      <stop offset="100%" stopColor={r.color} stopOpacity={0.02} />
+                    </linearGradient>
+                  ))}
+                </defs>
+                <CartesianGrid vertical={false} stroke="#EEF0F3" />
+                <XAxis dataKey="label" tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: '#6A7282' }} interval={2} />
+                <YAxis domain={[0, 100]} ticks={[0, 25, 50, 75, 100]} tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: '#6A7282' }} width={32} unit="%" />
+                <Tooltip cursor={{ stroke: '#C9CDD4', strokeDasharray: '3 3' }} content={<RateTip focus={focus} />} />
+
+                {/* LP 讀表率 */}
+                {(focus === null || focus === 'lp') && (
+                  <Area
+                    type="linear"
+                    dataKey="lp"
+                    name="LP 讀表率"
+                    stroke="#5B5BD6"
+                    strokeWidth={focus === 'lp' ? 2.2 : 1.8}
+                    fill="url(#iq-grad-lp)"
+                    connectNulls={false}
+                    dot={{ r: 2.5, fill: '#fff', stroke: '#5B5BD6', strokeWidth: 1.5 }}
+                    activeDot={{ r: 4, stroke: '#fff', strokeWidth: 2 }}
+                    isAnimationActive={false}
+                  />
+                )}
+
+                {/* ALT 讀表率 */}
+                {(focus === null || focus === 'alt') && (
+                  <Area
+                    type="linear"
+                    dataKey="alt"
+                    name="ALT 讀表率"
+                    stroke="#D9588F"
+                    strokeWidth={focus === 'alt' ? 2.2 : 1.8}
+                    fill="url(#iq-grad-alt)"
+                    connectNulls={false}
+                    dot={{ r: 2.5, fill: '#fff', stroke: '#D9588F', strokeWidth: 1.5 }}
+                    activeDot={{ r: 4, stroke: '#fff', strokeWidth: 2 }}
+                    isAnimationActive={false}
+                  />
+                )}
+              </AreaChart>
+            </ResponsiveContainer>
           </div>
-        )}
-        <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={hours} margin={{ top: 8, right: 12, bottom: 0, left: 0 }}>
-            <defs>
-              {RATE_SERIES.map((r) => (
-                <linearGradient key={r.key} id={`iq-grad-${r.key}`} x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor={r.color} stopOpacity={0.16} />
-                  <stop offset="100%" stopColor={r.color} stopOpacity={0.02} />
-                </linearGradient>
-              ))}
-            </defs>
-            <CartesianGrid vertical={false} stroke="#EEF0F3" />
-            <XAxis dataKey="label" tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: '#6A7282' }} interval={1} />
-            <YAxis domain={[0, 100]} ticks={[0, 25, 50, 75, 100]} tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: '#6A7282' }} width={34} unit="%" />
-            <Tooltip cursor={{ stroke: '#C9CDD4', strokeDasharray: '3 3' }} content={<RateTip />} />
-            {RATE_SERIES.map((r) => (
-              <Area
-                key={r.key}
-                type="linear"
-                dataKey={r.key}
-                name={r.label}
-                stroke={r.color}
-                strokeWidth={1.8}
-                fill={`url(#iq-grad-${r.key})`}
-                connectNulls={false}
-                // 每小時都打點，數值一格一格看得到；MN 一天只有一點，不打點會看不見
-                dot={{ r: r.key === 'midnight' ? 4 : 2.5, fill: '#fff', stroke: r.color, strokeWidth: 1.5 }}
-                activeDot={{ r: 4, stroke: '#fff', strokeWidth: 2 }}
-                isAnimationActive={false}
-              />
-            ))}
-          </AreaChart>
-        </ResponsiveContainer>
+        </div>
+
+        {/* ─── 右側：MN 午夜資料整張卡片（MDMS style：淡青藍底色、無藍點、無底部備註、顯示％與日期幾時幾分） ─── */}
+        <div
+          className="flex w-[240px] shrink-0 flex-col rounded-lg border p-3"
+          style={{
+            background: '#EAF6FA',
+            borderColor: 'rgba(26, 159, 196, 0.22)',
+          }}
+        >
+          {/* 卡片標題列 */}
+          <div
+            className="flex items-center justify-between pb-2 border-b"
+            style={{ borderColor: 'rgba(26, 159, 196, 0.16)' }}
+          >
+            <span className="text-[12.5px] font-semibold text-ink">午夜資料</span>
+            <span className="text-[11px] font-medium text-ink-sub tabular-nums">
+              {mnRecords.length} 筆回報
+            </span>
+          </div>
+
+          {/* 條列內容 */}
+          <div className="flex flex-1 flex-col divide-y divide-sky-200/50 overflow-y-auto">
+            {mnRecords.map((r) => {
+              const isMiss = r.status === '缺漏'
+              return (
+                <div
+                  key={r.id}
+                  className="flex items-center justify-between py-2.5 text-[12.5px]"
+                >
+                  <div className="flex items-center gap-1.5 tabular-nums text-ink">
+                    <span>{r.time}</span>
+                    {r.type === '自動補抄' && (
+                      <span className="rounded bg-sky-100/90 text-sky-800 border border-sky-300/70 px-1 py-0.2 text-[10px] font-medium">
+                        補抄
+                      </span>
+                    )}
+                  </div>
+                  <span
+                    className="font-bold tabular-nums"
+                    style={{ color: isMiss ? statusTok.danger.fg : '#1A9FC4' }}
+                  >
+                    {r.rate}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
       </div>
     </div>
   )
 }
 
-function RateTip({ active, payload }: { active?: boolean; payload?: Array<{ payload: HourPoint }> }) {
+function RateTip({
+  active,
+  payload,
+  focus,
+}: {
+  active?: boolean
+  payload?: Array<{ payload: HourPoint }>
+  focus?: ChartKey | null
+}) {
   const p = active ? payload?.[0]?.payload : null
   if (!p) return null
+
+  // 若有單獨聚焦，只顯示該指標；否則同時顯示 LP 與 ALT
+  const seriesToShow = focus ? CHART_SERIES.filter((r) => r.key === focus) : CHART_SERIES
+
   return (
-    <div className="min-w-[220px] rounded-lg border border-border bg-surface px-3 py-2 text-[12px] shadow-card">
+    <div className="min-w-[190px] rounded-lg border border-border bg-surface px-3 py-2 text-[12px] shadow-card">
       <div className="mb-1 tabular-nums text-ink-sub">{p.full}</div>
       {p.v === null && <div className="mb-1" style={{ color: statusTok.danger.fg }}>該小時無連線</div>}
-      {RATE_SERIES.map((r) => {
+      {seriesToShow.map((r) => {
         const c = p.cnt[r.key]
         return (
           <div key={r.key} className="flex items-center gap-2 leading-[1.8]">
@@ -414,71 +607,125 @@ function RateTip({ active, payload }: { active?: boolean; payload?: Array<{ payl
 }
 
 /**
- * 訊號強度分級（2026-11-19 業主：負數不好讀）—— 圖上 Y 軸改標 強／中／弱 三帶，不直接標負數；
- * 實際 dBm 留在滑過提示與連線紀錄表。數值越大（越接近 0）越好，所以圖往上＝變好。
+ * 訊號強度分級與色卡設定：
+ * - 圖表左側 Y 軸標記明確的 dBm 數值，數值越大（越接近 0）代表訊號越強。
+ * - 強 / 中 / 弱 獨立以色卡呈現，對應圖表中三帶背景色與門檻線。
  */
 const SIG_FLOOR = -120
 const SIG_CEIL = -50
+const SIG_TICKS = [-120, -100, -85, -70, -50]
 const SIG_GRADES = [
-  { label: '強', min: -85, max: SIG_CEIL, fill: '#EEF7EE', color: '#2E7D32' },
-  { label: '中', min: -100, max: -85, fill: '#F7F7F2', color: '#6A7282' },
-  { label: '弱', min: SIG_FLOOR, max: -100, fill: '#FBEFEF', color: statusTok.danger.fg },
+  {
+    label: '強',
+    min: -85,
+    max: SIG_CEIL,
+    fill: '#ECFDF5',
+    color: '#059669',
+    cardBg: '#F0FDF4',
+    cardBorder: '#BBF7D0',
+    range: '≥ -85 dBm',
+  },
+  {
+    label: '中',
+    min: -100,
+    max: -85,
+    fill: '#FFFBEB',
+    color: '#D97706',
+    cardBg: '#FFFDF5',
+    cardBorder: '#FDE68A',
+    range: '-85 ~ -100 dBm',
+  },
+  {
+    label: '弱',
+    min: SIG_FLOOR,
+    max: -100,
+    fill: '#FEF2F2',
+    color: '#DC2626',
+    cardBg: '#FEF2F2',
+    cardBorder: '#FECACA',
+    range: '< -100 dBm',
+  },
 ] as const
 const gradeOf = (v: number) => SIG_GRADES.find((g) => v >= g.min) ?? SIG_GRADES[2]
 
 function SignalCard({ title, hint, points, empty }: { title: string; hint: string; points: HourPoint[]; empty: string }) {
   const has = points.some((p) => p.v !== null)
   const line = statusTok.info.fg
+  const validTotal = points.filter((p) => p.v !== null).length
+
   return (
     <div className="flex min-h-0 flex-col rounded-card border border-border bg-surface p-4 shadow-card">
       <div className="flex items-baseline justify-between gap-3">
         <SectionTitle title={title} />
         <span className="text-[12px] text-ink-mut">{hint}</span>
       </div>
+
       {has ? (
-        <div className="mt-2 min-h-[180px] flex-1">
-          <ResponsiveContainer width="100%" height="100%">
-            {/* 面積從底部往上長：像訊號格「越滿越好」，不用讀負數 */}
-            <AreaChart data={points} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
-              <defs>
-                <linearGradient id="sigFill" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor={line} stopOpacity={0.28} />
-                  <stop offset="100%" stopColor={line} stopOpacity={0.04} />
-                </linearGradient>
-              </defs>
-              {SIG_GRADES.map((g) => (
-                <ReferenceArea key={g.label} y1={g.min} y2={g.max} fill={g.fill} fillOpacity={1} stroke="none" ifOverflow="hidden" />
-              ))}
-              {[-100, -85].map((y) => <ReferenceLine key={y} y={y} stroke="#E2E5EA" strokeDasharray="3 3" />)}
-              <XAxis dataKey="label" tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: '#6A7282' }} interval={1} />
-              <YAxis
-                domain={[SIG_FLOOR, SIG_CEIL]}
-                ticks={SIG_GRADES.map((g) => (g.min + g.max) / 2)}
-                tickFormatter={(v: number) => gradeOf(v).label}
-                tick={(props: { x: number; y: number; payload: { value: number } }) => {
-                  const g = gradeOf(props.payload.value)
-                  return <text x={props.x - 4} y={props.y} dy={4} textAnchor="end" fontSize={12} fontWeight={600} fill={g.color}>{g.label}</text>
-                }}
-                tickLine={false}
-                axisLine={false}
-                width={32}
-              />
-              <Tooltip cursor={{ stroke: '#C9CDD4', strokeDasharray: '3 3' }} content={<SigTip />} />
-              <Area
-                dataKey="v"
-                type="monotone"
-                baseValue={SIG_FLOOR}
-                stroke={line}
-                strokeWidth={2}
-                fill="url(#sigFill)"
-                connectNulls={false}
-                dot={{ r: 3, fill: '#fff', stroke: line, strokeWidth: 2 }}
-                activeDot={{ r: 5 }}
-                isAnimationActive={false}
-              />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
+        <>
+          {/* 強 / 中 / 弱 色卡對應 */}
+          <div className="mt-3 grid grid-cols-3 gap-2">
+            {SIG_GRADES.map((g) => {
+              const count = points.filter((p) => p.v !== null && gradeOf(p.v).label === g.label).length
+              const pct = validTotal > 0 ? Math.round((count / validTotal) * 100) : 0
+              return (
+                <div
+                  key={g.label}
+                  className="rounded-lg border px-3 py-2 transition-shadow"
+                  style={{ background: g.cardBg, borderColor: g.cardBorder }}
+                  title={`訊號${g.label}：${g.range}，近 24 小時共 ${count} 筆 (${pct}%)`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-[12px] font-semibold text-ink">訊號{g.label}</span>
+                    <span className="text-[11px] font-medium text-ink-sub tabular-nums">{g.range}</span>
+                  </div>
+                  <div className="mt-0.5 flex items-baseline gap-1.5 tabular-nums">
+                    <b className="text-[20px] font-bold" style={{ color: g.color }}>
+                      {count}
+                    </b>
+                    <span className="text-[12px] text-ink-sub">
+                      / {validTotal} 筆<span className="ml-1 text-[11px] text-ink-mut">({pct}%)</span>
+                    </span>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+
+          <div className="mt-2 min-h-[180px] flex-1">
+            <ResponsiveContainer width="100%" height="100%">
+              {/* 純折線圖：保留強/中/弱綠黃紅背景分級色塊與門檻線，移除曲線下方的漸層面積底色 */}
+              <LineChart data={points} margin={{ top: 12, right: 16, bottom: 0, left: 0 }}>
+                {SIG_GRADES.map((g) => (
+                  <ReferenceArea key={g.label} y1={g.min} y2={g.max} fill={g.fill} fillOpacity={0.85} stroke="none" ifOverflow="hidden" />
+                ))}
+                {[-100, -85].map((y) => (
+                  <ReferenceLine key={y} y={y} stroke="#CBD5E1" strokeDasharray="3 3" />
+                ))}
+                <XAxis dataKey="label" tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: '#6A7282' }} interval={1} />
+                <YAxis
+                  domain={[SIG_FLOOR, SIG_CEIL]}
+                  ticks={SIG_TICKS}
+                  tickFormatter={(v: number) => `${v} dBm`}
+                  tickLine={false}
+                  axisLine={false}
+                  tick={{ fontSize: 11, fill: '#6A7282' }}
+                  width={62}
+                />
+                <Tooltip cursor={{ stroke: '#C9CDD4', strokeDasharray: '3 3' }} content={<SigTip />} />
+                <Line
+                  dataKey="v"
+                  type="monotone"
+                  stroke={line}
+                  strokeWidth={2}
+                  connectNulls={false}
+                  dot={{ r: 3, fill: '#fff', stroke: line, strokeWidth: 2 }}
+                  activeDot={{ r: 5 }}
+                  isAnimationActive={false}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </>
       ) : (
         <div className="grid flex-1 place-items-center text-[13px] text-ink-mut">{empty}</div>
       )}
@@ -489,11 +736,20 @@ function SignalCard({ title, hint, points, empty }: { title: string; hint: strin
 function SigTip({ active, payload }: { active?: boolean; payload?: Array<{ payload: HourPoint }> }) {
   const p = active ? payload?.[0]?.payload : null
   if (!p) return null
+  const g = p.v !== null ? gradeOf(p.v) : null
   return (
     <div className="rounded-lg border border-border bg-surface px-3 py-2 text-[12px] shadow-card">
       <div className="tabular-nums text-ink-sub">{p.full}</div>
-      <div className="mt-0.5 font-semibold tabular-nums text-ink">
-        {p.v === null ? '無連線' : <>訊號{gradeOf(p.v).label}<span className="ml-1.5 font-normal text-ink-sub">{p.v} dBm</span></>}
+      <div className="mt-0.5 flex items-center gap-1.5 font-semibold tabular-nums text-ink">
+        {p.v === null ? (
+          <span style={{ color: statusTok.danger.fg }}>無連線</span>
+        ) : (
+          <>
+            <span className="size-2 rounded-full" style={{ background: g?.color }} />
+            <span>訊號{g?.label}</span>
+            <span className="ml-1 font-normal text-ink-sub">{p.v} dBm</span>
+          </>
+        )}
       </div>
     </div>
   )
