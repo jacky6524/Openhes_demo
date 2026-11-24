@@ -1,5 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, Bot, Check, Copy, Download, RotateCw, Trash2, User } from 'lucide-react'
+import {
+  AlertTriangle,
+  Bot,
+  Calendar,
+  Check,
+  Clock,
+  Copy,
+  Download,
+  Pencil,
+  RotateCw,
+  Trash2,
+  User,
+} from 'lucide-react'
 import { SquareChartIcon } from '@/components/shared/SquareChartIcon'
 import { Th, InfiniteFooter, useInfiniteRows } from '@/components/table/tableBits'
 import { PageTitle } from '@/components/shared/PageTitle'
@@ -49,6 +61,44 @@ type DataType = (typeof DATA_TYPES)[number]
 /** 每顆電表每天幾筆（預估用） */
 const PER_DAY: Record<DataType, number> = { LP: 96, ALT: 24, MN: 1, EVENT: 2, DRR: 1 / 30 }
 
+type ScheduleFreq = 'daily' | 'weekly' | 'monthly'
+type ScheduleRangePreset = 'yesterday' | 'last3days' | 'last7days' | 'lastWeek' | 'lastMonth'
+
+const FREQ_LABELS: Record<ScheduleFreq, string> = {
+  daily: '每日',
+  weekly: '每週',
+  monthly: '每月',
+}
+const RANGE_PRESET_LABELS: Record<ScheduleRangePreset, string> = {
+  yesterday: '昨日資料（前 1 日全天）',
+  last3days: '近 3 日資料',
+  last7days: '近 7 日資料',
+  lastWeek: '上週全週（週一至週日）',
+  lastMonth: '上月全月（1 日至月底）',
+}
+const WEEK_DAYS = ['週一', '週二', '週三', '週四', '週五', '週六', '週日']
+const TIME_OPTIONS = ['04:00', '04:30', '05:00', '05:30', '06:00', '07:00', '08:00', '12:00', '18:00', '23:00']
+
+interface Schedule {
+  id: string
+  name: string
+  type: ReportType
+  cases: string[]
+  office: string
+  group: string
+  freq: ScheduleFreq
+  time: string // '04:00'
+  dayOfWeek: number // 1..7 (for weekly)
+  dayOfMonth: number // 1..28 (for monthly)
+  rangePreset: ScheduleRangePreset
+  format: 'xlsx' | 'csv'
+  encoding: 'UTF-8' | 'Big5'
+  enabled: boolean
+  lastRunAt: number | null
+  nextRunAt: number
+  note: string
+}
+
 interface Form {
   type: ReportType
   cases: string[] // 案別 id；空＝全部
@@ -65,11 +115,29 @@ interface Form {
   format: 'xlsx' | 'csv'
   encoding: 'UTF-8' | 'Big5'
   note: string
+
+  // 排程相關選項
+  mode: 'instant' | 'schedule'
+  scheduleFreq: ScheduleFreq
+  scheduleTime: string
+  scheduleDayOfWeek: number
+  scheduleDayOfMonth: number
+  scheduleRange: ScheduleRangePreset
+  scheduleName: string
+  scheduleEnabled: boolean
 }
-const emptyForm = (type: ReportType = '電表狀態報表'): Form => ({
+const emptyForm = (type: ReportType = '電表狀態報表', mode: 'instant' | 'schedule' = 'instant'): Form => ({
   type, cases: [], office: '', group: '', from: '2026-11-12', to: '2026-11-18',
   commMode: '', meterClass: '', billingDay: '', dataTypes: ['LP'], drStart: '2026-11-18', drDays: '1',
   format: 'xlsx', encoding: 'UTF-8', note: '',
+  mode,
+  scheduleFreq: 'daily',
+  scheduleTime: '04:00',
+  scheduleDayOfWeek: 1,
+  scheduleDayOfMonth: 1,
+  scheduleRange: 'yesterday',
+  scheduleName: `每日自動產生 - ${type}`,
+  scheduleEnabled: true,
 })
 
 /* ───────────────────────── 預估 ───────────────────────── */
@@ -78,6 +146,14 @@ const EXCEL_ROWS = 1_048_576
 /** mock：各案別電表數 */
 const CASE_METERS: Record<string, number> = { case1: 82_000, case2: 126_000, case3: 64_000, case4: 91_000, case5: 73_000 }
 const days = (f: Form) => {
+  if (f.mode === 'schedule') {
+    switch (f.scheduleRange) {
+      case 'yesterday': return 1
+      case 'last3days': return 3
+      case 'last7days': case 'lastWeek': return 7
+      case 'lastMonth': return 30
+    }
+  }
   const a = Date.parse(f.from), b = Date.parse(f.to)
   return Number.isFinite(a) && Number.isFinite(b) ? Math.max(1, Math.round(Math.abs(b - a) / 86_400_000) + 1) : 1
 }
@@ -90,20 +166,18 @@ function estimate(f: Form): Estimate {
     if (f.office) meters = Math.round(meters / 9)
     if (f.group) meters = Math.min(meters, 20 + (f.group.length * 37) % 400)
   }
-  if (f.type === '電表狀態報表') {
-    if (f.commMode) meters = Math.round(meters / 3)
-    if (f.meterClass) meters = Math.round(meters / 3)
-    if (f.billingDay) meters = Math.round(meters / 28)
-  }
+  if (f.commMode) meters = Math.round(meters / 3)
+  if (f.meterClass) meters = Math.round(meters / 3)
+  if (f.billingDay) meters = Math.round(meters / 28)
   let rows: number
   let bytes: number
   switch (f.type) {
     case 'DCU狀態報表': rows = Math.ceil(meters / 280); bytes = 260; break
     case '電表狀態報表': rows = meters; bytes = 240; break
-    case '讀表資料': rows = Math.round(meters * days(f) * f.dataTypes.reduce((s, t) => s + PER_DAY[t], 0)); bytes = 64; break
-    case '電表讀表問題報表': rows = Math.round(meters * 0.04 * Math.min(days(f), 7)); bytes = 180; break
-    case '註冊錯誤報表': rows = Math.round(meters * 0.002 * days(f)); bytes = 200; break
-    case '台電DR執行清單': rows = Math.round(meters * 0.08 * Math.max(1, Number(f.drDays) || 1)); bytes = 150; break
+    case '讀表資料': rows = Math.round(meters * 96); bytes = 64; break
+    case '電表讀表問題報表': rows = Math.round(meters * 0.04 * 7); bytes = 180; break
+    case '註冊錯誤報表': rows = Math.round(meters * 0.002 * 7); bytes = 200; break
+    case '台電DR執行清單': rows = Math.round(meters * 0.08 * 3); bytes = 150; break
     case '台電未穩定收值報表': rows = Math.round(meters * 0.015); bytes = 160; break
   }
   const files = f.format === 'xlsx' ? Math.max(1, Math.ceil(rows / (EXCEL_ROWS - 1))) : 1
@@ -116,21 +190,16 @@ const slash = (d: string) => d.replace(/-/g, '/')
 
 /** 條件摘要（任務清單報表類型下方那行） */
 function summarize(f: Form): string {
-  const meta = TYPE_META[f.type]
   const parts: string[] = []
-  if (meta.scope || f.type === '台電DR執行清單') {
-    parts.push(f.cases.length ? f.cases.map((id) => CASES.find((c) => c.id === id)?.name ?? id).join('、') : '全部案別')
+  parts.push(f.cases.length ? f.cases.map((id) => CASES.find((c) => c.id === id)?.name ?? id).join('、') : '全部案別')
+  if (f.office) parts.push(f.office)
+  if (f.group) parts.push(`群組 ${f.group.split(':')[1]}`)
+  if (f.commMode) parts.push(f.commMode)
+  if (f.meterClass) parts.push(f.meterClass)
+  if (f.billingDay) parts.push(`計費日 ${f.billingDay}`)
+  if (f.mode === 'schedule') {
+    parts.push(RANGE_PRESET_LABELS[f.scheduleRange])
   }
-  if (meta.scope && f.office) parts.push(f.office)
-  if (meta.scope && f.group) parts.push(`群組 ${f.group.split(':')[1]}`)
-  if (meta.range) parts.push(`${slash(f.from)}～${slash(f.to)}`)
-  if (f.type === '讀表資料') parts.push(f.dataTypes.join('/'))
-  if (f.type === '電表狀態報表') {
-    if (f.commMode) parts.push(f.commMode)
-    if (f.meterClass) parts.push(f.meterClass)
-    if (f.billingDay) parts.push(`計費日 ${f.billingDay}`)
-  }
-  if (f.type === '台電DR執行清單') parts.push(`${slash(f.drStart)} 起 ${f.drDays} 天`)
   parts.push(f.format === 'csv' ? `CSV ${f.encoding}` : 'Excel')
   return parts.join(' · ')
 }
@@ -169,18 +238,18 @@ const newId = () => (seq += 0x1f3).toString(16) + 'cde4109fd949ed'
 const SEED: Array<[ReportType, 'auto' | 'manual', string, number, JobState, string, Partial<Form>]> = [
   ['DCU狀態報表', 'manual', '114-FET 例行', 1.2, 'done', '', { cases: ['case5'] }],
   ['讀表資料', 'manual', '', 0.3, 'running', '', { dataTypes: ['LP', 'ALT'], cases: ['case2'] }],
-  ['電表狀態報表', 'auto', '自動產生報表', 4.1, 'done', '', {}],
-  ['電表狀態報表', 'auto', '自動產生報表', 4.3, 'done', '', { cases: ['case2'] }],
-  ['DCU狀態報表', 'auto', '自動產生報表', 4.4, 'done', '', { cases: ['case2'] }],
-  ['電表讀表問題報表', 'auto', '自動產生報表', 4.7, 'done', '', {}],
-  ['台電未穩定收值報表', 'auto', '自動產生報表', 5.0, 'done', '', {}],
+  ['電表狀態報表', 'auto', '每日全案別電表狀態例行報表', 4.1, 'done', '', {}],
+  ['電表狀態報表', 'auto', '四五案電表狀態晨間排程', 4.3, 'done', '', { cases: ['case2'] }],
+  ['DCU狀態報表', 'auto', '四五案 DCU 狀態每日例行報表', 4.4, 'done', '', { cases: ['case2'] }],
+  ['電表讀表問題報表', 'auto', '電表讀表問題近3日自動追蹤', 4.7, 'done', '', {}],
+  ['台電未穩定收值報表', 'auto', '台電未穩定收值每週追蹤報表', 5.0, 'done', '', {}],
   ['讀表資料', 'manual', '北南區處 LP 抽查', 5.3, 'error', '查詢逾時：資料量過大，請縮短區間或分案別產生', { dataTypes: ['LP'], from: '2026-10-19', to: '2026-11-18' }],
   ['台電DR執行清單', 'manual', '', 6.2, 'done', '', { drDays: '3' }],
-  ['電表狀態報表', 'auto', '自動產生報表', 28.3, 'done', '', { cases: ['case1'] }],
-  ['電表狀態報表', 'auto', '自動產生報表', 28.5, 'done', '', { cases: ['case4'] }],
+  ['電表狀態報表', 'auto', '一案電表狀態例行報表', 28.3, 'done', '', { cases: ['case1'] }],
+  ['電表狀態報表', 'auto', '四案電表狀態例行報表', 28.5, 'done', '', { cases: ['case4'] }],
   ['註冊錯誤報表', 'manual', '1117', 50.1, 'done', '', {}],
-  ['DCU狀態報表', 'auto', '自動產生報表', 52.3, 'done', '', { cases: ['case2'] }],
-  ['電表狀態報表', 'auto', '自動產生報表', 148.2, 'done', '', {}],
+  ['DCU狀態報表', 'auto', '四五案 DCU 狀態每日例行報表', 52.3, 'done', '', { cases: ['case2'] }],
+  ['電表狀態報表', 'auto', '每日全案別電表狀態例行報表', 148.2, 'done', '', {}],
   ['讀表資料', 'manual', '月報對帳', 160.0, 'done', '', { dataTypes: ['MN'], from: '2026-10-01', to: '2026-10-31' }],
 ]
 const SEED_JOBS: Job[] = SEED.map(([type, source, note, hoursAgo, state, error, patch], i) => {
@@ -201,6 +270,104 @@ const SEED_JOBS: Job[] = SEED.map(([type, source, note, hoursAgo, state, error, 
   }
 })
 
+const SEED_SCHEDULES: Schedule[] = [
+  {
+    id: 'sch-01',
+    name: '每日全案別電表狀態例行報表',
+    type: '電表狀態報表',
+    cases: [],
+    office: '',
+    group: '',
+    freq: 'daily',
+    time: '04:00',
+    dayOfWeek: 1,
+    dayOfMonth: 1,
+    rangePreset: 'yesterday',
+    format: 'xlsx',
+    encoding: 'UTF-8',
+    enabled: true,
+    lastRunAt: NOW - 5.5 * 3_600_000,
+    nextRunAt: NOW + 18.5 * 3_600_000,
+    note: '自動產生報表',
+  },
+  {
+    id: 'sch-02',
+    name: '四五案 DCU 狀態每日例行報表',
+    type: 'DCU狀態報表',
+    cases: ['case2'],
+    office: '',
+    group: '',
+    freq: 'daily',
+    time: '04:30',
+    dayOfWeek: 1,
+    dayOfMonth: 1,
+    rangePreset: 'yesterday',
+    format: 'xlsx',
+    encoding: 'UTF-8',
+    enabled: true,
+    lastRunAt: NOW - 5.2 * 3_600_000,
+    nextRunAt: NOW + 19.0 * 3_600_000,
+    note: '自動產生報表',
+  },
+  {
+    id: 'sch-03',
+    name: '電表讀表問題近3日自動追蹤',
+    type: '電表讀表問題報表',
+    cases: [],
+    office: '',
+    group: '',
+    freq: 'daily',
+    time: '04:45',
+    dayOfWeek: 1,
+    dayOfMonth: 1,
+    rangePreset: 'last3days',
+    format: 'xlsx',
+    encoding: 'UTF-8',
+    enabled: true,
+    lastRunAt: NOW - 4.9 * 3_600_000,
+    nextRunAt: NOW + 19.25 * 3_600_000,
+    note: '自動產生報表',
+  },
+  {
+    id: 'sch-04',
+    name: '台電未穩定收值每週追蹤報表',
+    type: '台電未穩定收值報表',
+    cases: [],
+    office: '',
+    group: '',
+    freq: 'weekly',
+    time: '05:00',
+    dayOfWeek: 1,
+    dayOfMonth: 1,
+    rangePreset: 'lastWeek',
+    format: 'xlsx',
+    encoding: 'UTF-8',
+    enabled: true,
+    lastRunAt: NOW - 48.0 * 3_600_000,
+    nextRunAt: NOW + 120.0 * 3_600_000,
+    note: '自動產生報表',
+  },
+  {
+    id: 'sch-05',
+    name: '全區處月度讀表資料定時匯總',
+    type: '讀表資料',
+    cases: [],
+    office: '',
+    group: '',
+    freq: 'monthly',
+    time: '05:30',
+    dayOfWeek: 1,
+    dayOfMonth: 1,
+    rangePreset: 'lastMonth',
+    format: 'xlsx',
+    encoding: 'UTF-8',
+    enabled: false,
+    lastRunAt: NOW - 432.0 * 3_600_000,
+    nextRunAt: NOW + 288.0 * 3_600_000,
+    note: '月報定時產出',
+  },
+]
+
 /* ───────────────────────── 頁面 ───────────────────────── */
 
 const CTL = 'h-9 rounded-md border border-border bg-surface px-3 text-[13px] text-ink placeholder:text-ink-mut focus:outline-none focus:border-brand'
@@ -211,6 +378,9 @@ const isActive = (s: JobState) => s === 'queued' || s === 'running'
 export function StatsReport() {
   const [form, setForm] = useState<Form>(() => emptyForm())
   const [jobs, setJobs] = useState<Job[]>(SEED_JOBS)
+  const [schedules, setSchedules] = useState<Schedule[]>(SEED_SCHEDULES)
+  const [showScheduleModal, setShowScheduleModal] = useState(false)
+  const [editingScheduleId, setEditingScheduleId] = useState<string | null>(null)
   const [notice, setNotice] = useState('')
   const [tab, setTab] = useState<StateTab>('all')
   const [typeFilter, setTypeFilter] = useState<string>('')
@@ -225,7 +395,7 @@ export function StatsReport() {
   const est = useMemo(() => estimate(form), [form])
   const meta = TYPE_META[form.type]
   const over = form.format === 'xlsx' && est.files > 1
-  const invalid = (form.type === '讀表資料' && form.dataTypes.length === 0) || (meta.range && form.from > form.to)
+  const invalid = form.mode === 'schedule' && !form.scheduleName.trim()
 
   // 模擬：排隊 → 產生中（同時最多 2 個）→ 完成
   useEffect(() => {
@@ -246,12 +416,100 @@ export function StatsReport() {
 
   const submit = () => {
     if (invalid) return
-    const job: Job = { id: newId(), form, source: 'manual', owner: 'admin', createdAt: NOW, finishedAt: null, progress: 0, state: 'queued', error: '', est }
-    setJobs((all) => [job, ...all])
-    setTab('all'); setTypeFilter(''); setSourceFilter(''); setQ('')
-    setNotice(`已送出「${form.type}」，產生完成後可在下方清單下載`)
-    scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
+    if (form.mode === 'schedule') {
+      if (editingScheduleId) {
+        const schName = form.scheduleName.trim() || `自動產生報表 - ${form.type}`
+        setSchedules((all) =>
+          all.map((s) =>
+            s.id === editingScheduleId
+              ? {
+                  ...s,
+                  name: schName,
+                  type: form.type,
+                  cases: form.cases,
+                  office: form.office,
+                  group: form.group,
+                  freq: form.scheduleFreq,
+                  time: form.scheduleTime,
+                  dayOfWeek: form.scheduleDayOfWeek,
+                  dayOfMonth: form.scheduleDayOfMonth,
+                  rangePreset: form.scheduleRange,
+                  format: form.format,
+                  encoding: form.encoding,
+                  enabled: form.scheduleEnabled,
+                  note: form.note || schName,
+                }
+              : s,
+          ),
+        )
+        setNotice(`已更新排程設定「${schName}」`)
+        setEditingScheduleId(null)
+      } else {
+        const schName = form.scheduleName.trim() || `自動產生報表 - ${form.type}`
+        const newSch: Schedule = {
+          id: `sch-${Date.now().toString(36)}`,
+          name: schName,
+          type: form.type,
+          cases: form.cases,
+          office: form.office,
+          group: form.group,
+          freq: form.scheduleFreq,
+          time: form.scheduleTime,
+          dayOfWeek: form.scheduleDayOfWeek,
+          dayOfMonth: form.scheduleDayOfMonth,
+          rangePreset: form.scheduleRange,
+          format: form.format,
+          encoding: form.encoding,
+          enabled: form.scheduleEnabled,
+          lastRunAt: null,
+          nextRunAt: NOW + 18.5 * 3_600_000,
+          note: form.note || schName,
+        }
+        setSchedules((all) => [newSch, ...all])
+        setNotice(`已建立自動排程「${newSch.name}」（${FREQ_LABELS[newSch.freq]} ${newSch.time} 執行）`)
+      }
+    } else {
+      const job: Job = { id: newId(), form, source: 'manual', owner: 'admin', createdAt: NOW, finishedAt: null, progress: 0, state: 'queued', error: '', est }
+      setJobs((all) => [job, ...all])
+      setTab('all'); setTypeFilter(''); setSourceFilter(''); setQ('')
+      setNotice(`已送出「${form.type}」，產生完成後可在下方清單下載`)
+      scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
+    }
   }
+
+  const editSchedule = (s: Schedule) => {
+    setForm({
+      ...emptyForm(s.type, 'schedule'),
+      cases: s.cases,
+      office: s.office,
+      group: s.group,
+      format: s.format,
+      encoding: s.encoding,
+      note: s.note,
+      mode: 'schedule',
+      scheduleFreq: s.freq,
+      scheduleTime: s.time,
+      scheduleDayOfWeek: s.dayOfWeek,
+      scheduleDayOfMonth: s.dayOfMonth,
+      scheduleRange: s.rangePreset,
+      scheduleName: s.name,
+      scheduleEnabled: s.enabled,
+    })
+    setEditingScheduleId(s.id)
+    setShowScheduleModal(false)
+    topRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }
+
+  const toggleSchedule = (id: string) => {
+    setSchedules((all) =>
+      all.map((s) => (s.id === id ? { ...s, enabled: !s.enabled } : s)),
+    )
+  }
+
+  const deleteSchedule = (id: string) => {
+    setSchedules((all) => all.filter((s) => s.id !== id))
+  }
+
   const retry = (j: Job) => setJobs((all) => all.map((x) => (x.id === j.id ? { ...x, state: 'queued', progress: 0, error: '', createdAt: NOW, finishedAt: null } : x)))
 
   const counts = {
@@ -275,7 +533,50 @@ export function StatsReport() {
 
       {/* ── 產生報表 ── */}
       <section className="shrink-0 rounded-card border border-border bg-surface p-5 shadow-card">
-        <SectionTitle title="產生報表" />
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <SectionTitle title="產生報表" />
+
+          <div className="flex items-center gap-2">
+            {editingScheduleId && (
+              <span className="inline-flex items-center gap-1.5 rounded-lg border border-brand/30 bg-brand-soft px-2.5 py-1 text-[12px] font-medium text-brand">
+                <span>編輯排程中</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingScheduleId(null)
+                    set('scheduleName', `每日自動產生 - ${form.type}`)
+                  }}
+                  className="ml-1 text-[11px] underline hover:opacity-80"
+                >
+                  取消
+                </button>
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => setShowScheduleModal(true)}
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-[13px] font-semibold text-ink-sub hover:border-brand hover:text-brand transition-colors"
+            >
+              <Clock size={14} />
+              <span>排程管理</span>
+            </button>
+          </div>
+        </div>
+
+        {/* 標題下方：手動產生 / 排程設定 圓角膠囊 Tab（參考 MDMS 查詢） */}
+        <div className="mt-3">
+          <PillTabs
+            tabs={[
+              { key: 'instant', label: '手動產生' },
+              { key: 'schedule', label: '排程設定' },
+            ]}
+            value={form.mode}
+            onChange={(m) => {
+              set('mode', m)
+              if (m === 'instant') setEditingScheduleId(null)
+            }}
+          />
+        </div>
 
         {/* ── 篩選條件 ── */}
         <div className="mt-4 flex flex-col gap-3">
@@ -283,81 +584,56 @@ export function StatsReport() {
             <Labeled label="報表類型">
               <select
                 value={form.type}
-                onChange={(e) => setForm((f) => ({ ...emptyForm(e.target.value as ReportType), cases: f.cases, office: f.office, format: f.format, encoding: f.encoding, note: f.note }))}
+                onChange={(e) => {
+                  const newType = e.target.value as ReportType
+                  setForm((f) => ({
+                    ...emptyForm(newType, f.mode),
+                    cases: f.cases,
+                    office: f.office,
+                    group: f.group,
+                    commMode: f.commMode,
+                    meterClass: f.meterClass,
+                    billingDay: f.billingDay,
+                    format: f.format,
+                    encoding: f.encoding,
+                    note: f.note,
+                    scheduleFreq: f.scheduleFreq,
+                    scheduleTime: f.scheduleTime,
+                    scheduleRange: f.scheduleRange,
+                    scheduleName: `每日自動產生 - ${newType}`,
+                  }))
+                }}
                 className={`${CTL} w-[190px] font-medium`}
               >
                 {REPORT_TYPES.map((t) => <option key={t}>{t}</option>)}
               </select>
             </Labeled>
 
-            {(meta.scope || form.type === '台電DR執行清單') && (
-              <Labeled label="案別" hint="可複選">
-                <MultiSelect
-                  options={CASE_OPTIONS}
-                  value={form.cases}
-                  onChange={(cases) => set('cases', cases)}
-                  placeholder="全部案別"
-                  width={200}
-                />
-              </Labeled>
-            )}
-
-            {meta.scope && (
-              <>
-                <Labeled label="區處">
-                  <select value={form.office} onChange={(e) => set('office', e.target.value)} className={`${CTL} w-[130px]`}>
-                    <option value="">全部</option>
-                    {OFFICES.map((o) => <option key={o}>{o}</option>)}
-                  </select>
-                </Labeled>
-                <Labeled label="群組" hint="選填">
-                  <GroupSelect value={form.group} onChange={(v) => set('group', v)} className="w-[170px]" />
-                </Labeled>
-              </>
-            )}
-
-            {meta.range && (
-              <Labeled label="資料時間">
-                <div className={`${CTL} flex items-center gap-2`}>
-                  <input type="date" value={form.from} max={form.to} onChange={(e) => set('from', e.target.value)} className="bg-transparent tabular-nums focus:outline-none" />
-                  <span className="text-ink-mut">→</span>
-                  <input type="date" value={form.to} min={form.from} onChange={(e) => set('to', e.target.value)} className="bg-transparent tabular-nums focus:outline-none" />
-                  <span className="text-[12px] text-ink-mut font-medium">{days(form)} 天</span>
-                </div>
-              </Labeled>
-            )}
-
-            {meta.extra === 'meterAttr' && (
-              <>
-                <SelectField label="通訊方式" value={form.commMode} options={COMM_MODES} onChange={(v) => set('commMode', v)} width={110} />
-                <SelectField label="電表類別" value={form.meterClass} options={METER_CLASSES} onChange={(v) => set('meterClass', v)} width={110} />
-                <SelectField label="計費日" value={form.billingDay} options={Array.from({ length: 28 }, (_, i) => String(i + 1))} onChange={(v) => set('billingDay', v)} width={90} />
-              </>
-            )}
-
-            {meta.extra === 'dr' && (
-              <>
-                <Labeled label="開始日期">
-                  <input type="date" value={form.drStart} onChange={(e) => set('drStart', e.target.value)} className={`${CTL} w-[140px] tabular-nums`} />
-                </Labeled>
-                <SelectField label="天數" value={form.drDays} options={['1', '2', '3', '5', '7']} onChange={(v) => set('drDays', v || '1')} width={80} noAll />
-              </>
-            )}
-          </div>
-
-          {meta.extra === 'dataTypes' && (
-            <Labeled label="資料類型" hint="可複選；LP 每顆電表每天 96 筆，資料量最大">
-              <div className="flex h-9 items-center gap-4">
-                {DATA_TYPES.map((t) => (
-                  <label key={t} className="flex cursor-pointer items-center gap-1.5 text-[13px] text-ink">
-                    <input type="checkbox" checked={form.dataTypes.includes(t)} onChange={() => set('dataTypes', form.dataTypes.includes(t) ? form.dataTypes.filter((x) => x !== t) : DATA_TYPES.filter((x) => x === t || form.dataTypes.includes(x)))} className="size-4 cursor-pointer accent-danger" />
-                    {t}
-                  </label>
-                ))}
-                {form.dataTypes.length === 0 && <span className="text-[12px] text-danger">請至少選一種</span>}
-              </div>
+            <Labeled label="案別" hint="可複選">
+              <MultiSelect
+                options={CASE_OPTIONS}
+                value={form.cases}
+                onChange={(cases) => set('cases', cases)}
+                placeholder="全部案別"
+                width={200}
+              />
             </Labeled>
-          )}
+
+            <Labeled label="區處">
+              <select value={form.office} onChange={(e) => set('office', e.target.value)} className={`${CTL} w-[130px]`}>
+                <option value="">全部</option>
+                {OFFICES.map((o) => <option key={o}>{o}</option>)}
+              </select>
+            </Labeled>
+
+            <Labeled label="群組" hint="選填">
+              <GroupSelect value={form.group} onChange={(v) => set('group', v)} className="w-[170px]" />
+            </Labeled>
+
+            <SelectField label="通訊方式" value={form.commMode} options={COMM_MODES} onChange={(v) => set('commMode', v)} width={110} />
+            <SelectField label="電表類別" value={form.meterClass} options={METER_CLASSES} onChange={(v) => set('meterClass', v)} width={110} />
+            <SelectField label="計費日" value={form.billingDay} options={Array.from({ length: 28 }, (_, i) => String(i + 1))} onChange={(v) => set('billingDay', v)} width={90} />
+          </div>
 
           <div className="flex flex-wrap items-end gap-3">
             <Labeled label="檔案格式">
@@ -381,14 +657,107 @@ export function StatsReport() {
             <Labeled label="備註" hint="選填，方便在清單裡找">
               <input value={form.note} onChange={(e) => set('note', e.target.value)} placeholder="例：月報對帳、第4季抽查" className={`${CTL} w-[260px]`} />
             </Labeled>
-            <button
-              onClick={submit}
-              disabled={invalid}
-              className="inline-flex h-9 items-center justify-center rounded-lg bg-ink px-4 text-[13px] font-semibold text-white shadow hover:opacity-90 disabled:opacity-40 transition-opacity"
-            >
-              產生報表
-            </button>
+
+            {form.mode === 'instant' && (
+              <button
+                type="button"
+                onClick={submit}
+                disabled={invalid}
+                className="inline-flex h-9 items-center justify-center rounded-lg bg-ink px-4 text-[13px] font-semibold text-white shadow hover:opacity-90 disabled:opacity-40 transition-opacity"
+              >
+                產生報表
+              </button>
+            )}
           </div>
+
+          {/* 排程專屬設定區塊（置於檔案格式下方） */}
+          {form.mode === 'schedule' && (
+            <div className="flex flex-wrap items-end gap-3 rounded-xl border border-brand/20 bg-brand-soft/20 p-3.5">
+              <Labeled label="排程週期">
+                <select
+                  value={form.scheduleFreq}
+                  onChange={(e) => set('scheduleFreq', e.target.value as ScheduleFreq)}
+                  className={`${CTL} w-[110px] bg-surface font-medium`}
+                >
+                  <option value="daily">每日</option>
+                  <option value="weekly">每週</option>
+                  <option value="monthly">每月</option>
+                </select>
+              </Labeled>
+
+              {form.scheduleFreq === 'weekly' && (
+                <Labeled label="執行星期">
+                  <select
+                    value={form.scheduleDayOfWeek}
+                    onChange={(e) => set('scheduleDayOfWeek', Number(e.target.value))}
+                    className={`${CTL} w-[110px] bg-surface`}
+                  >
+                    {WEEK_DAYS.map((w, idx) => (
+                      <option key={w} value={idx + 1}>{w}</option>
+                    ))}
+                  </select>
+                </Labeled>
+              )}
+
+              {form.scheduleFreq === 'monthly' && (
+                <Labeled label="每月日期">
+                  <select
+                    value={form.scheduleDayOfMonth}
+                    onChange={(e) => set('scheduleDayOfMonth', Number(e.target.value))}
+                    className={`${CTL} w-[110px] bg-surface`}
+                  >
+                    {Array.from({ length: 28 }, (_, i) => i + 1).map((d) => (
+                      <option key={d} value={d}>每月 {d} 日</option>
+                    ))}
+                  </select>
+                </Labeled>
+              )}
+
+              <Labeled label="執行時間">
+                <select
+                  value={form.scheduleTime}
+                  onChange={(e) => set('scheduleTime', e.target.value)}
+                  className={`${CTL} w-[110px] bg-surface font-mono`}
+                >
+                  {TIME_OPTIONS.map((t) => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                </select>
+              </Labeled>
+
+              <Labeled label="資料相對區間">
+                <select
+                  value={form.scheduleRange}
+                  onChange={(e) => set('scheduleRange', e.target.value as ScheduleRangePreset)}
+                  className={`${CTL} w-[200px] bg-surface`}
+                >
+                  <option value="yesterday">昨日資料（前 1 日全天）</option>
+                  <option value="last3days">近 3 日資料</option>
+                  <option value="last7days">近 7 日資料</option>
+                  <option value="lastWeek">上週全週（週一至週日）</option>
+                  <option value="lastMonth">上月全月（1 日至月底）</option>
+                </select>
+              </Labeled>
+
+              <Labeled label="排程名稱">
+                <input
+                  value={form.scheduleName}
+                  onChange={(e) => set('scheduleName', e.target.value)}
+                  placeholder="請輸入排程名稱"
+                  className={`${CTL} w-[260px] bg-surface`}
+                />
+              </Labeled>
+
+              <button
+                type="button"
+                onClick={submit}
+                disabled={invalid}
+                className="inline-flex h-9 items-center justify-center rounded-lg bg-ink px-4 text-[13px] font-semibold text-white shadow hover:opacity-90 disabled:opacity-40 transition-opacity"
+              >
+                {editingScheduleId ? '更新排程設定' : '儲存排程設定'}
+              </button>
+            </div>
+          )}
         </div>
 
         {/* ── 下方：送出前預估區塊 ── */}
@@ -396,15 +765,20 @@ export function StatsReport() {
           <div className="flex flex-wrap items-center gap-x-6 gap-y-1.5 text-[13px]">
             <div className="flex items-center gap-2 font-semibold text-ink">
               <span className="size-2 rounded-full bg-brand" />
-              <span>送出前預估</span>
+              <span>{form.mode === 'schedule' ? '排程單期預估' : '送出前預估'}</span>
             </div>
             <div className="flex items-center gap-4 text-ink-sub">
               <span>{form.type === 'DCU狀態報表' ? 'DCU 數' : '電表數'}：<b className="tabular-nums font-semibold text-ink">約 {fmtN(est.meters)}</b></span>
               <span className="text-border">|</span>
-              <span>資料列數：<b className="tabular-nums font-semibold text-ink">約 {fmtN(est.rows)}</b></span>
+              <span>每期資料列數：<b className="tabular-nums font-semibold text-ink">約 {fmtN(est.rows)}</b></span>
               <span className="text-border">|</span>
-              <span>檔案大小：<b className="tabular-nums font-semibold text-ink">約 {fmtSize(est.mb)}</b></span>
+              <span>每期檔案大小：<b className="tabular-nums font-semibold text-ink">約 {fmtSize(est.mb)}</b></span>
             </div>
+            {form.mode === 'schedule' && (
+              <span className="text-[12.5px] font-medium text-brand">
+                （排程規則：{FREQ_LABELS[form.scheduleFreq]} {form.scheduleTime} 自動產出 · {RANGE_PRESET_LABELS[form.scheduleRange]}）
+              </span>
+            )}
             {over ? (
               <div className="flex items-center gap-1.5 text-[12.5px] font-medium" style={{ color: '#B45309' }}>
                 <AlertTriangle size={15} className="shrink-0" />
@@ -412,11 +786,11 @@ export function StatsReport() {
                   超過 Excel 上限，將自動分成 <b>{est.files}</b> 個檔案（ZIP），亦可<button type="button" onClick={() => set('format', 'csv')} className="ml-1 font-semibold underline">改用 CSV</button>
                 </span>
               </div>
-            ) : (
+            ) : form.mode !== 'schedule' ? (
               <span className="text-[12px] text-ink-mut">
                 {form.format === 'xlsx' ? '（在 Excel 上限 1,048,576 列以內，單一檔案。）' : '（CSV 格式不受列數限制）'}
               </span>
-            )}
+            ) : null}
           </div>
 
           {notice && <span className="text-[12.5px] font-semibold" style={{ color: statusTok.normal.fg }}>{notice}</span>}
@@ -571,6 +945,121 @@ export function StatsReport() {
                 <span className="font-medium">備註：</span>{errorModalJob.form.note}
               </div>
             )}
+          </div>
+        </SimpleModal>
+      )}
+
+      {/* ── 排程管理彈窗 ── */}
+      {showScheduleModal && (
+        <SimpleModal
+          title="排程管理"
+          onClose={() => setShowScheduleModal(false)}
+          width={880}
+          actions={
+            <button
+              type="button"
+              onClick={() => {
+                setShowScheduleModal(false)
+                setNotice('排程設定已更新')
+              }}
+              className="inline-flex h-8 items-center justify-center rounded-lg bg-ink px-3.5 text-[13px] font-semibold text-white shadow-sm hover:opacity-90 transition-opacity"
+            >
+              儲存
+            </button>
+          }
+        >
+          <div className="space-y-4">
+            <div className="rounded-xl border border-border overflow-hidden">
+              <table className="w-full text-left text-[13px] border-collapse">
+                <thead>
+                  <tr className="border-b border-border bg-inset/60 text-ink-sub">
+                    <th className="px-3.5 py-2.5 font-medium">排程名稱 / 報表類型</th>
+                    <th className="px-3.5 py-2.5 font-medium">週期與時間</th>
+                    <th className="px-3.5 py-2.5 font-medium">資料區間</th>
+                    <th className="px-3.5 py-2.5 font-medium text-center">狀態</th>
+                    <th className="px-3.5 py-2.5 font-medium">下次執行</th>
+                    <th className="px-3.5 py-2.5 font-medium text-right">操作</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {schedules.map((s) => {
+                    const timeStr =
+                      s.freq === 'daily'
+                        ? `每日 ${s.time}`
+                        : s.freq === 'weekly'
+                        ? `每${WEEK_DAYS[s.dayOfWeek - 1]} ${s.time}`
+                        : `每月 ${s.dayOfMonth} 日 ${s.time}`
+                    return (
+                      <tr key={s.id} className="hover:bg-inset/30 transition-colors">
+                        <td className="px-3.5 py-3">
+                          <div className="font-semibold text-ink">{s.name}</div>
+                          <div className="flex items-center gap-2 text-[12px] text-ink-mut mt-0.5">
+                            <span className="rounded bg-brand-soft px-1.5 py-0.2 text-[11px] font-medium text-brand">
+                              {s.type}
+                            </span>
+                            <span>{s.cases.length ? s.cases.join('、') : '全部案別'}</span>
+                            {s.office && <span>· {s.office}</span>}
+                          </div>
+                        </td>
+                        <td className="px-3.5 py-3 tabular-nums font-medium text-ink">
+                          {timeStr}
+                        </td>
+                        <td className="px-3.5 py-3 text-[12.5px] text-ink-sub">
+                          {RANGE_PRESET_LABELS[s.rangePreset] || s.rangePreset}
+                        </td>
+                        <td className="px-3.5 py-3 text-center">
+                          <button
+                            type="button"
+                            onClick={() => toggleSchedule(s.id)}
+                            title={s.enabled ? '點擊停用排程' : '點擊啟用排程'}
+                            className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                              s.enabled ? 'bg-normal' : 'bg-border-strong'
+                            }`}
+                          >
+                            <span
+                              className={`pointer-events-none inline-block size-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                s.enabled ? 'translate-x-4' : 'translate-x-0'
+                              }`}
+                            />
+                          </button>
+                        </td>
+                        <td className="px-3.5 py-3 tabular-nums text-[12.5px] text-ink-sub">
+                          {s.enabled ? stamp(s.nextRunAt) : <span className="text-ink-mut">已停用</span>}
+                        </td>
+                        <td className="px-3.5 py-3 text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => editSchedule(s)}
+                              title="編輯此排程設定"
+                              className="inline-flex h-7 items-center gap-1 rounded-md border border-border px-2 text-[12px] font-medium text-ink-sub hover:bg-inset hover:text-ink"
+                            >
+                              <Pencil size={11} />
+                              <span>編輯</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => deleteSchedule(s.id)}
+                              title="刪除此排程"
+                              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-mut hover:text-danger hover:bg-danger/10"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                  {schedules.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="px-4 py-8 text-center text-ink-mut">
+                        目前尚無自動排程設定。
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         </SimpleModal>
       )}
