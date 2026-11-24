@@ -53,10 +53,10 @@ function CaseDropdown() {
   const [draft, setDraft] = useState<Set<string>>(new Set(selected))
   const ref = useRef<HTMLDivElement>(null)
 
-  // 打開選單時同步目前已套用的案別
+  // 打開選單時同步目前已套用的案別（未選時預設全勾選）
   const handleToggle = () => {
     if (!open) {
-      setDraft(new Set(selected))
+      setDraft(new Set(selected.size === 0 ? CASES.map((c) => c.id) : selected))
     }
     setOpen((o) => !o)
   }
@@ -104,7 +104,7 @@ function CaseDropdown() {
         <div className="absolute left-0 top-full mt-1.5 z-40 w-[260px] rounded-lg bg-surface border border-border shadow-card py-1 overflow-hidden">
           <div className="flex items-center justify-between px-3 py-1.5 border-b border-divider">
             <span className="text-[11px] font-medium text-ink-sub">案別篩選（可複選）</span>
-            {draft.size > 0 ? (
+            {draft.size === CASES.length ? (
               <button
                 type="button"
                 onClick={() => setDraft(new Set())}
@@ -113,7 +113,13 @@ function CaseDropdown() {
                 清空
               </button>
             ) : (
-              <span className="text-[11px] text-ink-mut">預設全部</span>
+              <button
+                type="button"
+                onClick={() => setDraft(new Set(CASES.map((c) => c.id)))}
+                className="text-[11px] text-brand hover:underline"
+              >
+                全選
+              </button>
             )}
           </div>
           <div className="max-h-[260px] overflow-y-auto py-1">
@@ -142,7 +148,7 @@ function CaseDropdown() {
           </div>
           <div className="flex items-center justify-between gap-2 px-3 py-2 border-t border-divider bg-inset/40">
             <span className="text-[11px] text-ink-mut">
-              {draft.size === 0 ? '全部案別' : `已選 ${draft.size} 項`}
+              {draft.size === 0 || draft.size === CASES.length ? '全部案別' : `已選 ${draft.size} 項`}
             </span>
             <div className="flex items-center gap-1.5">
               <button

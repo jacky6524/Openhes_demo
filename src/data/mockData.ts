@@ -201,8 +201,8 @@ export function buildTaiwanTree(selectedCases?: Set<string>): {
 
   const isCountyDeployed = (c: (typeof COUNTIES)[number]) => {
     if (!hasFilter) {
-      // 未篩選或全選：全選時全開，未選時依預設（TTT 台東為未部署）
-      return selectedCases && selectedCases.size === CASES.length ? true : c.deployed !== false
+      // 未篩選或全選：依預設（TTT 台東為未部署）
+      return c.deployed !== false
     }
     return activeCounties.has(c.id)
   }

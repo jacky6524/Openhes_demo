@@ -52,7 +52,7 @@ interface CaseFilterState {
 }
 
 export const useCaseFilter = create<CaseFilterState>((set) => ({
-  selected: new Set<string>(), // 預設無篩選 → ALL
+  selected: new Set<string>(CASES.map((c) => c.id)), // 預設全部案別皆勾選（全部）
   toggle: (id) =>
     set((s) => {
       const next = new Set(s.selected)
@@ -60,15 +60,15 @@ export const useCaseFilter = create<CaseFilterState>((set) => ({
       return { selected: next }
     }),
   setSelected: (selected) => set({ selected: new Set(selected) }),
-  clear: () => set({ selected: new Set<string>() }),
+  clear: () => set({ selected: new Set<string>(CASES.map((c) => c.id)) }),
 }))
 
 /**
- * 目前案別顯示文字；無篩選 → '全部'。
+ * 目前案別顯示文字；無篩選或全選 → '全部'。
  * 單選 / 複選皆顯示含編碼的完整名（二案(108-FET)、三案(110-CHT)），
  * 讓左上角徽章一眼看得出標案編號與得標廠商。
  */
 export function caseLabel(selected: Set<string>): string {
-  if (selected.size === 0) return '全部'
+  if (selected.size === 0 || selected.size === CASES.length) return '全部'
   return CASES.filter((c) => selected.has(c.id)).map(caseFullName).join('、')
 }
