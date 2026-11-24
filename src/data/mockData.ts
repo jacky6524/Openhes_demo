@@ -2,6 +2,7 @@ import type { RegionNode, RegionMetrics } from '@/types'
 import { rollup, round2 } from '@/lib/aggregate'
 import { overallHealth } from '@/lib/health'
 import { townRoster } from '@/data/geo/geo'
+import { CASES, CASE_COUNTY_MAP } from '@/store/useCaseFilter'
 
 /* ---------- seeded PRNG (deterministic mock) ---------- */
 function mulberry32(seed: number) {
@@ -141,7 +142,7 @@ function finalize(node: RegionNode): RegionNode {
    township roster (id = TOWNCODE) so the region tree and the map geographies
    share keys. 行政區 is the deepest level — no 村里 drill-down; clicking one
    opens the meter-detail drawer. */
-function buildCounty(c: (typeof COUNTIES)[number]): RegionNode {
+function buildCounty(c: (typeof COUNTIES)[number], isDeployed: boolean): RegionNode {
   const r = mulberry32(hashStr(c.id))
   const roster = townRoster(c.name)
   const towns =
@@ -152,14 +153,13 @@ function buildCounty(c: (typeof COUNTIES)[number]): RegionNode {
           name: `${c.name}第${i + 1}區`,
         }))
 
-  const deployed = c.deployed !== false
   const districts: RegionNode[] = towns.map((town) => {
     const dId = town.code
     const rd = mulberry32(hashStr(dId))
     // 行政區 is a leaf — its meter count is the county's share ± variance.
     // 未部署縣市其行政區全無電表；已部署縣市中亦保留少數 (~8%) 尚未佈建的行政區,
     // 讓「無智慧電表」在下鑽層級也看得到區分。
-    const undeployedDistrict = !deployed || rd() < 0.08
+    const undeployedDistrict = !isDeployed || rd() < 0.08
     const dMeters = undeployedDistrict
       ? 0
       : Math.max(300, Math.round((c.meters / towns.length) * (0.6 + rd() * 0.8)))
@@ -185,9 +185,30 @@ function buildCounty(c: (typeof COUNTIES)[number]): RegionNode {
 }
 
 /* ---------- public tree + helpers ---------- */
-export const TAIWAN: RegionNode = (() => {
-  const counties = COUNTIES.map(buildCounty)
-  return finalize({
+
+export function buildTaiwanTree(selectedCases?: Set<string>): {
+  root: RegionNode
+  index: Record<string, RegionNode>
+  countyNodes: RegionNode[]
+} {
+  const hasFilter = !!(selectedCases && selectedCases.size > 0 && selectedCases.size < CASES.length)
+  const activeCounties = new Set<string>()
+  if (hasFilter && selectedCases) {
+    selectedCases.forEach((cid) => {
+      CASE_COUNTY_MAP[cid]?.forEach((id) => activeCounties.add(id))
+    })
+  }
+
+  const isCountyDeployed = (c: (typeof COUNTIES)[number]) => {
+    if (!hasFilter) {
+      // 未篩選或全選：全選時全開，未選時依預設（TTT 台東為未部署）
+      return selectedCases && selectedCases.size === CASES.length ? true : c.deployed !== false
+    }
+    return activeCounties.has(c.id)
+  }
+
+  const counties = COUNTIES.map((c) => buildCounty(c, isCountyDeployed(c)))
+  const root = finalize({
     id: 'TW',
     name: '全台',
     level: 'L1',
@@ -195,18 +216,28 @@ export const TAIWAN: RegionNode = (() => {
     health: 'good',
     children: counties,
   })
-})()
 
-/** flat index by id */
-export const REGION_INDEX: Record<string, RegionNode> = (() => {
-  const idx: Record<string, RegionNode> = {}
+  const index: Record<string, RegionNode> = {}
   const walk = (n: RegionNode) => {
-    idx[n.id] = n
+    index[n.id] = n
     n.children?.forEach(walk)
   }
-  walk(TAIWAN)
-  return idx
-})()
+  walk(root)
 
-export const COUNTY_NODES = TAIWAN.children ?? []
-export const getById = (id: string) => REGION_INDEX[id]
+  return { root, index, countyNodes: root.children ?? [] }
+}
+
+const initialTree = buildTaiwanTree()
+let currentIndex: Record<string, RegionNode> = initialTree.index
+
+export const TAIWAN: RegionNode = initialTree.root
+export const COUNTY_NODES: RegionNode[] = initialTree.countyNodes
+
+/** 依目前套用的案別動態重算全台樹與索引 */
+export function updateTaiwanTree(selectedCases?: Set<string>) {
+  const next = buildTaiwanTree(selectedCases)
+  currentIndex = next.index
+  return next
+}
+
+export const getById = (id: string) => currentIndex[id]

@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { MetricKey, RegionNode } from '@/types'
-import { TAIWAN, getById } from '@/data/mockData'
+import { TAIWAN, getById, updateTaiwanTree } from '@/data/mockData'
+import { useCaseFilter } from '@/store/useCaseFilter'
 
 interface DashboardState {
   selectedKpi: MetricKey // active KPI → map colour + shared card (default 'lp')
@@ -13,6 +14,7 @@ interface DashboardState {
   jumpTo: (index: number) => void // breadcrumb cross-level jump
   openDrawer: (node: RegionNode) => void
   closeDrawer: () => void
+  setCaseFilter: (cases: Set<string>) => void
 }
 
 export const useDashboard = create<DashboardState>((set, get) => ({
@@ -52,7 +54,40 @@ export const useDashboard = create<DashboardState>((set, get) => ({
 
   openDrawer: (node) => set({ drawerRegion: getById(node.id) ?? node }),
   closeDrawer: () => set({ drawerRegion: null }),
+
+  setCaseFilter: (cases) => {
+    const { root, index } = updateTaiwanTree(cases)
+    const currentPath = get().drillPath
+    let newPath: RegionNode[] = [root]
+    if (currentPath.length > 1) {
+      const county = index[currentPath[1].id]
+      if (county && county.metrics.meterTotal > 0) {
+        newPath.push(county)
+        if (currentPath.length > 2) {
+          const district = index[currentPath[2].id]
+          if (district && district.metrics.meterTotal > 0) {
+            newPath.push(district)
+          }
+        }
+      }
+    }
+    const currentDrawer = get().drawerRegion
+    const updatedDrawer =
+      currentDrawer && index[currentDrawer.id] && index[currentDrawer.id].metrics.meterTotal > 0
+        ? index[currentDrawer.id]
+        : null
+
+    set({
+      drillPath: newPath,
+      drawerRegion: updatedDrawer,
+    })
+  },
 }))
+
+// 監聽案別切換，同步更新系統總覽資料樹
+useCaseFilter.subscribe((state) => {
+  useDashboard.getState().setCaseFilter(state.selected)
+})
 
 /* selectors */
 export const useCurrentNode = () => useDashboard((s) => s.drillPath[s.drillPath.length - 1])

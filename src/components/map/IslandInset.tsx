@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { ComposableMap, Geographies, Geography } from 'react-simple-maps'
 import { geoMercator } from 'd3-geo'
-import { useDashboard } from '@/store/useDashboard'
+import { useDashboard, useCurrentNode } from '@/store/useDashboard'
 import { getById } from '@/data/mockData'
 import { countyGeoById } from '@/data/geo/geo'
 import { metricHealth } from '@/lib/health'
@@ -30,6 +30,7 @@ export function IslandInset({
   width?: number
   height?: number
 }) {
+  const node = useCurrentNode()
   const drillInto = useDashboard((s) => s.drillInto)
 
   const { fc, projection } = useMemo(() => {
@@ -93,6 +94,7 @@ export function IslandInset({
                     stroke: mapOutline,
                     strokeWidth: 0.45,
                     outline: 'none',
+                    transition: 'fill 350ms ease, stroke 350ms ease, fill-opacity 350ms ease',
                   },
                   hover: {
                     fill,
@@ -100,6 +102,7 @@ export function IslandInset({
                     stroke: mapOutline,
                     strokeWidth: 0.45,
                     outline: 'none',
+                    transition: 'fill 350ms ease, stroke 350ms ease, fill-opacity 350ms ease',
                   },
                   pressed: {
                     fill,
@@ -107,6 +110,7 @@ export function IslandInset({
                     stroke: mapOutline,
                     strokeWidth: 0.45,
                     outline: 'none',
+                    transition: 'fill 350ms ease, stroke 350ms ease, fill-opacity 350ms ease',
                   },
                 }}
               />

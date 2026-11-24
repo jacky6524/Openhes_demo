@@ -203,6 +203,7 @@ export function HealthMap() {
                           strokeWidth: noData ? 0.6 : 0.75,
                           outline: 'none',
                           cursor: noData ? 'default' : 'pointer',
+                          transition: 'fill 350ms ease, stroke 350ms ease, fill-opacity 350ms ease',
                         },
                         hover: {
                           fill: baseFill,
@@ -212,6 +213,7 @@ export function HealthMap() {
                           strokeWidth: noData ? 0.6 : 1.4,
                           outline: 'none',
                           cursor: noData ? 'default' : 'pointer',
+                          transition: 'fill 350ms ease, stroke 350ms ease, fill-opacity 350ms ease',
                         },
                         pressed: {
                           fill: noData ? baseFill : tone.stroke,
@@ -219,6 +221,7 @@ export function HealthMap() {
                           stroke: noData ? baseStroke : '#FFFFFF',
                           strokeWidth: noData ? 0.6 : 1.4,
                           outline: 'none',
+                          transition: 'fill 350ms ease, stroke 350ms ease, fill-opacity 350ms ease',
                         },
                       }}
                     />
@@ -242,6 +245,7 @@ export function HealthMap() {
                   strokeWidth={2}
                   strokeLinejoin="round"
                   paintOrder="stroke"
+                  style={{ transition: 'fill 350ms ease, stroke 350ms ease' }}
                 >
                   {l.name}
                 </text>
