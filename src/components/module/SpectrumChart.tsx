@@ -17,7 +17,6 @@ import {
  * 同日追加：廠商按顏色、頻點按文字（HES 後加 ¹／²＝頻點1／頻點2）；hover 色塊或表格列時，
  *   同步用同一個動態框框出一致的頻點（同組 HES 設定的所有色塊），表格對應列也一起反白。
  */
-const SUP = { 1: '¹', 2: '²' } as const
 
 const MIN_SPAN = 0.4
 const FULL_SPAN = SPECTRUM_MAX - SPECTRUM_MIN
@@ -69,11 +68,14 @@ export function SpectrumChart({ rows, focus, highlight, onHover, selected, onSel
 }) {
   const blocks = useMemo(() => buildBlocks(rows), [rows])
   const selRow = selected ? rows.find((r) => rowKey(r) === selected) : undefined
-  /** 點色塊：不含目前組別 → 選第一組；含 → 換下一組，最後一組再點＝取消 */
+  /** 點色塊：如果色塊有多組，循環切換；若只有一組，再次點選依然保持選取並重新捲動 */
   const clickBlock = (b: Block) => {
     const gs = groupsOf(b)
     const i = selected ? gs.indexOf(selected) : -1
-    onSelect(i < 0 ? gs[0] : (gs[i + 1] ?? null))
+    const next = gs.length > 1
+      ? (i < 0 ? gs[0] : (gs[i + 1] ?? gs[0]))
+      : gs[0]
+    onSelect(next)
   }
   const usedRange = useMemo<[number, number]>(() => {
     const fs = blocks.map((b) => b.f)
@@ -219,22 +221,20 @@ export function SpectrumChart({ rows, focus, highlight, onHover, selected, onSel
                   const left = pos(b.f - BLOCK_MHZ / 2)
                   if (left > 100 || left + (BLOCK_MHZ / span) * 100 < 0) return null
                   const suspect = b.uses.some((u) => u.suspect !== undefined)
-                  const picked = b.uses.some((u) => u.key === selected || highlight.includes(u.key))
+                  const isSelected = b.uses.some((u) => u.key === selected)
+                  const isHovered = b.uses.some((u) => highlight.includes(u.key))
                   const hesList = [...new Set(b.uses.map((u) => u.hes))]
-                  // 頻點按文字：O¹＝O 的頻點1、R²＝R 的頻點2；同一塊都是同一個頻點時只標一次（O/sO¹）
-                  const whichs = new Set(b.uses.map((u) => u.which))
-                  const label = whichs.size === 1
-                    ? hesList.join('/') + SUP[b.uses[0].which]
-                    : [...new Set(b.uses.map((u) => u.hes + SUP[u.which]))].join('/')
-                  // 估字寬：粗體英數 11px 約 6px、10px 約 5.4px，上標約 3.5px；放不下 11px 就縮成 10px
-                  const sups = (label.match(/[¹²]/g) ?? []).length
-                  const est = (w: number) => (label.length - sups) * w + sups * 3.5 + 4
-                  const labelSize = blockPx >= est(6) ? 11 : blockPx >= est(5.4) ? 10 : 0
+                  const label = hesList.join('/')
+                  // 估字寬：粗體英數，不顯示 Channel 數字，只顯示純 HES 設定英文
+                  const est = (w: number) => label.length * w + 4
+                  const labelSize = blockPx >= est(6) ? 11 : blockPx >= est(5) ? 10 : blockPx >= est(4) ? 9 : 0
                   const showLabel = labelSize > 0
-                  const showFreq = blockPx >= 52
                   return (
                     <span
                       key={b.f}
+                      onPointerDown={(e) => {
+                        e.stopPropagation()
+                      }}
                       onPointerEnter={(e) => {
                         const box = wrapRef.current?.getBoundingClientRect()
                         const me = e.currentTarget.getBoundingClientRect()
@@ -242,23 +242,26 @@ export function SpectrumChart({ rows, focus, highlight, onHover, selected, onSel
                         if (!drag.current) onHover(groupsOf(b))
                       }}
                       onPointerLeave={() => { setTip(null); onHover([]) }}
-                      onClick={() => { if (!moved.current) clickBlock(b) }}
-                      className={`${picked ? 'spectrum-pick ' : ''}absolute inset-y-1 flex cursor-pointer flex-col items-center justify-center overflow-hidden rounded-[3px] leading-tight text-white`}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        clickBlock(b)
+                      }}
+                      className={[
+                        'absolute inset-y-1 flex cursor-pointer items-center justify-center overflow-hidden rounded-[3px] leading-tight text-white transition-all',
+                        isSelected ? 'spectrum-pick z-20 ' : isHovered ? 'brightness-110 shadow-md z-10 ' : '',
+                      ].join(' ')}
                       style={{
                         left: `${left}%`,
                         width: `max(${blockPx - 1}px, 2px)`,
                         background: laneColor(c),
-                        // 點選中的色塊外框交給 .spectrum-pick（動畫要用 box-shadow，這裡不能蓋掉）
-                        boxShadow: picked ? undefined : suspect ? 'inset 0 0 0 2px #F59E0B' : undefined,
-                        zIndex: picked ? 2 : undefined,
+                        boxShadow: isSelected ? undefined : suspect ? 'inset 0 0 0 2px #F59E0B' : undefined,
                       }}
                     >
                       {showLabel ? (
-                        <span className="whitespace-nowrap font-bold" style={{ fontSize: labelSize }}>{label}</span>
-                      ) : hesList.length > 1 && blockPx >= 14 ? (
-                        <span className="text-[10px] font-bold">{hesList.length}</span>
+                        <span className="whitespace-nowrap font-bold select-none px-0.5 text-center" style={{ fontSize: labelSize }}>
+                          {label}
+                        </span>
                       ) : null}
-                      {showFreq && <span className="text-[10px] tabular-nums opacity-90">{fmtF(b.f)}</span>}
                     </span>
                   )
                 })}
@@ -283,31 +286,77 @@ export function SpectrumChart({ rows, focus, highlight, onHover, selected, onSel
           <Navigator blocks={blocks} view={view} onChange={(l, h) => setView(fit(l, h))} />
         </div>
 
-        <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-1 pl-[128px] text-[12px] text-ink-sub">
-          <span>顏色＝廠商 · 文字 ¹／²＝頻點1／頻點2</span>
-          <span className="flex items-center gap-1.5"><span className="spectrum-pick h-2.5 w-4 rounded-sm" />滑過＝框出同一組 HES 設定的頻點，點選＝固定框選（色塊含多組時再點換下一組）</span>
-          <span className="flex items-center gap-1.5"><span className="h-2.5 w-4 rounded-sm" style={{ boxShadow: 'inset 0 0 0 2px #F59E0B' }} />頻點與 Channel 對不上（待確認）</span>
-          <span className="text-ink-mut">滾輪縮放 · 拖曳平移 · 雙擊對焦 · 拖動下方框的左右把手拉伸範圍</span>
+        <div className="mt-2 flex flex-wrap items-center gap-x-6 gap-y-1 pl-[128px] text-[12px] text-ink-sub">
+          <span>顏色＝廠商 · 文字＝HES 設定</span>
+          <span className="flex items-center gap-1.5">
+            <span className="h-2.5 w-3.5 rounded-sm" style={{ boxShadow: 'inset 0 0 0 2px #F59E0B' }} />
+            頻點待確認
+          </span>
         </div>
 
-        {tip && (
-          <div
-            className="pointer-events-none absolute z-20 -translate-x-1/2 -translate-y-full rounded-lg border border-border bg-surface px-3 py-2 text-[12px] shadow-card"
-            style={{ left: tip.x, top: tip.y - 6 }}
-          >
-            <div className="flex items-center gap-1.5 font-semibold text-ink">
-              <span className="size-2 rounded-sm" style={{ background: laneColor(tip.b.lane) }} />
-              {tip.b.lane} · {fmtF(tip.b.f)} MHz
-            </div>
-            {tip.b.uses.map((u) => (
-              <div key={`${u.key}-${u.which}`} className="mt-0.5 whitespace-nowrap tabular-nums text-ink-sub">
-                HES {u.hes}（{u.cases.join('/')}）· Channel{u.which} = {u.ch}
-                {u.suspect !== undefined && <span className="ml-1 text-[#B45309]">（依 Channel 換算應為 {fmtF(u.suspect)}，待確認）</span>}
+        {tip && (() => {
+          const tipRows = rows.filter((r) => tip.b.uses.some((u) => u.key === rowKey(r)))
+          return (
+            <div
+              className="pointer-events-none absolute z-30 -translate-x-1/2 -translate-y-full rounded-xl border border-border bg-surface p-3 text-[12px] shadow-drawer min-w-[260px]"
+              style={{ left: tip.x, top: tip.y - 8 }}
+            >
+              <div className="space-y-2.5">
+                {tipRows.map((r, idx) => (
+                  <div
+                    key={rowKey(r)}
+                    className={`${idx > 0 ? 'border-t border-border/70 pt-2.5' : ''} space-y-1.5`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5 font-bold text-ink">
+                        <span className="size-2.5 rounded-sm" style={{ background: laneColor(r.lane) }} />
+                        <span>{r.lane}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="rounded bg-inset px-1.5 py-0.5 text-[11px] font-medium text-ink-sub">
+                          {r.cases.join('/')}
+                        </span>
+                        <span className="rounded bg-brand-soft px-1.5 py-0.5 text-[11px] font-semibold text-brand">
+                          HES: {r.hes}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1 rounded-lg bg-inset/60 p-2 text-[11.5px] tabular-nums">
+                      <div className="flex items-center justify-between gap-4">
+                        <span className="text-[11px] text-ink-mut">Channel 1：</span>
+                        <span className="font-semibold text-ink">
+                          CH {r.ch1} <span className="font-normal text-ink-sub">({fmtF(r.f1)} MHz)</span>
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between gap-4">
+                        <span className="text-[11px] text-ink-mut">Channel 2：</span>
+                        <span className="font-semibold text-ink">
+                          {r.ch2 !== null && r.f2 !== null ? (
+                            <>
+                              CH {r.ch2} <span className="font-normal text-ink-sub">({fmtF(r.f2)} MHz)</span>
+                            </>
+                          ) : (
+                            <span className="font-normal text-ink-mut">-</span>
+                          )}
+                        </span>
+                      </div>
+                    </div>
+
+                    {r.suspect && (
+                      <div className="text-[11px] text-[#B45309]">
+                        * 依 Channel 換算應為 {fmtF(r.suspect.expected)} MHz，待確認
+                      </div>
+                    )}
+                  </div>
+                ))}
               </div>
-            ))}
-            <div className="mt-1 text-[11px] text-ink-mut">點一下框出這組頻點</div>
-          </div>
-        )}
+              <div className="mt-2 text-[10.5px] text-ink-mut">
+                點擊方塊可捲動至上方列表
+              </div>
+            </div>
+          )
+        })()}
       </div>
     </div>
   )

@@ -27,7 +27,34 @@ export function ChannelPlan() {
   const [selected, setSelected] = useState<string | null>(null)
   const rows = CHANNEL_ROWS.filter((r) => vendor === ALL || r.lane === vendor)
   const scrollRef = useRef<HTMLDivElement>(null)
-  const { visible, sentinelRef, hasMore } = useInfiniteRows(rows.length, [vendor], 30)
+  const { visible, sentinelRef, hasMore } = useInfiniteRows(rows.length, [vendor], 40)
+
+  const scrollToRow = (k: string) => {
+    const container = scrollRef.current
+    const el = document.getElementById(`channel-row-${k}`)
+    if (container && el) {
+      const containerRect = container.getBoundingClientRect()
+      const elRect = el.getBoundingClientRect()
+      const offset = elRect.top - containerRect.top + container.scrollTop - (container.clientHeight / 2) + (elRect.height / 2)
+      container.scrollTo({ top: Math.max(0, offset), behavior: 'smooth' })
+    }
+  }
+
+  // 點選頻譜色塊或表格列時切換選取狀態，並自動平滑捲動到對應的那一列
+  const handleSelect = (k: string | null) => {
+    setSelected(k)
+    if (!k) return
+
+    // 若點選的項目所屬廠商被目前過濾器隱藏，切回 ALL 以確保表格列顯示
+    const targetRow = CHANNEL_ROWS.find((r) => rowKey(r) === k)
+    if (targetRow && vendor !== ALL && targetRow.lane !== vendor) {
+      setVendor(ALL)
+    }
+
+    requestAnimationFrame(() => scrollToRow(k))
+    setTimeout(() => scrollToRow(k), 40)
+    setTimeout(() => scrollToRow(k), 120)
+  }
 
   return (
     <div className="flex h-full min-w-[1280px] flex-col gap-3 p-4">
@@ -63,11 +90,15 @@ export function ChannelPlan() {
                 return (
                   <tr
                     key={k}
+                    id={`channel-row-${k}`}
                     onMouseEnter={() => setHover([k])}
                     onMouseLeave={() => setHover([])}
-                    onClick={() => setSelected(on ? null : k)}
-                    title={on ? '再點一次取消框選' : '點選以在頻譜圖框出這組頻點'}
-                    className={['cursor-pointer border-b border-divider', on ? 'bg-brand-soft' : hover.includes(k) ? 'bg-inset' : ''].join(' ')}
+                    onClick={() => handleSelect(on ? null : k)}
+                    title={on ? '再點一次取消選取' : '點選以在頻譜圖框出這組頻點'}
+                    className={[
+                      'cursor-pointer border-b border-divider transition-colors duration-150',
+                      on ? 'bg-brand-soft ring-1 ring-inset ring-brand/40 font-medium' : hover.includes(k) ? 'bg-inset' : '',
+                    ].join(' ')}
                   >
                     <td className="px-3 py-2.5">
                       <span className="inline-flex items-center gap-2 font-semibold text-ink">
@@ -90,7 +121,7 @@ export function ChannelPlan() {
         <InfiniteFooter loaded={Math.min(visible, rows.length)} total={rows.length} hasMore={hasMore} onTop={() => scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })} />
       </div>
 
-      <SpectrumChart rows={CHANNEL_ROWS} focus={vendor === ALL ? null : (vendor as Lane)} highlight={hover} onHover={setHover} selected={selected} onSelect={setSelected} />
+      <SpectrumChart rows={CHANNEL_ROWS} focus={vendor === ALL ? null : (vendor as Lane)} highlight={hover} onHover={setHover} selected={selected} onSelect={handleSelect} />
     </div>
   )
 }

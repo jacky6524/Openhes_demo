@@ -127,9 +127,9 @@ body {
   animation: drawerRight 220ms ease-out both;
 }
 
-/* 頻道規劃：點選的組別 —— 動態框（黑色虛線框＋外光暈脈動） */
+/* 頻道規劃：點選的組別 —— 動態框（黑色實線框＋外光暈脈動） */
 .spectrum-pick {
-  outline: 2px dashed #111827;
+  outline: 2px solid #111827;
   outline-offset: 1px;
   animation: spectrumPick 1.2s ease-in-out infinite;
 }
