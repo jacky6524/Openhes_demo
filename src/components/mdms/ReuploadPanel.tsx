@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { CircleCheck, UploadCloud } from 'lucide-react'
-import { DateTime15, Field, GroupSelect, addMonths } from '@/components/shared/QueryFields'
+import { CircleCheck } from 'lucide-react'
+import { Field, GroupSelect, RangeInput } from '@/components/shared/QueryFields'
 import { TargetSearchMulti, parseTargets, TARGET_MODES, FIELD_BOX, type TargetMode } from '@/components/shared/TargetSearch'
 import { status as statusTok } from '@/tokens'
 import { hashStr } from '@/data/readTasks'
@@ -18,20 +18,6 @@ import { MDMS_TYPES, buckets, parseLocal, type MdmsKey } from '@/data/mdmsUpload
  * TODO: 接後端重新上拋 API。
  */
 const fmtN = (n: number) => n.toLocaleString('en-US')
-
-/** 改起點動終點、改終點動起點：不讓起訖顛倒，也不超過 1 個月 */
-function clampRange(r: { from: string; to: string }, side: 'from' | 'to', v: string) {
-  if (side === 'from') {
-    let to = r.to
-    if (v && to && to < v) to = v
-    if (v && to && to > addMonths(v, 1)) to = addMonths(v, 1)
-    return { from: v, to }
-  }
-  let from = r.from
-  if (from && v && from > v) from = v
-  if (from && v && from < addMonths(v, -1)) from = addMonths(v, -1)
-  return { from, to: v }
-}
 
 interface Found { slots: number; pending: number; who: string }
 
@@ -84,75 +70,77 @@ export function ReuploadPanel({ typeKey, from: from0, to: to0 }: { typeKey: Mdms
   const confirming = !!found && found.pending > 0
 
   return (
-    <section className="flex min-h-0 flex-col gap-4 overflow-y-auto overflow-x-hidden rounded-card border border-border bg-surface p-5 shadow-card">
-      <div className="flex items-center gap-2">
-        <span className="h-4 w-[3px] rounded-full bg-danger" />
-        <h2 className="text-[16px] font-semibold text-ink">上拋操作</h2>
+    <section className="flex flex-1 min-h-0 flex-col justify-between rounded-card border border-border bg-surface p-5 shadow-card">
+      <div className="flex flex-col gap-3">
+        <div className="flex items-center gap-2">
+          <span className="h-4 w-[3px] rounded-full bg-danger" />
+          <h2 className="text-[16px] font-semibold text-ink">上拋操作</h2>
+        </div>
+
+        <TargetSearchMulti
+          mode={mode}
+          text={text}
+          onMode={(m) => { setMode(m); touched() }}
+          onText={(v) => { setText(v); touched() }}
+          groupInput={<GroupSelect value={group} onChange={(v) => { setGroup(v); touched() }} className="w-full" />}
+          textareaClassName="h-20 w-full min-w-0 flex-1"
+        />
+        {mode !== 'group' && <p className="-mt-1.5 text-[12px] text-ink-mut">留空＝全部電表</p>}
+
+        <Field label="選擇資料類型">
+          <select value={type} onChange={(e) => { setType(e.target.value as MdmsKey); touched() }} className={`${FIELD_BOX} h-9 w-full py-0`}>
+            {MDMS_TYPES.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+          </select>
+        </Field>
+
+        <Field label="上拋電表資料時間" hint="以整點為單位，單次上限 1 個月">
+          <RangeInput
+            from={range.from}
+            to={range.to}
+            maxMonths={1}
+            stepMin={60}
+            className="w-full justify-center"
+            onChange={(from, to) => { setRange({ from, to }); touched() }}
+          />
+        </Field>
       </div>
 
-      <TargetSearchMulti
-        mode={mode}
-        text={text}
-        onMode={(m) => { setMode(m); touched() }}
-        onText={(v) => { setText(v); touched() }}
-        groupInput={<GroupSelect value={group} onChange={(v) => { setGroup(v); touched() }} className="w-full" />}
-        textareaClassName="h-32 w-full"
-      />
-      {mode !== 'group' && <p className="-mt-2 text-[12px] text-ink-mut">留空＝全部電表</p>}
-
-      <Field label="選擇資料類型">
-        <select value={type} onChange={(e) => { setType(e.target.value as MdmsKey); touched() }} className={`${FIELD_BOX} h-9 w-full py-0`}>
-          {MDMS_TYPES.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
-        </select>
-      </Field>
-
-      {/* 板塊窄，起訖分兩行（同 RangeInput 的規則：顛倒或超過 1 個月時拉回另一端） */}
-      <Field label="上拋電表資料時間" hint="以整點為單位，單次上限 1 個月">
-        <div className="flex flex-col gap-1.5">
-          {(['from', 'to'] as const).map((side) => (
-            <div key={side} className={`${FIELD_BOX} flex h-9 items-center gap-3 py-0`}>
-              <span className="w-4 text-[12px] text-ink-mut">{side === 'from' ? '起' : '迄'}</span>
-              <DateTime15 value={range[side]} stepMin={60} onChange={(v) => { setRange((r) => clampRange(r, side, v)); touched() }} />
-            </div>
-          ))}
+      <div className="flex flex-col gap-2 pt-2">
+        <div className="flex gap-2">
+          <button onClick={clear} className="h-9 rounded-lg border border-border bg-surface px-3 text-[13px] font-semibold text-ink-sub hover:border-brand hover:text-brand">
+            清除條件
+          </button>
+          <button
+            onClick={run}
+            disabled={!!found && !found.pending}
+            className={`inline-flex h-9 flex-1 items-center justify-center rounded-lg text-[13px] font-semibold text-white disabled:opacity-40 ${confirming ? 'bg-danger hover:opacity-90' : 'bg-ink hover:opacity-90'}`}
+          >
+            {confirming ? `確認上拋 ${fmtN(found!.pending)} 筆` : '執行上拋'}
+          </button>
         </div>
-      </Field>
 
-      <div className="flex gap-2">
-        <button onClick={clear} className="h-9 rounded-lg border border-border bg-surface px-3 text-[13px] font-semibold text-ink-sub hover:border-brand hover:text-brand">
-          清除條件
-        </button>
-        <button
-          onClick={run}
-          disabled={!!found && !found.pending}
-          className={`inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg text-[13px] font-semibold text-white disabled:opacity-40 ${confirming ? 'bg-danger hover:opacity-90' : 'bg-ink hover:opacity-90'}`}
-        >
-          <UploadCloud size={15} />
-          {confirming ? `確認上拋 ${fmtN(found!.pending)} 筆` : '執行上拋'}
-        </button>
+        {/* 結果：算完筆數（等確認）或送出後 */}
+        {found && (
+          <div className="rounded-lg bg-inset px-3 py-2 text-[12.5px] leading-relaxed text-ink-sub">
+            {typeDef.label}・{found.who}
+            {found.slots > 0 && `・共 ${found.slots} 個已完成時段`}
+            <br />
+            {found.slots === 0 ? (
+              <b className="text-ink">這個區間沒有已完成的時段，請調整資料時間</b>
+            ) : found.pending ? (
+              <>未上拋 <b className="tabular-nums" style={{ color: statusTok.danger.fg }}>{fmtN(found.pending)}</b> 筆，再按一次確認送出。
+                <button onClick={() => setFound(null)} className="ml-2 text-ink-mut underline hover:text-ink">取消</button></>
+            ) : (
+              <b style={{ color: statusTok.normal.fg }}>全部已上拋，不需重新上拋</b>
+            )}
+          </div>
+        )}
+        {done && (
+          <div className="flex gap-1.5 text-[12.5px] font-semibold leading-relaxed" style={{ color: statusTok.normal.fg }}>
+            <CircleCheck size={16} className="mt-0.5 shrink-0" />{done}
+          </div>
+        )}
       </div>
-
-      {/* 結果：算完筆數（等確認）或送出後 */}
-      {found && (
-        <div className="rounded-lg bg-inset px-3 py-2.5 text-[13px] leading-relaxed text-ink-sub">
-          {typeDef.label}・{found.who}
-          {found.slots > 0 && `・共 ${found.slots} 個已完成時段`}
-          <br />
-          {found.slots === 0 ? (
-            <b className="text-ink">這個區間沒有已完成的時段，請調整資料時間</b>
-          ) : found.pending ? (
-            <>未上拋 <b className="tabular-nums" style={{ color: statusTok.danger.fg }}>{fmtN(found.pending)}</b> 筆，再按一次確認送出。
-              <button onClick={() => setFound(null)} className="ml-2 text-ink-mut underline hover:text-ink">取消</button></>
-          ) : (
-            <b style={{ color: statusTok.normal.fg }}>全部已上拋，不需重新上拋</b>
-          )}
-        </div>
-      )}
-      {done && (
-        <div className="flex gap-1.5 text-[13px] font-semibold leading-relaxed" style={{ color: statusTok.normal.fg }}>
-          <CircleCheck size={16} className="mt-0.5 shrink-0" />{done}
-        </div>
-      )}
     </section>
   )
 }

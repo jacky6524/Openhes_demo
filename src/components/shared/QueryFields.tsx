@@ -65,7 +65,7 @@ export function DateTime15({ value, min, max, stepMin = 15, onChange }: { value:
   const inner = 'bg-transparent text-[13px] tabular-nums text-ink focus:outline-none disabled:cursor-not-allowed disabled:text-ink-mut'
   const put = (d: string, t: string) => onChange(d ? `${d}T${t}` : '')
   return (
-    <span className="flex items-center gap-1">
+    <span className="flex items-center gap-1.5 shrink-0">
       <input type="date" value={date} min={min?.slice(0, 10)} max={max?.slice(0, 10)} onChange={(e) => put(e.target.value, time)} className={inner} />
       <select value={time} disabled={!date} onChange={(e) => put(date, e.target.value)} aria-label="時間" className={inner}>
         {TIMES.map((t) => <option key={t} value={t}>{t}</option>)}
