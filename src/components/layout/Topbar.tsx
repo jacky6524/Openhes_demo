@@ -49,19 +49,11 @@ export function Topbar({ onToggleSidebar }: { onToggleSidebar: () => void }) {
 function CaseDropdown() {
   const [open, setOpen] = useState(false)
   const selected = useCaseFilter((s) => s.selected)
+  const toggle = useCaseFilter((s) => s.toggle)
   const setSelected = useCaseFilter((s) => s.setSelected)
-  const [draft, setDraft] = useState<Set<string>>(new Set(selected))
   const ref = useRef<HTMLDivElement>(null)
 
-  // 打開選單時同步目前已套用的案別（未選時預設全勾選）
-  const handleToggle = () => {
-    if (!open) {
-      setDraft(new Set(selected.size === 0 ? CASES.map((c) => c.id) : selected))
-    }
-    setOpen((o) => !o)
-  }
-
-  // close on outside click (不儲存未套用的變更)
+  // close on outside click
   useEffect(() => {
     if (!open) return
     const onDown = (e: MouseEvent) => {
@@ -73,25 +65,12 @@ function CaseDropdown() {
     return () => document.removeEventListener('mousedown', onDown)
   }, [open])
 
-  const toggleDraft = (id: string) => {
-    setDraft((prev) => {
-      const next = new Set(prev)
-      next.has(id) ? next.delete(id) : next.add(id)
-      return next
-    })
-  }
-
-  const handleApply = () => {
-    setSelected(draft)
-    setOpen(false)
-  }
-
   const label = caseLabel(selected)
 
   return (
     <div ref={ref} className="relative shrink-0">
       <button
-        onClick={handleToggle}
+        onClick={() => setOpen((o) => !o)}
         className="ml-2 flex items-center gap-1.5 whitespace-nowrap rounded-lg bg-brand-soft px-3 py-1.5 text-sm hover:bg-brand-soft-hover"
       >
         <span className="text-ink-sub">案別</span>
@@ -101,13 +80,13 @@ function CaseDropdown() {
       </button>
 
       {open && (
-        <div className="absolute left-0 top-full mt-1.5 z-40 w-[260px] rounded-lg bg-surface border border-border shadow-card py-1 overflow-hidden">
+        <div className="absolute left-0 top-full mt-1.5 z-40 w-[248px] rounded-lg bg-surface border border-border shadow-card py-1 overflow-hidden">
           <div className="flex items-center justify-between px-3 py-1.5 border-b border-divider">
             <span className="text-[11px] font-medium text-ink-sub">案別篩選（可複選）</span>
-            {draft.size === CASES.length ? (
+            {selected.size === CASES.length ? (
               <button
                 type="button"
-                onClick={() => setDraft(new Set())}
+                onClick={() => setSelected(new Set())}
                 className="text-[11px] text-brand hover:underline"
               >
                 清空
@@ -115,7 +94,7 @@ function CaseDropdown() {
             ) : (
               <button
                 type="button"
-                onClick={() => setDraft(new Set(CASES.map((c) => c.id)))}
+                onClick={() => setSelected(new Set(CASES.map((c) => c.id)))}
                 className="text-[11px] text-brand hover:underline"
               >
                 全選
@@ -124,12 +103,12 @@ function CaseDropdown() {
           </div>
           <div className="max-h-[260px] overflow-y-auto py-1">
             {CASES.map((c) => {
-              const on = draft.has(c.id)
+              const on = selected.has(c.id)
               return (
                 <button
                   key={c.id}
                   type="button"
-                  onClick={() => toggleDraft(c.id)}
+                  onClick={() => toggle(c.id)}
                   className="w-full flex items-center gap-2.5 px-3 py-2 text-[13px] text-left hover:bg-inset transition-colors"
                 >
                   <span
@@ -146,26 +125,8 @@ function CaseDropdown() {
               )
             })}
           </div>
-          <div className="flex items-center justify-between gap-2 px-3 py-2 border-t border-divider bg-inset/40">
-            <span className="text-[11px] text-ink-mut">
-              {draft.size === 0 || draft.size === CASES.length ? '全部案別' : `已選 ${draft.size} 項`}
-            </span>
-            <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                onClick={() => setOpen(false)}
-                className="rounded px-2.5 py-1 text-[12px] text-ink-sub hover:bg-inset hover:text-ink transition-colors"
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                onClick={handleApply}
-                className="rounded bg-brand px-3 py-1 text-[12px] font-medium text-white shadow-sm hover:bg-brand/90 active:scale-95 transition-all"
-              >
-                套用
-              </button>
-            </div>
+          <div className="px-3 py-1.5 text-[11px] text-ink-mut border-t border-divider">
+            標案編號-得標廠商（demo）
           </div>
         </div>
       )}
