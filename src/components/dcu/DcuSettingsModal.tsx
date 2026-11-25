@@ -228,9 +228,9 @@ function RemotePanel({ dcu, mode }: { dcu: DcuRow; mode: string }) {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3">
         <Field label="頻道組別" kind="select" options={CHANNEL_GROUPS} />
-        {/* 2026-11-24 業主意見：白名單鎖定高度與頻道組別完全一致（h-[38px]） */}
+        {/* 2026-11-24 業主意見：名單鎖定高度與頻道組別完全一致（h-[38px]） */}
         <div className="flex flex-col gap-1">
-          <span className="text-[12px] text-ink-sub">白名單鎖定</span>
+          <span className="text-[12px] text-ink-sub">名單鎖定</span>
           <div
             onClick={() => setLocked((v) => !v)}
             role="button"
