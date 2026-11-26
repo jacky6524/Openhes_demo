@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState, type ReactNode } from 'react'
+import { Ban } from 'lucide-react'
 import {
   Th, SearchHead, StatusPill, EnabledState, StampLines, InfiniteFooter, useInfiniteRows,
   ONLINE_LABELS, OneLine,
@@ -6,6 +7,7 @@ import {
 import { PillTabs } from '@/components/shared/PillTabs'
 import { PageTitle } from '@/components/shared/PageTitle'
 import { SimpleModal, BTN_GHOST, BTN_PRIMARY } from '@/components/shared/SimpleModal'
+import { FeatureNotice } from '@/components/shared/FeatureNotice'
 import { DCU_LIST_ROWS, METER_LIST_ROWS, type DcuListRow, type MeterListRow } from '@/data/dcuListPage'
 import { status as statusTok } from '@/tokens'
 
@@ -252,10 +254,11 @@ function DisabledTable<R extends { enabled: boolean }>({
           <button
             onClick={() => setConfirm(true)}
             disabled={checked.size === 0}
-            title={checked.size === 0 ? `請先勾選要啟用的${noun}` : undefined}
-            className="rounded-lg bg-ink px-3 py-1.5 text-[13px] font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+            title={checked.size === 0 ? `請先勾選要啟用的${noun}` : '批次啟用（暫不啟用，僅供瀏覽）'}
+            className="flex items-center gap-1.5 rounded-lg bg-ink px-3 py-1.5 text-[13px] font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            批次啟用{checked.size > 0 && ` (${checked.size})`}
+            <Ban size={14} strokeWidth={2.4} className="shrink-0" />
+            <span>批次啟用{checked.size > 0 && ` (${checked.size})`}</span>
           </button>
         </div>
       </div>
@@ -326,19 +329,30 @@ function DisabledTable<R extends { enabled: boolean }>({
       {confirm && (
         <SimpleModal
           title="批次啟用"
+          width={460}
           onClose={() => setConfirm(false)}
           actions={
             <>
               <button onClick={() => setConfirm(false)} className={BTN_GHOST}>取消</button>
-              <button onClick={enableChecked} className={BTN_PRIMARY}>確認啟用</button>
+              <button
+                disabled
+                title="暫不啟用，無法執行操作"
+                className={`${BTN_PRIMARY} disabled:cursor-not-allowed disabled:hover:bg-brand`}
+              >
+                確認啟用
+              </button>
             </>
           }
         >
-          <p className="text-[13px] leading-relaxed text-ink">
-            確定要啟用勾選的 <b>{checked.size}</b> 個{noun}嗎？
-            <br />
-            <span className="text-ink-sub">啟用後會從停用清單移除，並重新列入連線率與讀表率統計。</span>
-          </p>
+          <div className="flex flex-col gap-4">
+            <FeatureNotice text="批次啟用暫無功能，畫面僅供瀏覽，無法執行操作。">
+              <p className="text-[13px] leading-relaxed text-ink">
+                確定要啟用勾選的 <b>{checked.size}</b> 個{noun}嗎？
+                <br />
+                <span className="text-ink-sub">啟用後會從停用清單移除，並重新列入連線率與讀表率統計。</span>
+              </p>
+            </FeatureNotice>
+          </div>
         </SimpleModal>
       )}
     </div>
